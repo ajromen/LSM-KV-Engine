@@ -5,12 +5,14 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	"github.com/ajromen/LSM-KV-Engine/internal/cli"
 )
 
 func main() {
-	flags := ParseFlags()
-	fmt.Println("Config file:", flags.ConfigPath)
-	// TODO napraiviti engine.go i poslati mu config i flagove
+	flags := cli.ParseFlags()
+	fmt.Println("Debug is nil: ", flags.Debug == nil)
+	// TODO napraiviti engine.go i poslati mu flagove
 	RunCli()
 }
 
