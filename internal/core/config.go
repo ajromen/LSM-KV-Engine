@@ -1,5 +1,10 @@
 package core
 
+import (
+	"encoding/json"
+	"os"
+)
+
 type Config struct {
 	WAL               WALConfig               `json:"wal"`
 	Memtable          MemtableConfig          `json:"memtable"`
@@ -87,4 +92,16 @@ type SimHashConfig struct {
 type TTLConfig struct {
 	Enabled  bool `json:"enabled"`
 	Duration int  `json:"duration"`
+}
+
+func LoadConfig(path string) (Config, error) {
+	var config Config
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return config, err
+	}
+	if err := json.Unmarshal(data, &config); err != nil {
+		return config, err
+	}
+	return config, err
 }
