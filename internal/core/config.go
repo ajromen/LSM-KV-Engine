@@ -2,6 +2,7 @@ package core
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 )
 
@@ -94,14 +95,36 @@ type TTLConfig struct {
 	Duration int  `json:"duration"`
 }
 
-func LoadConfig(path string) (Config, error) {
-	var config Config
-	data, err := os.ReadFile(path)
+func LoadConfig(path string) (*Config, error) {
+	file, err := os.Open(path)
 	if err != nil {
-		return config, err
+		return nil, fmt.Errorf("cannot open config file: %w", err)
 	}
-	if err := json.Unmarshal(data, &config); err != nil {
-		return config, err
+	defer file.Close()
+	var cfg Config
+	decoder := json.NewDecoder(file)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&cfg); err != nil {
+		return nil, fmt.Errorf("invalid config format: %w", err)
 	}
-	return config, err
+	applyDefaults(&cfg)
+
+	// if err := validateConfig(&cfg); err != nil { return nil,err } - napraviti validaciju config,json fajla
+
+	return &cfg, nil
+}
+
+func applyDefaults(cfg *Config) {
+	if cfg.WAL.WALSegmentSize == 0 {
+		cfg.WAL.WALSegmentSize = 1024 * 1024
+	}
+	if cfg.Memtable.MemtableMaxSize == 0 {
+		cfg.Memtable.MemtableMaxSize = 1000
+	}
+	if cfg.Memtable.MemtableType == "" {
+		cfg.Memtable.MemtableType = "hashmap"
+	}
+	if cfg.SSTable.SSTableDataBlockSize == 0 {
+		cfg.SSTable.SSTableDataBlockSize = 16 // Ovo je u KB (Tako je na LevelDB pa kontam da je ok)
+	}
 }
