@@ -1,9 +1,11 @@
-package core
+package config
 
 import (
 	"encoding/json"
 	"fmt"
 	"os"
+
+	"github.com/ajromen/LSM-KV-Engine/internal/cli"
 )
 
 type Config struct {
@@ -100,43 +102,4 @@ type TTLConfig struct {
 
 type SkipListConfig struct {
 	MaxLevel int `json:"max_level"`
-}
-
-func LoadConfig(path string) (*Config, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return nil, fmt.Errorf("cannot open config file: %w", err)
-	}
-	defer file.Close()
-	var cfg Config
-	decoder := json.NewDecoder(file)
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&cfg); err != nil {
-		return nil, fmt.Errorf("invalid config format: %w", err)
-	}
-	applyDefaults(&cfg)
-
-	// if err := validateConfig(&cfg); err != nil { return nil,err } - napraviti validaciju config,json fajla
-
-	return &cfg, nil
-}
-
-func applyDefaults(cfg *Config) {
-	if cfg.WAL.WALSegmentSize == 0 {
-		cfg.WAL.WALSegmentSize = 1024 * 1024
-	}
-	// Ovde kaze "Maksimalnu velicinu specificira korisnik tako sto navodi broj elemenata ILI zauzece memorije u KB" - na
-	// nama je da vidimo hocemo li birati jedno od ta dva ili proveravati koji je popunjen i dati koristiti
-	if cfg.Memtable.MemtableMaxSize == 0 && cfg.Memtable.MemtableSizeKB == 0 {
-		cfg.Memtable.MemtableMaxSize = 1000
-	}
-	if cfg.Memtable.MemtableType == "" {
-		cfg.Memtable.MemtableType = "hashmap"
-	}
-	if cfg.SSTable.SSTableDataBlockSize == 0 {
-		cfg.SSTable.SSTableDataBlockSize = 16 // Ovo je u KB (Tako je na LevelDB pa kontam da je ok)
-	}
-	if cfg.SkipList.MaxLevel == 0 {
-		cfg.SkipList.MaxLevel = 16
-	}
 }
