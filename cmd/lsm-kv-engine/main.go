@@ -7,16 +7,20 @@ import (
 	"strings"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/cli"
+	"github.com/ajromen/LSM-KV-Engine/internal/core"
 )
 
 func main() {
 	flags := cli.ParseFlags()
-	fmt.Println("Debug is nil: ", flags.Debug == nil)
-	// TODO napraiviti engine.go i poslati mu flagove
-	RunCli()
+	engine, err := core.NewEngine(flags)
+	if err != nil {
+		fmt.Println("Greska: ", err)
+		return
+	}
+	RunCli(engine)
 }
 
-func RunCli() {
+func RunCli(engine *core.Engine) {
 	reader := bufio.NewReader(os.Stdin)
 	for {
 		fmt.Print("> ")
@@ -34,6 +38,7 @@ func RunCli() {
 		case "put":
 			//TODO pozivati metode engine-a za put get delete ( za sad )
 		case "exit", "quit":
+			engine.Close()
 			return
 		case "help":
 			fmt.Println("commands...")
