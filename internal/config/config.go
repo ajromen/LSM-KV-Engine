@@ -1,13 +1,5 @@
 package config
 
-import (
-	"encoding/json"
-	"fmt"
-	"os"
-
-	"github.com/ajromen/LSM-KV-Engine/internal/cli"
-)
-
 type Config struct {
 	WAL               WALConfig               `json:"wal"`
 	Memtable          MemtableConfig          `json:"memtable"`

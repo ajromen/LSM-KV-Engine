@@ -1,8 +1,10 @@
 package memtable
 
-func NewMemtable(memType string, maxSize int) Memtable {
-	if memType == "hashmap" {
-		return NewHashMap(maxSize)
+import "github.com/ajromen/LSM-KV-Engine/internal/config"
+
+func NewMemtable(config config.MemtableConfig) Memtable {
+	if config.MemtableType == "hashmap" {
+		return NewHashMap(config.MemtableMaxSize)
 	} else {
 		return nil
 	}
