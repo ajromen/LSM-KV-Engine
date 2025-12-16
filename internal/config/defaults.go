@@ -22,7 +22,7 @@ const (
 func NewDefaultConfig() *Config {
 	return &Config{
 		WAL: WALConfig{
-			WALSegmentSize: DefaultWalSegmentSize,
+			SegmentSize: DefaultWalSegmentSize,
 		},
 		Memtable: MemtableConfig{
 			MemtableType:    MemtableType,

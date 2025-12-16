@@ -38,6 +38,9 @@ func (c *Config) applyFlags(flags *cli.FLags) error {
 	if flags.MemtableType != nil {
 		c.Memtable.MemtableType = *flags.MemtableType
 	}
+	if flags.WalSegmentSize != nil {
+		c.WAL.SegmentSize = *flags.WalSegmentSize
+	}
 	return nil
 }
 
@@ -51,6 +54,10 @@ func (c *Config) validateFields() error {
 		c.Memtable.MemtableType != "skiplist" &&
 		c.Memtable.MemtableType != "btree" {
 		return fmt.Errorf("invalid memtable type")
+	}
+
+	if c.WAL.SegmentSize <= 0 {
+		return fmt.Errorf("segment size must be positive")
 	}
 	// TODO continue validation
 	return nil

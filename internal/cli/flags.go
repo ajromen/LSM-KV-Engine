@@ -12,6 +12,9 @@ type FLags struct {
 	MemtableMaxSize   *int
 	MemtableMaxSizeKb *int
 	MemtableType      *string
+
+	//WAL
+	WalSegmentSize *int
 }
 
 func ParseFlags() *FLags {
@@ -20,6 +23,7 @@ func ParseFlags() *FLags {
 	var mtMaxSizeOpt OptionalInt
 	var mtMaxSizeKbOpt OptionalInt
 	var mtTypeOpt OptionalString
+	var walSegmentSizeOpt OptionalInt
 
 	flagString(&configPathOpt, "config", "Path to config file")
 	flagString(&configPathOpt, "c", "Path to config file")
@@ -28,6 +32,7 @@ func ParseFlags() *FLags {
 	flagInt(&mtMaxSizeOpt, "memtable-max-size", "Max memtable size in bytes")
 	flagInt(&mtMaxSizeKbOpt, "memtable-max-size-kb", "Max memtable size in kilobytes")
 	flagString(&mtTypeOpt, "memtable-type", "hashmap, skiplist or btree")
+	flagInt(&walSegmentSizeOpt, "wal-segment-size", "WAL segment size in bytes")
 
 	flag.Parse()
 
@@ -37,6 +42,7 @@ func ParseFlags() *FLags {
 		MemtableMaxSize:   mtMaxSizeOpt.Get(),
 		MemtableMaxSizeKb: mtMaxSizeKbOpt.Get(),
 		MemtableType:      mtTypeOpt.Get(),
+		WalSegmentSize:    walSegmentSizeOpt.Get(),
 	}
 }
 
