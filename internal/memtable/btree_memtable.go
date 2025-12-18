@@ -1,7 +1,5 @@
 package memtable
 
-import "fmt"
-
 type BTreeNode struct {
 	nodeData []MemtableEntry
 	leaf     bool
@@ -31,26 +29,24 @@ func newBTree(t int) *BTree {
 	}
 }
 
-func (btn *BTreeNode) Search(key string) *MemtableEntry {
+func (btn *BTreeNode) Search(key string) MemtableEntry {
 	i := 0
 	for i < len(btn.nodeData) && btn.nodeData[i].Key < key {
 		i++
 	}
 	if i < len(btn.nodeData) && btn.nodeData[i].Key == key {
-		return &btn.nodeData[i]
+		return btn.nodeData[i]
 	}
 	if btn.leaf {
-		return nil
+		return MemtableEntry{}
 	}
 	return btn.children[i].Search(key)
 }
 
-func (bt *BTree) SearchTree(key string) ([]byte, bool) {
+func (bt *BTree) SearchTree(key string) (MemtableEntry, bool) {
 	entry := bt.root.Search(key)
-	if entry.Tombstone {
-		return nil, false
+	if entry.Tombstone || entry.Value == nil || entry.Key == "" {
+		return MemtableEntry{}, false
 	}
-	s := bt.t
-	fmt.Println(s)
-	return entry.Value, true
+	return entry, true
 }
