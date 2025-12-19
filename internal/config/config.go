@@ -77,6 +77,9 @@ type BloomFilterConfig struct {
 
 type CountMinSketchConfig struct {
 	Enabled bool `json:"enabled"`
+	Accuracy float64 `json:"accuracy"`
+	Confidence float64 `json:"confidence"`
+	Seeds [][]byte `json:"seeds"`
 }
 
 type HyperLogLogConfig struct {
