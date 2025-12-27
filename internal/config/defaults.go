@@ -17,6 +17,15 @@ const (
 
 	//SkipList
 	DefaultSkipListMaxLevel = 16
+
+	//CMS
+	DefaultCMSAccuracy = 0.01
+	DefaultCMSConfidence = 0.99
+
+	DefaultCMSSeed1 = 0x01020304
+	DefaultCMSSeed2 = 0x05060708
+	DefaultCMSSeed3 = 0x090A0B0C
+
 )
 
 func NewDefaultConfig() *Config {
@@ -33,6 +42,18 @@ func NewDefaultConfig() *Config {
 		},
 		SkipList: SkipListConfig{
 			MaxLevel: DefaultSkipListMaxLevel,
+		},
+		ProbabilisticType: ProbabilisticTypeConfig{
+			CountMinSketch: CountMinSketchConfig{
+				Enabled: true,
+				Accuracy: DefaultCMSAccuracy,
+				Confidence: DefaultCMSConfidence,
+				Seeds: [][]byte{
+					{1, 2, 3, 4},
+					{5, 6, 7, 8},
+					{9, 10, 11, 12},
+				},
+			},
 		},
 	}
 }
