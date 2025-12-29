@@ -106,15 +106,15 @@ func (btn *BTreeNode) splitChild(i int, t int) {
 }
 
 func (btn *BTreeNode) inOrder(result *[]MemtableEntry) {
+	if btn.leaf {
+		*result = append(*result, btn.nodeData...)
+		return
+	}
 	for i := 0; i < len(btn.nodeData); i++ {
-		if !btn.leaf {
-			btn.children[i].inOrder(result)
-		}
+		btn.children[i].inOrder(result)
 		*result = append(*result, btn.nodeData[i])
 	}
-	if !btn.leaf {
-		btn.children[len(btn.nodeData)].inOrder(result)
-	}
+	btn.children[len(btn.nodeData)].inOrder(result)
 }
 
 func (bt *BTree) Insert(entry MemtableEntry) {
@@ -148,16 +148,25 @@ func (bt *BTree) entriesInOrder() []MemtableEntry {
 type BTreeMemtable struct {
 	memtableData *BTree
 	maxSize      int
+	flushHandler func([]MemtableEntry)
 }
 
-func NewBTreeMem(maxSize int) *BTreeMemtable {
+func NewBTreeMem(maxSize int, flushHandler func([]MemtableEntry)) *BTreeMemtable {
 	return &BTreeMemtable{
 		memtableData: NewBTree(8),
 		maxSize:      maxSize,
+		flushHandler: flushHandler,
 	}
 }
 
 func (memtable *BTreeMemtable) Put(key string, value []byte) {
+	shouldFlush := memtable.Flush()
+	if shouldFlush {
+		entries := memtable.FlushEntries()
+		if memtable.flushHandler != nil {
+			memtable.flushHandler(entries)
+		}
+	}
 	entry := MemtableEntry{
 		Key:       key,
 		Value:     value,
@@ -170,8 +179,13 @@ func (memtable *BTreeMemtable) Get(key string) (MemtableEntry, bool) {
 	return memtable.memtableData.SearchTree(key)
 }
 
-func (memtable *BTreeMemtable) Delete(key string) {
+func (memtable *BTreeMemtable) Delete(key string) bool {
+	_, ok := memtable.memtableData.SearchTree(key)
+	if !ok {
+		return false
+	}
 	memtable.memtableData.markDeleted(key)
+	return true
 }
 
 func (memtable *BTreeMemtable) Flush() bool {
@@ -183,5 +197,12 @@ func (memtable *BTreeMemtable) Reset() {
 }
 
 func (memtable *BTreeMemtable) FlushEntries() []MemtableEntry {
-	return memtable.memtableData.entriesInOrder()
+	memtable.Reset()
+	entries := memtable.memtableData.entriesInOrder()
+	return entries
+}
+
+func (memtable *BTreeMemtable) ReadEntriesNoFlushing() []MemtableEntry {
+	entries := memtable.memtableData.entriesInOrder()
+	return entries
 }

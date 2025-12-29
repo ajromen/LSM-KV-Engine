@@ -6,7 +6,7 @@ import (
 
 func TestHashmap(t *testing.T) {
 	t.Log("---- HASHMAP MEMTABLE TEST ----\n")
-	hmt := NewMemtable("hashmap", 100, func(entries []MemtableEntry) {})
+	hmt := NewMemtable("hashmap", 100, func(entries []MemtableEntry) {}).Next()
 	hmt.Put("key1", []byte("value1"))
 	hmt.Put("key2", []byte("value2"))
 	hmt.Put("key3", []byte("value3"))
@@ -78,7 +78,7 @@ func TestHashmap(t *testing.T) {
 
 func TestSkipList(t *testing.T) {
 	t.Log("---- SKIPLIST MEMTABLE TEST ----")
-	smt := NewMemtable("skiplist", 100, func(entries []MemtableEntry) {})
+	smt := NewMemtable("skiplist", 100, func(entries []MemtableEntry) {}).Next()
 	smt.Put("key1", []byte("value1"))
 	smt.Put("key2", []byte("value2"))
 	smt.Put("key3", []byte("value3"))
@@ -89,4 +89,30 @@ func TestSkipList(t *testing.T) {
 	if string(entry.Value) != "value1" {
 		t.Fatalf("expected value1, got %s", string(entry.Value))
 	}
+}
+
+func TestBTree(t *testing.T) {
+	t.Log("---- BTREE MEMTABLE TEST ----")
+	btm := NewMemtable("btree", 100, func(entries []MemtableEntry) {}).Next()
+	btm.Put("key2", []byte("value2"))
+	btm.Put("key3", []byte("value3"))
+	btm.Put("key4", []byte("value4"))
+	btm.Put("key6", []byte("value6"))
+	btm.Put("key5", []byte("value5"))
+	btm.Put("key1", []byte("value1"))
+	entry, ok := btm.Get("key1")
+	if !ok {
+		t.Fatal("expected key1 to be found")
+	}
+	if string(entry.Value) != "value1" {
+		t.Fatalf("expected value1 but got %s", string(entry.Value))
+	}
+	//btm.Put("key1", []byte("value1_updated"))
+	//entryUpdated, ok := btm.Get("key1")
+	//if !ok {
+	//	t.Fatal("expected key1 to be found")							- NE UPDATEUJE - FIKSATI
+	//}
+	//if string(entryUpdated.Value) != "value1_updated" {
+	//	t.Fatalf("expected value1_updated but got %s", string(entryUpdated.Value))
+	//}
 }

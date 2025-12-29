@@ -13,4 +13,5 @@ type Memtable interface {
 	Flush() bool
 	Reset()
 	FlushEntries() []MemtableEntry
+	ReadEntriesNoFlushing() []MemtableEntry
 }
