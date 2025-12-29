@@ -1,17 +1,14 @@
 package memtable
 
 func NewMemtable(memType string, maxSize int) Memtable {
-	if memType == "hashmap" {
+	switch memType {
+	case "hashmap":
 		return NewHashMap(maxSize)
-	} else if memType == "skiplist" {
+	case "skiplist":
 		return NewSkipListMem(maxSize)
-	} else {
+	case "btree":
+		return NewBTreeMem(maxSize)
+	default:
 		return nil
 	}
-	/*
-
-		else if memType == "btree" {
-			return newBTree(maxSize)
-		}
-	*/
 }

@@ -15,9 +15,10 @@ Svaki cvor ima najvise 2t dece
 type BTree struct {
 	root *BTreeNode
 	t    int
+	size int
 }
 
-func newBTree(t int) *BTree {
+func NewBTree(t int) *BTree {
 	nodeEntry := &BTreeNode{
 		nodeData: make([]MemtableEntry, 0),
 		leaf:     true,
@@ -49,4 +50,138 @@ func (bt *BTree) SearchTree(key string) (MemtableEntry, bool) {
 		return MemtableEntry{}, false
 	}
 	return entry, true
+}
+func (btn *BTreeNode) insertNonFull(entry MemtableEntry, t int) {
+	i := len(btn.nodeData) - 1
+	if btn.leaf {
+		btn.nodeData = append(btn.nodeData, MemtableEntry{})
+		for i >= 0 && entry.Key < btn.nodeData[i].Key {
+			btn.nodeData[i+1] = btn.nodeData[i]
+			i--
+		}
+		btn.nodeData[i+1] = entry
+		return
+	}
+	for i >= 0 && entry.Key < btn.nodeData[i].Key {
+		i--
+	}
+	i++
+	if len(btn.children[i].nodeData) == 2*t-1 {
+		btn.splitChild(i, t)
+		if entry.Key > btn.nodeData[i].Key {
+			i++
+		}
+	}
+	btn.children[i].insertNonFull(entry, t)
+}
+
+func (btn *BTreeNode) splitChild(i int, t int) {
+	fullNode := btn.children[i]
+	newNode := &BTreeNode{
+		nodeData: make([]MemtableEntry, t-1),
+		leaf:     fullNode.leaf,
+	}
+	for j := 0; j < t-1; j++ {
+		newNode.nodeData[j] = fullNode.nodeData[j+t]
+	}
+	if !fullNode.leaf {
+		newNode.children = make([]*BTreeNode, t)
+		for j := 0; j < t; j++ {
+			newNode.children[j] = fullNode.children[j+t]
+		}
+		fullNode.children = fullNode.children[:t]
+	}
+	median := fullNode.nodeData[t-1]
+	fullNode.nodeData = fullNode.nodeData[:t-1]
+	btn.children = append(btn.children, nil)
+	for j := len(btn.children) - 1; j > i+1; j-- {
+		btn.children[j] = btn.children[j-1]
+	}
+	btn.children[i+1] = newNode
+	btn.nodeData = append(btn.nodeData, MemtableEntry{})
+	for j := len(btn.nodeData) - 1; j > i; j-- {
+		btn.nodeData[j] = btn.nodeData[j-1]
+	}
+	btn.nodeData[i] = median
+}
+
+func (btn *BTreeNode) inOrder(result *[]MemtableEntry) {
+	for i := 0; i < len(btn.nodeData); i++ {
+		if !btn.leaf {
+			btn.children[i].inOrder(result)
+		}
+		*result = append(*result, btn.nodeData[i])
+	}
+	if !btn.leaf {
+		btn.children[len(btn.nodeData)].inOrder(result)
+	}
+}
+
+func (bt *BTree) Insert(entry MemtableEntry) {
+	root := bt.root
+	if len(root.nodeData) == 2*bt.t-1 {
+		s := &BTreeNode{leaf: false, children: []*BTreeNode{root}}
+		bt.root = s
+		s.splitChild(0, bt.t)
+		s.insertNonFull(entry, bt.t)
+	} else {
+		root.insertNonFull(entry, bt.t)
+	}
+	bt.size += 1
+}
+
+func (bt *BTree) markDeleted(key string) {
+	entry := MemtableEntry{
+		Key:       key,
+		Value:     nil,
+		Tombstone: true,
+	}
+	bt.Insert(entry)
+}
+
+func (bt *BTree) entriesInOrder() []MemtableEntry {
+	result := make([]MemtableEntry, 0, bt.size)
+	bt.root.inOrder(&result)
+	return result
+}
+
+type BTreeMemtable struct {
+	memtableData *BTree
+	maxSize      int
+}
+
+func NewBTreeMem(maxSize int) *BTreeMemtable {
+	return &BTreeMemtable{
+		memtableData: NewBTree(8),
+		maxSize:      maxSize,
+	}
+}
+
+func (memtable *BTreeMemtable) Put(key string, value []byte) {
+	entry := MemtableEntry{
+		Key:       key,
+		Value:     value,
+		Tombstone: false,
+	}
+	memtable.memtableData.Insert(entry)
+}
+
+func (memtable *BTreeMemtable) Get(key string) (MemtableEntry, bool) {
+	return memtable.memtableData.SearchTree(key)
+}
+
+func (memtable *BTreeMemtable) Delete(key string) {
+	memtable.memtableData.markDeleted(key)
+}
+
+func (memtable *BTreeMemtable) Flush() bool {
+	return memtable.memtableData.size >= memtable.maxSize
+}
+
+func (memtable *BTreeMemtable) Reset() {
+	memtable.memtableData = NewBTree(8)
+}
+
+func (memtable *BTreeMemtable) FlushEntries() []MemtableEntry {
+	return memtable.memtableData.entriesInOrder()
 }
