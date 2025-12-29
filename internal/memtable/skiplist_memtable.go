@@ -94,16 +94,25 @@ func (sl *SkipList) Search(key string) (MemtableEntry, bool) {
 type SkipListMemtable struct {
 	memtableData *SkipList
 	maxSize      int
+	flushHandler func([]MemtableEntry)
 }
 
-func NewSkipListMem(maxSize int) *SkipListMemtable {
+func NewSkipListMem(maxSize int, flushHandler func([]MemtableEntry)) *SkipListMemtable {
 	return &SkipListMemtable{
 		memtableData: NewSkipList(16),
 		maxSize:      maxSize,
+		flushHandler: flushHandler,
 	}
 }
 
 func (memtable *SkipListMemtable) Put(key string, value []byte) {
+	shouldFlush := memtable.Flush()
+	if shouldFlush {
+		entries := memtable.FlushEntries()
+		if memtable.flushHandler != nil {
+			memtable.flushHandler(entries)
+		}
+	}
 	entry := MemtableEntry{
 		Key:       key,
 		Value:     value,
@@ -116,8 +125,13 @@ func (memtable *SkipListMemtable) Get(key string) (MemtableEntry, bool) {
 	return memtable.memtableData.Search(key)
 }
 
-func (memtable *SkipListMemtable) Delete(key string) {
+func (memtable *SkipListMemtable) Delete(key string) bool {
+	_, ok := memtable.memtableData.Search(key)
+	if !ok {
+		return false
+	}
 	memtable.memtableData.MarkDeleted(key)
+	return true
 }
 
 func (memtable *SkipListMemtable) Flush() bool {
@@ -126,4 +140,25 @@ func (memtable *SkipListMemtable) Flush() bool {
 
 func (memtable *SkipListMemtable) Reset() {
 	memtable.memtableData = NewSkipList(16)
+}
+
+func (memtable *SkipListMemtable) FlushEntries() []MemtableEntry {
+	entries := make([]MemtableEntry, 0, memtable.memtableData.size)
+	current := memtable.memtableData.header.next[0]
+	for current != nil {
+		entries = append(entries, current.entry)
+		current = current.next[0]
+	}
+	memtable.Reset()
+	return entries
+}
+
+func (memtable *SkipListMemtable) ReadEntriesNoFlushing() []MemtableEntry {
+	entries := make([]MemtableEntry, 0, memtable.memtableData.size)
+	current := memtable.memtableData.header.next[0]
+	for current != nil {
+		entries = append(entries, current.entry)
+		current = current.next[0]
+	}
+	return entries
 }

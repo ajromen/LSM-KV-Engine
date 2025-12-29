@@ -1,13 +1,13 @@
 package memtable
 
-func NewMemtable(memType string, maxSize int) Memtable {
+func NewMemtable(memType string, maxSize int, flushHandler func([]MemtableEntry)) Memtable {
 	switch memType {
 	case "hashmap":
-		return NewHashMap(maxSize)
+		return NewHashMap(maxSize, flushHandler)
 	case "skiplist":
-		return NewSkipListMem(maxSize)
+		return NewSkipListMem(maxSize, flushHandler)
 	case "btree":
-		return NewBTreeMem(maxSize)
+		return nil
 	default:
 		return nil
 	}

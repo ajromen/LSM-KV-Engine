@@ -9,7 +9,8 @@ type MemtableEntry struct {
 type Memtable interface {
 	Put(key string, value []byte)
 	Get(key string) (MemtableEntry, bool)
-	Delete(key string)
+	Delete(key string) bool
 	Flush() bool
 	Reset()
+	FlushEntries() []MemtableEntry
 }
