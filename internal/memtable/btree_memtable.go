@@ -54,6 +54,12 @@ func (bt *BTree) SearchTree(key string) (MemtableEntry, bool) {
 func (btn *BTreeNode) insertNonFull(entry MemtableEntry, t int) {
 	i := len(btn.nodeData) - 1
 	if btn.leaf {
+		for j := 0; j < len(btn.nodeData); j++ {
+			if btn.nodeData[j].Key == entry.Key {
+				btn.nodeData[j] = entry
+				return
+			}
+		}
 		btn.nodeData = append(btn.nodeData, MemtableEntry{})
 		for i >= 0 && entry.Key < btn.nodeData[i].Key {
 			btn.nodeData[i+1] = btn.nodeData[i]
