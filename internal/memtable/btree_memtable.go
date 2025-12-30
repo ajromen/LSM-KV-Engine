@@ -185,13 +185,8 @@ func (memtable *BTreeMemtable) Get(key string) (MemtableEntry, bool) {
 	return memtable.memtableData.SearchTree(key)
 }
 
-func (memtable *BTreeMemtable) Delete(key string) bool {
-	_, ok := memtable.memtableData.SearchTree(key)
-	if !ok {
-		return false
-	}
+func (memtable *BTreeMemtable) Delete(key string) {
 	memtable.memtableData.markDeleted(key)
-	return true
 }
 
 func (memtable *BTreeMemtable) Flush() bool {

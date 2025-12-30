@@ -125,13 +125,8 @@ func (memtable *SkipListMemtable) Get(key string) (MemtableEntry, bool) {
 	return memtable.memtableData.Search(key)
 }
 
-func (memtable *SkipListMemtable) Delete(key string) bool {
-	_, ok := memtable.memtableData.Search(key)
-	if !ok {
-		return false
-	}
+func (memtable *SkipListMemtable) Delete(key string) {
 	memtable.memtableData.MarkDeleted(key)
-	return true
 }
 
 func (memtable *SkipListMemtable) Flush() bool {

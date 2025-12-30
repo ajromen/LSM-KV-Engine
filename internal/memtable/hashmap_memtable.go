@@ -33,14 +33,13 @@ func (memtable *HashMapMemtable) Get(key string) (MemtableEntry, bool) {
 	return MemtableEntry{}, false
 }
 
-func (memtable *HashMapMemtable) Delete(key string) bool {
-	entry, ok := memtable.memtableData[key]
-	if !ok {
-		return false
+func (memtable *HashMapMemtable) Delete(key string) {
+	entry := MemtableEntry{
+		Key:       key,
+		Value:     nil,
+		Tombstone: true,
 	}
-	entry.Tombstone = true
 	memtable.memtableData[key] = entry
-	return true
 }
 
 func (memtable *HashMapMemtable) Flush() bool {

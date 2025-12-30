@@ -6,13 +6,14 @@ import (
 
 func TestHashmap(t *testing.T) {
 	t.Log("---- HASHMAP MEMTABLE TEST ----")
-	mt := NewMemtables("hashmap", 1, 5, func(entries []MemtableEntry) {})
+	mt := NewMemtables("hashmap", 1, 10, func(entries []MemtableEntry) {})
 	mt.Put("key1", []byte("value1"))
 	mt.Put("key2", []byte("value2"))
 	mt.Put("key3", []byte("value3"))
+	mt.Put("key4", []byte("value4"))
 	entry, ok := mt.Get("key1")
 	if !ok {
-		t.Fatal("key1 not found")
+		t.Fatal("key1 not found, expected to be found")
 	}
 	if string(entry.Value) != "value1" {
 		t.Fatalf("expected value1, got %s", entry.Value)
@@ -28,6 +29,11 @@ func TestHashmap(t *testing.T) {
 	_, ok = mt.Get("nonexisting")
 	if ok {
 		t.Fatalf("expected nonexisting key to be missing")
+	}
+	mt.Delete("nonexisting")
+	entries := mt.ReadEntriesNoFlushing()
+	if !entries[4].Tombstone {
+		t.Fatalf("expected tombstone to be true")
 	}
 }
 
@@ -53,6 +59,25 @@ func TestHashmapFlush(t *testing.T) {
 	}
 	if len(flushed[0]) != 2 {
 		t.Fatalf("expected 2 flushed entries, got %d", len(flushed[0]))
+	}
+}
+
+func TestHashmapRotation(t *testing.T) {
+	t.Log("---- HASHMAP MEMTABLE ROTATION TEST ----")
+	mt := NewMemtables("hashmap", 2, 2, func(entries []MemtableEntry) {})
+	mt.Put("key1", []byte("value1"))
+	mt.Put("key2", []byte("value2"))
+	mt.Put("key3", []byte("value3"))
+	entries := mt.ReadEntriesNoFlushing()
+	if entries[2].Key != "key3" && mt.activeIndex != 1 {
+		t.Fatalf("active index expected to be 1 because of rotation but is 0")
+	}
+	entry, ok := mt.Get("key1")
+	if !ok {
+		t.Fatalf("expected key1 to be found in readonly memtable at index 0")
+	}
+	if string(entry.Value) != "value1" {
+		t.Fatalf("expected value at key1 to be value1 but is %s", string(entry.Value))
 	}
 }
 
