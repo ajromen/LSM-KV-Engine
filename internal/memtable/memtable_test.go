@@ -87,12 +87,74 @@ func TestSkipList(t *testing.T) {
 	mt.Put("key1", []byte("value1"))
 	mt.Put("key2", []byte("value2"))
 	mt.Put("key3", []byte("value3"))
+	mt.Put("key4", []byte("value4"))
 	entry, ok := mt.Get("key1")
 	if !ok {
-		t.Fatal("key1 not found")
+		t.Fatal("key1 not found, expected to be found")
 	}
 	if string(entry.Value) != "value1" {
-		t.Fatalf("expected value1, got %s", string(entry.Value))
+		t.Fatalf("expected value1, got %s", entry.Value)
+	}
+	mt.Put("key1", []byte("value1_updated"))
+	entryUpdated, ok := mt.Get("key1")
+	if !ok {
+		t.Fatalf("key1 not found")
+	}
+	if string(entryUpdated.Value) != "value1_updated" {
+		t.Fatalf("expected value1_updated, got %s", entryUpdated.Value)
+	}
+	_, ok = mt.Get("nonexisting")
+	if ok {
+		t.Fatalf("expected nonexisting key to be missing")
+	}
+	mt.Delete("nonexisting")
+	entries := mt.ReadEntriesNoFlushing()
+	if !entries[4].Tombstone {
+		t.Fatalf("expected tombstone to be true")
+	}
+}
+
+func TestSkipListFlush(t *testing.T) {
+	t.Log("---- SKIPLIST MEMTABLE FLUSH TEST ----")
+	flushed := [][]MemtableEntry{}
+	mt := NewMemtables("skiplist", 1, 2, func(entries []MemtableEntry) {
+		flushed = append(flushed, entries)
+	})
+	mt.Put("key1", []byte("value1"))
+	mt.Put("key2", []byte("value2"))
+	mt.Put("key3", []byte("value3"))
+	_, ok := mt.Get("key1")
+	if ok {
+		t.Fatalf("expected key1 to be missing after flush")
+	}
+	_, ok = mt.Get("key3")
+	if !ok {
+		t.Fatalf("expected key3 to exist")
+	}
+	if len(flushed) != 1 {
+		t.Fatalf("expected 1 flush, got %d", len(flushed))
+	}
+	if len(flushed[0]) != 2 {
+		t.Fatalf("expected 2 flushed entries, got %d", len(flushed[0]))
+	}
+}
+
+func TestSkipListRotation(t *testing.T) {
+	t.Log("---- SKIPLIST MEMTABLE ROTATION TEST ----")
+	mt := NewMemtables("skiplist", 2, 2, func(entries []MemtableEntry) {})
+	mt.Put("key1", []byte("value1"))
+	mt.Put("key2", []byte("value2"))
+	mt.Put("key3", []byte("value3"))
+	entries := mt.ReadEntriesNoFlushing()
+	if entries[2].Key != "key3" && mt.activeIndex != 1 {
+		t.Fatalf("active index expected to be 1 because of rotation but is 0")
+	}
+	entry, ok := mt.Get("key1")
+	if !ok {
+		t.Fatalf("expected key1 to be found in readonly memtable at index 0")
+	}
+	if string(entry.Value) != "value1" {
+		t.Fatalf("expected value at key1 to be value1 but is %s", string(entry.Value))
 	}
 }
 
@@ -119,5 +181,49 @@ func TestBTree(t *testing.T) {
 	}
 	if string(entryUpdated.Value) != "value1_updated" {
 		t.Fatalf("expected value1_updated but got %s", string(entryUpdated.Value))
+	}
+}
+
+func TestBTreeFlush(t *testing.T) {
+	t.Log("---- BTREE MEMTABLE FLUSH TEST ----")
+	flushed := [][]MemtableEntry{}
+	mt := NewMemtables("btree", 1, 2, func(entries []MemtableEntry) {
+		flushed = append(flushed, entries)
+	})
+	mt.Put("key1", []byte("value1"))
+	mt.Put("key2", []byte("value2"))
+	mt.Put("key3", []byte("value3"))
+	_, ok := mt.Get("key1")
+	if ok {
+		t.Fatalf("expected key1 to be missing after flush")
+	}
+	_, ok = mt.Get("key3")
+	if !ok {
+		t.Fatalf("expected key3 to exist")
+	}
+	if len(flushed) != 1 {
+		t.Fatalf("expected 1 flush, got %d", len(flushed))
+	}
+	if len(flushed[0]) != 2 {
+		t.Fatalf("expected 2 flushed entries, got %d", len(flushed[0]))
+	}
+}
+
+func TestBTreeRotation(t *testing.T) {
+	t.Log("---- BTREE MEMTABLE ROTATION TEST ----")
+	mt := NewMemtables("btree", 2, 2, func(entries []MemtableEntry) {})
+	mt.Put("key1", []byte("value1"))
+	mt.Put("key2", []byte("value2"))
+	mt.Put("key3", []byte("value3"))
+	entries := mt.ReadEntriesNoFlushing()
+	if entries[2].Key != "key3" && mt.activeIndex != 1 {
+		t.Fatalf("active index expected to be 1 because of rotation but is 0")
+	}
+	entry, ok := mt.Get("key1")
+	if !ok {
+		t.Fatalf("expected key1 to be found in readonly memtable at index 0")
+	}
+	if string(entry.Value) != "value1" {
+		t.Fatalf("expected value at key1 to be value1 but is %s", string(entry.Value))
 	}
 }
