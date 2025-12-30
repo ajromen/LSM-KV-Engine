@@ -1,6 +1,9 @@
 package wal
 
-import "hash/crc32"
+import (
+	"encoding/binary"
+	"hash/crc32"
+)
 
 const (
 	CRC_SIZE        = 4
@@ -25,6 +28,35 @@ type Record struct {
 	ValueSize uint64
 	Key       []byte
 	Value     []byte
+}
+
+func Encode(r Record) []byte {
+	r.KeySize = uint64(len(r.Key))
+	r.ValueSize = uint64(len(r.Value))
+
+	total := KEY_START + int(r.KeySize) + int(r.ValueSize)
+	buf := make([]byte, total)
+
+	binary.BigEndian.PutUint64(buf[TIMESTAMP_START:], r.Timestamp)
+
+	if r.Tombstone {
+		buf[TOMBSTONE_START] = 1
+	} else {
+		buf[TOMBSTONE_START] = 0
+	}
+
+	binary.BigEndian.PutUint64(buf[KEY_SIZE_START:], r.KeySize)
+	binary.BigEndian.PutUint64(buf[VALUE_SIZE_START:], r.ValueSize)
+
+	copy(buf[KEY_START:KEY_START+int(r.KeySize)], r.Key)
+	copy(buf[KEY_START+int(r.KeySize):], r.Value)
+
+	r.CRC = CRC32(buf[TIMESTAMP_START:])
+	//r.CRC = crc32.ChecksumIEEE(buf[TIMESTAMP_START:])
+
+	binary.BigEndian.PutUint32(buf[CRC_START:], r.CRC)
+
+	return buf
 }
 
 func CRC32(data []byte) uint32 {
