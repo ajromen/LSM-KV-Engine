@@ -198,8 +198,8 @@ func (memtable *BTreeMemtable) Reset() {
 }
 
 func (memtable *BTreeMemtable) FlushEntries() []MemtableEntry {
-	memtable.Reset()
 	entries := memtable.memtableData.entriesInOrder()
+	memtable.Reset()
 	return entries
 }
 
