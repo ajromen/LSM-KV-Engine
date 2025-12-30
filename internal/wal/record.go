@@ -2,6 +2,7 @@ package wal
 
 import (
 	"encoding/binary"
+	"fmt"
 	"hash/crc32"
 )
 
@@ -57,6 +58,32 @@ func Encode(r Record) []byte {
 	binary.BigEndian.PutUint32(buf[CRC_START:], r.CRC)
 
 	return buf
+}
+
+func Decode(buf []byte) (Record, error) {
+	var r Record
+	r.CRC = binary.BigEndian.Uint32(buf[CRC_START:TIMESTAMP_START])
+
+	calculatedCRC := CRC32(buf[TIMESTAMP_START:])
+	if r.CRC != calculatedCRC {
+		return r, fmt.Errorf("crc mismatch: received %d, expected %d", r.CRC, calculatedCRC)
+	}
+
+	r.Timestamp = binary.BigEndian.Uint64(buf[TIMESTAMP_START:TOMBSTONE_START])
+	r.Tombstone = buf[TOMBSTONE_START] == 1
+	r.KeySize = binary.BigEndian.Uint64(buf[KEY_SIZE_START:VALUE_SIZE_START])
+	r.ValueSize = binary.BigEndian.Uint64(buf[VALUE_SIZE_START:KEY_START])
+
+	keyEnd := KEY_START + int(r.KeySize)
+	valueEnd := keyEnd + int(r.ValueSize)
+
+	r.Key = make([]byte, r.KeySize)
+	r.Value = make([]byte, r.ValueSize)
+
+	copy(r.Key, buf[KEY_START:keyEnd])
+	copy(r.Value, buf[keyEnd:valueEnd])
+
+	return r, nil
 }
 
 func CRC32(data []byte) uint32 {
