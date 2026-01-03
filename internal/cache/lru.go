@@ -2,45 +2,46 @@ package cache
 
 import "container/list"
 
-type LRU struct {
+type LRU[K comparable, V any] struct {
 	maxElements int
 	list        *list.List
-	cache       map[interface{}]*list.Element
+	cache       map[K]*list.Element
 }
 
 // entry korisnti bilo sta za key/value ako treba moze lako da se promeni
-type entry struct {
-	key   interface{}
-	value interface{}
+type entry[K comparable, V any] struct {
+	key   K
+	value V
 }
 
-func NewLRU(maxElements int) *LRU {
-	return &LRU{
+func NewLRU[K comparable, V any](maxElements int) *LRU[K, V] {
+	return &LRU[K, V]{
 		maxElements: maxElements,
 		list:        list.New(),
-		cache:       make(map[interface{}]*list.Element),
+		cache:       make(map[K]*list.Element),
 	}
 }
 
-func (lru *LRU) Get(key interface{}) (interface{}, bool) {
+func (lru *LRU[K, V]) Get(key K) (V, bool) {
 	node, ok := lru.cache[key]
 	if !ok {
-		return nil, false
+		var zero V
+		return zero, false
 	}
 
 	lru.list.MoveToFront(node)
 
-	return node.Value.(*entry).value, true
+	return node.Value.(*entry[K, V]).value, true
 }
 
-func (lru *LRU) Put(key interface{}, value interface{}) {
+func (lru *LRU[K, V]) Put(key K, value V) {
 	if e, ok := lru.cache[key]; ok {
-		e.Value.(*entry).value = value
+		e.Value.(*entry[K, V]).value = value
 		lru.list.MoveToFront(e)
 		return
 	}
 
-	elem := lru.list.PushFront(&entry{key, value})
+	elem := lru.list.PushFront(&entry[K, V]{key, value})
 	lru.cache[key] = elem
 
 	if lru.list.Len() > lru.maxElements {
@@ -48,13 +49,13 @@ func (lru *LRU) Put(key interface{}, value interface{}) {
 	}
 }
 
-func (lru *LRU) removeLast() {
+func (lru *LRU[K, V]) removeLast() {
 	element := lru.list.Back()
 	if element == nil {
 		return
 	}
 
 	lru.list.Remove(element)
-	key := element.Value.(*entry).key
+	key := element.Value.(*entry[K, V]).key
 	delete(lru.cache, key)
 }

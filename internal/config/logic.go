@@ -38,6 +38,9 @@ func (c *Config) applyFlags(flags *cli.FLags) error {
 	if flags.MemtableType != nil {
 		c.Memtable.MemtableType = *flags.MemtableType
 	}
+	if flags.BlockCacheMaxBlocks != nil {
+		c.BlockManager.BlockCacheMaxBlocks = *flags.BlockCacheMaxBlocks
+	}
 	return nil
 }
 
@@ -52,6 +55,15 @@ func (c *Config) validateFields() error {
 		c.Memtable.MemtableType != "btree" {
 		return fmt.Errorf("invalid memtable type")
 	}
+
+	if c.BlockManager.BlockSize%(4*1024) != 0 {
+		return fmt.Errorf("invalid block size, must be multiple of 4kb")
+	}
+
+	if c.BlockManager.BlockCacheMaxBlocks < 1 {
+		return fmt.Errorf("invalid block cacheMaxBlocks must be positive")
+	}
+
 	// TODO continue validation
 	return nil
 }

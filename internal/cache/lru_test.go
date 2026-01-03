@@ -1,12 +1,11 @@
 package cache
 
 import (
-	"bytes"
 	"testing"
 )
 
 func TestGetMissingKey(t *testing.T) {
-	lru := NewLRU(2)
+	lru := NewLRU[string, string](2)
 
 	if val, ok := lru.Get("a"); ok {
 		t.Fatalf("expected not found, got %s", val)
@@ -14,26 +13,26 @@ func TestGetMissingKey(t *testing.T) {
 }
 
 func TestPutAndGet(t *testing.T) {
-	lru := NewLRU(2)
+	lru := NewLRU[string, string](2)
 
-	lru.Put("a", []byte("jedan"))
+	lru.Put("a", "jedan")
 
 	val, ok := lru.Get("a")
 	if !ok {
 		t.Fatal("expected found, got not found")
 	}
 
-	if !bytes.Equal(val.([]byte), []byte("jedan")) {
+	if val != "jedan" {
 		t.Fatalf("expected 'jedan', got %s", val)
 	}
 }
 
 func TestEviction(t *testing.T) {
-	lru := NewLRU(2)
+	lru := NewLRU[string, string](2)
 
-	lru.Put("a", []byte("jedan"))
-	lru.Put("b", []byte("dva"))
-	lru.Put("c", []byte("tri"))
+	lru.Put("a", "jedan")
+	lru.Put("b", "dva")
+	lru.Put("c", "tri")
 
 	if _, ok := lru.Get("a"); ok {
 		t.Fatal("expected 'a' to be evicted")
@@ -49,16 +48,16 @@ func TestEviction(t *testing.T) {
 }
 
 func TestRefresh(t *testing.T) {
-	lru := NewLRU(2)
+	lru := NewLRU[string, string](2)
 
-	lru.Put("a", []byte("jedan"))
-	lru.Put("b", []byte("dva"))
+	lru.Put("a", "jedan")
+	lru.Put("b", "dva")
 
 	// refresh 'a'
 	lru.Get("a")
 
 	// "b" ispada
-	lru.Put("c", []byte("tri"))
+	lru.Put("c", "tri")
 
 	if _, ok := lru.Get("b"); ok {
 		t.Fatal("expected 'b' to be evicted")
@@ -70,23 +69,23 @@ func TestRefresh(t *testing.T) {
 }
 
 func TestUpdateExistingKey(t *testing.T) {
-	lru := NewLRU(2)
+	lru := NewLRU[string, string](2)
 
-	lru.Put("a", []byte("jedan"))
-	lru.Put("b", []byte("dva"))
+	lru.Put("a", "jedan")
+	lru.Put("b", "dva")
 
-	lru.Put("a", []byte("novo"))
+	lru.Put("a", "novo")
 
 	val, ok := lru.Get("a")
 	if !ok {
 		t.Fatal("expected 'a' to exist")
 	}
 
-	if !bytes.Equal(val.([]byte), []byte("novo")) {
+	if val != "novo" {
 		t.Fatalf("expected updated value, got %s", val)
 	}
 
-	lru.Put("c", []byte("tri"))
+	lru.Put("c", "tri")
 
 	if _, ok := lru.Get("b"); ok {
 		t.Fatal("expected 'b' to be evicted")

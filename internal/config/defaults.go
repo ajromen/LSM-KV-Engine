@@ -23,7 +23,8 @@ const (
 	DefaultCMSConfidence = 0.99
 
 	//Block Manager
-	DefaultBlockSize = 4 * 1024
+	DefaultBlockSize           = 4 * 1024
+	DefaultBlockCacheMaxBlocks = 2048
 )
 
 func NewDefaultConfig() *Config {
@@ -54,7 +55,8 @@ func NewDefaultConfig() *Config {
 			},
 		},
 		BlockManager: BlockManagerConfig{
-			BlockSize: DefaultBlockSize,
+			BlockSize:           DefaultBlockSize,
+			BlockCacheMaxBlocks: DefaultBlockCacheMaxBlocks,
 		},
 	}
 }
