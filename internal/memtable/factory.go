@@ -1,12 +1,5 @@
 package memtable
 
-type Memtables struct {
-	activeIndex  int
-	maxTables    int
-	tables       []Memtable
-	flushHandler func([]MemtableEntry)
-}
-
 func NewMemtables(memType string, instances int, maxSize int, flushHandler func([]MemtableEntry)) *Memtables {
 	if instances < 1 {
 		instances = 1

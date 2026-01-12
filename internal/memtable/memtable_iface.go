@@ -15,3 +15,10 @@ type Memtable interface {
 	FlushEntries() []MemtableEntry
 	ReadEntriesNoFlushing() []MemtableEntry
 }
+
+type Memtables struct {
+	activeIndex  int
+	maxTables    int
+	tables       []Memtable
+	flushHandler func([]MemtableEntry)
+}
