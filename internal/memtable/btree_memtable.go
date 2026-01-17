@@ -151,12 +151,6 @@ func (bt *BTree) entriesInOrder() []MemtableEntry {
 	return result
 }
 
-type BTreeMemtable struct {
-	memtableData *BTree
-	maxSize      int
-	flushHandler func([]MemtableEntry)
-}
-
 func NewBTreeMem(maxSize int, flushHandler func([]MemtableEntry)) *BTreeMemtable {
 	return &BTreeMemtable{
 		memtableData: NewBTree(8),

@@ -1,11 +1,5 @@
 package memtable
 
-type HashMapMemtable struct {
-	memtableData map[string]MemtableEntry
-	maxSize      int
-	flushHandler func([]MemtableEntry)
-}
-
 func NewHashMap(maxSize int, flushHandler func([]MemtableEntry)) *HashMapMemtable {
 	return &HashMapMemtable{
 		memtableData: make(map[string]MemtableEntry),
