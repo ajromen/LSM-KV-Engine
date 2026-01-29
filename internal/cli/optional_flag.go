@@ -23,3 +23,15 @@ func (o *OptionalString) Get() *string {
 	}
 	return &o.val
 }
+
+type OptionalInt struct {
+	val int
+	set bool
+}
+
+func (o *OptionalInt) Get() *int {
+	if !o.set {
+		return nil
+	}
+	return &o.val
+}
