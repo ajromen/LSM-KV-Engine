@@ -1,5 +1,10 @@
 package wal
 
+import (
+	"errors"
+	"hash/crc32"
+)
+
 type FragmentType uint8
 
 // A single record may be in one or muliple blocks, depending on its size
@@ -33,6 +38,39 @@ const (
 
 // Fragment = FragmentHeader + Record
 type Fragment struct {
-	header  FragmentHeader
+	Header  FragmentHeader
 	Payload []byte
+}
+
+var (
+	ErrInvalidType     = errors.New("fragment: invalid fragment type")
+	ErrPayloadTooLarge = errors.New("fragment: payload too large for uint16 size field")
+)
+
+// ComputeFragmentCRC computes CRC using (Type + Payload).
+func ComputeFragmentCRC(t FragmentType, payload []byte) uint32 {
+	// 1 byte type + payload
+	buf := make([]byte, 1+len(payload))
+	buf[0] = byte(t)
+	copy(buf[1:], payload)
+	return crc32.ChecksumIEEE(buf)
+}
+
+// NewFragment creates a new fragment and fills header (CRC/Size/Type/LogNumber).
+func NewFragment(t FragmentType, logNumber uint32, payload []byte) (*Fragment, error) {
+	if !t.Valid() {
+		return nil, ErrInvalidType
+	}
+	if len(payload) > int(^uint16(0)) { // > 65535
+		return nil, ErrPayloadTooLarge
+	}
+
+	h := FragmentHeader{
+		Size:      uint16(len(payload)),
+		Type:      t,
+		LogNumber: logNumber,
+	}
+	h.CRC = ComputeFragmentCRC(t, payload)
+
+	return &Fragment{Header: h, Payload: payload}, nil
 }
