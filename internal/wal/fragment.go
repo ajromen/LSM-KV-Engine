@@ -1,6 +1,7 @@
 package wal
 
 import (
+	"encoding/binary"
 	"errors"
 	"hash/crc32"
 )
@@ -36,18 +37,21 @@ const (
 	FragmentHeaderSize = fragCRCLen + fragSizeLen + fragTypeLen + fragLogNumberLen
 )
 
-// Fragment = FragmentHeader + Record
+// Fragment = FragmentHeader + PayLoad bytes
 type Fragment struct {
 	Header  FragmentHeader
 	Payload []byte
 }
 
 var (
+	ErrShortHeader     = errors.New("fragment: not enough bytes for header")
 	ErrInvalidType     = errors.New("fragment: invalid fragment type")
+	ErrSizeMismatch    = errors.New("fragment: header size does not match payload length")
+	ErrCorrupted       = errors.New("fragment: crc mismatch (corrupted or partial write)")
 	ErrPayloadTooLarge = errors.New("fragment: payload too large for uint16 size field")
 )
 
-// ComputeFragmentCRC computes CRC using (Type + Payload).
+// ComputeFragmentCRC computes CRC using (Type + Payload)
 func ComputeFragmentCRC(t FragmentType, payload []byte) uint32 {
 	// 1 byte type + payload
 	buf := make([]byte, 1+len(payload))
@@ -56,7 +60,7 @@ func ComputeFragmentCRC(t FragmentType, payload []byte) uint32 {
 	return crc32.ChecksumIEEE(buf)
 }
 
-// NewFragment creates a new fragment and fills header (CRC/Size/Type/LogNumber).
+// NewFragment creates a new fragment and fills header (CRC/Size/Type/LogNumber)
 func NewFragment(t FragmentType, logNumber uint32, payload []byte) (*Fragment, error) {
 	if !t.Valid() {
 		return nil, ErrInvalidType
@@ -73,4 +77,52 @@ func NewFragment(t FragmentType, logNumber uint32, payload []byte) (*Fragment, e
 	h.CRC = ComputeFragmentCRC(t, payload)
 
 	return &Fragment{Header: h, Payload: payload}, nil
+}
+
+// EncodeHeader writes header in dst
+func EncodeHeader(h FragmentHeader, dst []byte) error {
+	if len(dst) < FragmentHeaderSize {
+		return ErrShortHeader
+	}
+	if !h.Type.Valid() {
+		return ErrInvalidType
+	}
+
+	binary.BigEndian.PutUint32(dst[0:4], h.CRC)
+	binary.BigEndian.PutUint16(dst[4:6], h.Size)
+	dst[6] = byte(h.Type)
+	binary.BigEndian.PutUint32(dst[7:11], h.LogNumber)
+
+	return nil
+}
+
+// DecodeHeader reads header from src
+func DecodeHeader(src []byte) (FragmentHeader, error) {
+	if len(src) < FragmentHeaderSize {
+		return FragmentHeader{}, ErrShortHeader
+	}
+
+	h := FragmentHeader{
+		CRC:       binary.BigEndian.Uint32(src[0:4]),
+		Size:      binary.BigEndian.Uint16(src[4:6]),
+		Type:      FragmentType(src[6]),
+		LogNumber: binary.BigEndian.Uint32(src[7:11]),
+	}
+
+	if !h.Type.Valid() {
+		return FragmentHeader{}, ErrInvalidType
+	}
+	return h, nil
+}
+
+// Verifies: 1) payload size 2) CRC integrity
+func (f *Fragment) Verify() error {
+	if int(f.Header.Size) != len(f.Payload) {
+		return ErrSizeMismatch
+	}
+	expected := ComputeFragmentCRC(f.Header.Type, f.Payload)
+	if expected != f.Header.CRC {
+		return ErrCorrupted
+	}
+	return nil
 }
