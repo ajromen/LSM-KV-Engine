@@ -1,7 +1,6 @@
 package sstable
 
 import (
-	""
 	"encoding/binary"
 	"github.com/ajromen/LSM-KV-Engine/internal/compressor"
 	"github.com/ajromen/LSM-KV-Engine/internal/utils"

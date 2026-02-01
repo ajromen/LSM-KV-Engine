@@ -6,9 +6,9 @@ import (
 )
 
 func WriteUvarint(file *os.File, value uint64) error {
-	bytes := make([]byte, binary.MaxVarintLen64)
-	n := binary.PutUvarint(bytes, value)
-	_, err := file.Write(bytes[:n])
+	buf := make([]byte, binary.MaxVarintLen64)
+	n := binary.PutUvarint(buf, value)
+	_, err := file.Write(buf[:n])
 	if err != nil {
 		return err
 	}
