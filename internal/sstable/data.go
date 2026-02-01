@@ -2,9 +2,11 @@ package sstable
 
 import (
 	"encoding/binary"
+	"fmt"
+	"os"
+
 	"github.com/ajromen/LSM-KV-Engine/internal/compressor"
 	"github.com/ajromen/LSM-KV-Engine/internal/utils"
-	"os"
 )
 
 type DataRecord struct {
@@ -60,6 +62,12 @@ func (df *DataFile) writeRecord(file *os.File, record *DataRecord, compressorDic
 		if err != nil {
 			return err
 		}
+	} else {
+		idx, _ := compressorDict.GetIdx(string(record.Key))
+		err = utils.WriteUvarint(file, uint64(idx))
+		if err != nil {
+			return err
+		}
 	}
 	if !record.Tombstone {
 		err = utils.WriteUvarint(file, uint64(len(record.Value)))
@@ -69,12 +77,6 @@ func (df *DataFile) writeRecord(file *os.File, record *DataRecord, compressorDic
 	}
 	if compressorDict == nil {
 		_, err = file.Write(record.Key)
-		if err != nil {
-			return err
-		}
-	} else {
-		idx, _ := compressorDict.GetIdx(string(record.Key))
-		err = utils.WriteUvarint(file, uint64(idx))
 		if err != nil {
 			return err
 		}
@@ -116,23 +118,9 @@ func (df *DataFile) readRecord(file *os.File, compressorDict *compressor.Compres
 		tombstone = true
 	}
 	var keySize uint64
-	if compressorDict == nil {
-		keySize, err = utils.ReadUvarint(file)
-		if err != nil {
-			return nil, err
-		}
-	}
-	var valueSize uint64
-	if !tombstone {
-		valueSize, err = utils.ReadUvarint(file)
-		if err != nil {
-			return nil, err
-		}
-	}
 	var key []byte
 	if compressorDict == nil {
-		key = make([]byte, keySize)
-		_, err = file.Read(key)
+		keySize, err = utils.ReadUvarint(file)
 		if err != nil {
 			return nil, err
 		}
@@ -143,6 +131,20 @@ func (df *DataFile) readRecord(file *os.File, compressorDict *compressor.Compres
 		}
 		keyStr, _ := compressorDict.GetKey(int(keyIndex))
 		key = []byte(keyStr)
+	}
+	var valueSize uint64
+	if !tombstone {
+		valueSize, err = utils.ReadUvarint(file)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if compressorDict == nil {
+		key = make([]byte, keySize)
+		_, err = file.Read(key)
+		if err != nil {
+			return nil, err
+		}
 	}
 	var value []byte
 	if !tombstone {
@@ -160,4 +162,44 @@ func (df *DataFile) readRecord(file *os.File, compressorDict *compressor.Compres
 		Value:     value,
 	}
 	return record, nil
+}
+
+func (df *DataFile) printRecordOnDisk(record *DataRecord, compressorDict *compressor.CompressorDict) {
+	fmt.Println("=== Record Disk Format ===")
+	fmt.Printf("CRC: %d\n", record.CRC)
+	fmt.Printf("Timestamp: %d\n", record.Timestamp)
+	fmt.Printf("Tombstone: %v\n", record.Tombstone)
+	if compressorDict == nil {
+		keySize := len(record.Key)
+		valueSize := 0
+		if !record.Tombstone {
+			valueSize = len(record.Value)
+		}
+		fmt.Printf("KeySize: %d\n", keySize)
+		fmt.Printf("ValueSize: %d\n", valueSize)
+		fmt.Printf("Key: %q\n", string(record.Key))
+		if !record.Tombstone {
+			fmt.Printf("Value: %q\n", string(record.Value))
+		} else {
+			fmt.Printf("Value: <deleted>\n")
+		}
+	} else {
+		idx, ok := compressorDict.GetIdx(string(record.Key))
+		if !ok {
+			fmt.Printf("KeyIndex: NOT IN DICT\n")
+		} else {
+			fmt.Printf("KeyIndex: %d\n", idx)
+		}
+		valueSize := 0
+		if !record.Tombstone {
+			valueSize = len(record.Value)
+		}
+		fmt.Printf("ValueSize: %d\n", valueSize)
+		if !record.Tombstone {
+			fmt.Printf("Value: %q\n", string(record.Value))
+		} else {
+			fmt.Printf("Value: <deleted>\n")
+		}
+	}
+	fmt.Println("==========================")
 }

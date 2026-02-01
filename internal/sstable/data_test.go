@@ -29,6 +29,7 @@ func TestWriteReadRecord_NoCompression(t *testing.T) {
 	}
 	file.Seek(0, 0)
 	read, err := df.readRecord(file, nil)
+	df.printRecordOnDisk(read, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,6 +65,7 @@ func TestWriteReadRecord_Tombstone(t *testing.T) {
 	df.writeRecord(file, original, nil)
 	file.Seek(0, 0)
 	read, err := df.readRecord(file, nil)
+	df.printRecordOnDisk(read, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,6 +98,7 @@ func TestWriteReadRecord_Compression(t *testing.T) {
 	df.writeRecord(file, original, compressorDict)
 	file.Seek(0, 0)
 	read, err := df.readRecord(file, compressorDict)
+	df.printRecordOnDisk(read, compressorDict)
 	if err != nil {
 		t.Fatal(err)
 	}
