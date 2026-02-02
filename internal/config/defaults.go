@@ -17,6 +17,14 @@ const (
 
 	//SkipList
 	DefaultSkipListMaxLevel = 16
+
+	//CMS
+	DefaultCMSAccuracy   = 0.01
+	DefaultCMSConfidence = 0.99
+
+	//Block Manager
+	DefaultBlockSize           = 4 * 1024
+	DefaultBlockCacheMaxBlocks = 2048
 )
 
 func NewDefaultConfig() *Config {
@@ -33,6 +41,22 @@ func NewDefaultConfig() *Config {
 		},
 		SkipList: SkipListConfig{
 			MaxLevel: DefaultSkipListMaxLevel,
+		},
+		ProbabilisticType: ProbabilisticTypeConfig{
+			CountMinSketch: CountMinSketchConfig{
+				Enabled:    true,
+				Accuracy:   DefaultCMSAccuracy,
+				Confidence: DefaultCMSConfidence,
+				Seeds: [][]byte{
+					{1, 2, 3, 4},
+					{5, 6, 7, 8},
+					{9, 10, 11, 12},
+				},
+			},
+		},
+		BlockManager: BlockManagerConfig{
+			BlockSize:           DefaultBlockSize,
+			BlockCacheMaxBlocks: DefaultBlockCacheMaxBlocks,
 		},
 	}
 }

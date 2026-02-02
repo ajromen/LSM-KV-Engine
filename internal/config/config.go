@@ -5,9 +5,7 @@ type Config struct {
 	Memtable          MemtableConfig          `json:"memtable"`
 	SSTable           SSTableConfig           `json:"sstable"`
 	LSMTree           LSMTreeConfig           `json:"lsmtree"`
-	Cache             CacheConfig             `json:"cache"`
 	BlockManager      BlockManagerConfig      `json:"blockmanager"`
-	BlockCache        BlockCacheConfig        `json:"blockcache"`
 	Snapshot          SnapshotConfig          `json:"snapshot"`
 	Checkpoint        CheckpointConfig        `json:"checkpoint"`
 	Backup            BackupConfig            `json:"backup"`
@@ -44,15 +42,8 @@ type LSMTreeConfig struct {
 	LSMTreeMaxLevels int `json:"lsmtree_max_levels"`
 }
 
-type CacheConfig struct {
-	CacheMaxSize int `json:"cache_max_size"`
-}
-
 type BlockManagerConfig struct {
-	BlockSize int `json:"block_size"`
-}
-
-type BlockCacheConfig struct {
+	BlockSize           int `json:"block_size"`
 	BlockCacheMaxBlocks int `json:"blockcache_max_blocks"`
 }
 
@@ -84,7 +75,10 @@ type BloomFilterConfig struct {
 }
 
 type CountMinSketchConfig struct {
-	Enabled bool `json:"enabled"`
+	Enabled    bool     `json:"enabled"`
+	Accuracy   float64  `json:"accuracy"`
+	Confidence float64  `json:"confidence"`
+	Seeds      [][]byte `json:"seeds"`
 }
 
 type HyperLogLogConfig struct {
