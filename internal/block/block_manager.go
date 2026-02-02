@@ -85,3 +85,8 @@ func (bm *BlockManager) WriteAt(f *os.File, key BlockKey, value []byte) error {
 
 	return nil
 }
+
+// Helper da drugi paketi mogu da naprave BlockKey bez diranja struct polja
+func NewBlockKey(filePath string, offset uint32) BlockKey {
+	return BlockKey{filePath: filePath, offset: offset}
+}
