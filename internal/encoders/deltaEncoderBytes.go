@@ -53,6 +53,12 @@ func (de *DeltaEncoderBytes) Decode(buf []byte, pos *int) ([]byte, error) {
 		return nil, errors.New("invalid nonshared prefix")
 	}
 	*pos += n
+	if int(shared) > len(de.prevKey) {
+		return nil, errors.New("shared prefix exceeds previous key length")
+	}
+	if *pos+int(nonShared) > len(buf) {
+		return nil, errors.New("buffer underflow")
+	}
 	key := make([]byte, int(shared+nonShared))
 	copy(key, de.prevKey[:shared])
 	copy(key[shared:], buf[*pos:*pos+int(nonShared)])
