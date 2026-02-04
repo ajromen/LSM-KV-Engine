@@ -115,11 +115,11 @@ func (ad *AdaptiveDict) EncodeValue(value []byte) (valueType byte, payload []byt
 		for i := range b {
 			if b[i] == cand {
 				ad.candidates[h] = append(b[:i], b[i+1:]...)
+				if len(b) == 0 {
+					delete(ad.candidates, h)
+				}
 				break
 			}
-		}
-		if len(b) == 0 {
-			delete(ad.candidates, h)
 		}
 		return 1, binary.AppendUvarint(nil, uint64(id))
 	}
