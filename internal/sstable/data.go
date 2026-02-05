@@ -1,6 +1,7 @@
 package sstable
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"hash/crc32"
@@ -90,6 +91,18 @@ func (d *DataBlockBuilder) Restart() {
 
 func (d *DataBlockBuilder) Size() int {
 	return len(d.buf)
+}
+
+func (d *DataBlockBuilder) Encoder() *encoders.DeltaEncoderBytes {
+	return d.encoder
+}
+
+func (d *DataBlockBuilder) Buffer() []byte {
+	return d.buf
+}
+
+func (d *DataBlockBuilder) RestartInterval() int {
+	return d.restartInterval
 }
 
 func (d *DataBlockBuilder) RecordCount() int {
@@ -259,6 +272,155 @@ func (d *DataBlockReader) Next() (*Record, error) {
 	}, nil
 }
 
+func (d *DataBlockReader) Data() []byte {
+	return d.data
+}
+
+func (d *DataBlockReader) Decoder() *encoders.DeltaEncoderBytes {
+	return d.decoder
+}
+
+func (d *DataBlockReader) RestartArray() []uint32 {
+	return d.restartArray
+}
+
+func (d *DataBlockReader) Compression() string {
+	switch d.compression {
+	case CompressionNone:
+		return "NONE"
+	case CompressionSnappy:
+		return "SNAPPY"
+	case CompressionZSTD:
+		return "ZSTD"
+	default:
+		return "UNKNOWN"
+	}
+}
+
+func (d *DataBlockReader) Position() int {
+	return d.pos
+}
+
+func (d *DataBlockReader) DataEnd() int {
+	return d.dataEnd
+}
+
 func (d *DataBlockReader) Close() error {
+	return nil
+}
+
+type DataBlockIterator struct {
+	reader  *DataBlockReader
+	current *Record
+	valid   bool
+}
+
+func NewDataBlockIterator(data []byte) (*DataBlockIterator, error) {
+	reader, err := NewDataBlockReader(data)
+	if err != nil {
+		return nil, err
+	}
+	iterator := &DataBlockIterator{
+		reader:  reader,
+		current: nil,
+		valid:   false,
+	}
+	iterator.Rewind()
+	return iterator, nil
+}
+
+func (iterator *DataBlockIterator) Rewind() {
+	iterator.reader.SeekToRestart(0)
+	rec, err := iterator.reader.ReadRecord()
+	if err != nil {
+		iterator.valid = false
+		return
+	}
+	iterator.current = rec
+	iterator.valid = true
+}
+
+func (iterator *DataBlockIterator) HasNext() bool {
+	return iterator.valid && iterator.reader.HasNext()
+}
+
+func (iterator *DataBlockIterator) Next() error {
+	if !iterator.valid {
+		return nil
+	}
+	if !iterator.reader.HasNext() {
+		iterator.valid = false
+		return nil
+	}
+	record, err := iterator.reader.ReadRecord()
+	if err != nil {
+		iterator.valid = false
+		return err
+	}
+	iterator.current = record
+	iterator.valid = true
+	return nil
+}
+
+func (iterator *DataBlockIterator) Seek(target []byte) error {
+	restarts := iterator.reader.restartArray
+	left := 0
+	right := len(restarts) - 1
+	best := 0
+	for left <= right {
+		mid := left + (right-left)/2
+		iterator.reader.SeekToRestart(mid)
+		record, err := iterator.reader.ReadRecord()
+		if err != nil {
+			iterator.valid = false
+			return err
+		}
+		cmp := bytes.Compare(record.Key, target)
+		if cmp < 0 {
+			best = mid
+			left = mid + 1
+		} else {
+			right = mid - 1
+		}
+	}
+	iterator.reader.SeekToRestart(best)
+	iterator.reader.decoder.Reset()
+	for iterator.reader.HasNext() {
+		record, err := iterator.reader.ReadRecord()
+		if err != nil {
+			iterator.valid = false
+			return err
+		}
+		if bytes.Compare(record.Key, target) >= 0 {
+			iterator.current = record
+			iterator.valid = true
+			return nil
+		}
+	}
+	iterator.valid = false
+	return nil
+}
+
+func (iterator *DataBlockIterator) Valid() bool {
+	return iterator.valid
+}
+
+func (iterator *DataBlockIterator) Key() []byte {
+	return iterator.current.Key
+}
+
+func (iterator *DataBlockIterator) Value() []byte {
+	return iterator.current.Value
+}
+
+func (iterator *DataBlockIterator) Timestamp() utils.Uint128 {
+	return iterator.current.Timestamp
+}
+
+func (iterator *DataBlockIterator) Tombstone() bool {
+	return iterator.current.Tombstone
+}
+
+func (iterator *DataBlockIterator) Close() error {
 	return nil
 }

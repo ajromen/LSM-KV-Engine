@@ -315,3 +315,120 @@ func TestDataBlockVisualInspection(t *testing.T) {
 	t.Log("      ALL TESTS PASSED")
 	t.Log("==================================================")
 }
+
+func TestDataBlockIteratorForwardScan(t *testing.T) {
+	t.Log("---- DATA BLOCK ITERATOR TEST ----")
+	builder := NewDataBlockBuilder(2, 1024)
+	records := []Record{
+		{Timestamp: ts(0, 1), Key: []byte("a"), Value: []byte("1")},
+		{Timestamp: ts(0, 2), Key: []byte("b"), Value: []byte("2")},
+		{Timestamp: ts(0, 3), Key: []byte("c"), Value: []byte("3")},
+	}
+	for _, r := range records {
+		builder.AddRecord(r)
+	}
+	block := builder.Finish(CompressionNone)
+	it, err := NewDataBlockIterator(block)
+	if err != nil {
+		t.Fatalf("failed to create iterator: %v", err)
+	}
+	for i := 0; i < len(records); i++ {
+		if !it.Valid() {
+			t.Fatalf("iterator invalid at index %d", i)
+		}
+		if string(it.Key()) != string(records[i].Key) {
+			t.Fatalf("expected key %s, got %s", records[i].Key, it.Key())
+		}
+		it.Next()
+	}
+	if it.Valid() {
+		t.Fatalf("iterator should be invalid after last record")
+	}
+}
+
+func TestDataBlockIteratorSeekExact(t *testing.T) {
+	t.Log("---- DATA BLOCK ITERATOR SEEK TEST (IF KEY EXISTS) ----")
+	builder := NewDataBlockBuilder(1, 1024)
+	keys := []string{"a", "b", "c", "d"}
+	for i, k := range keys {
+		builder.AddRecord(Record{
+			Timestamp: ts(0, uint64(i)),
+			Key:       []byte(k),
+			Value:     []byte("v"),
+		})
+	}
+	block := builder.Finish(CompressionNone)
+	it, _ := NewDataBlockIterator(block)
+
+	err := it.Seek([]byte("c"))
+	if err != nil {
+		t.Fatalf("seek failed: %v", err)
+	}
+	if !it.Valid() {
+		t.Fatalf("iterator invalid after seek")
+	}
+	if string(it.Key()) != "c" {
+		t.Fatalf("expected key c, got %s", it.Key())
+	}
+}
+
+func TestDataBlockIteratorSeekBetweenKeys(t *testing.T) {
+	t.Log("---- DATA BLOCK ITERATOR SEEK TEST (IF KEY DOESNT EXIST) ----")
+	builder := NewDataBlockBuilder(2, 1024)
+	keys := []string{"a", "c", "e"}
+	for i, k := range keys {
+		builder.AddRecord(Record{
+			Timestamp: ts(0, uint64(i)),
+			Key:       []byte(k),
+			Value:     []byte("v"),
+		})
+	}
+	block := builder.Finish(CompressionNone)
+	it, _ := NewDataBlockIterator(block)
+	err := it.Seek([]byte("b"))
+	if err != nil {
+		t.Fatalf("seek failed: %v", err)
+	}
+	if !it.Valid() {
+		t.Fatalf("iterator invalid after seek")
+	}
+	if string(it.Key()) != "c" {
+		t.Fatalf("expected key c, got %s", it.Key())
+	}
+}
+
+func TestDataBlockIteratorSeekPastEnd(t *testing.T) {
+	t.Log("---- DATA BLOCK ITERATOR SEEK TEST PAST THE END ----")
+	builder := NewDataBlockBuilder(2, 1024)
+	builder.AddRecord(Record{Timestamp: ts(0, 1), Key: []byte("a"), Value: []byte("1")})
+	builder.AddRecord(Record{Timestamp: ts(0, 2), Key: []byte("b"), Value: []byte("2")})
+	block := builder.Finish(CompressionNone)
+	it, _ := NewDataBlockIterator(block)
+	err := it.Seek([]byte("z"))
+	if err != nil {
+		t.Fatalf("seek failed: %v", err)
+	}
+	if it.Valid() {
+		t.Fatalf("iterator should be invalid after seek past end")
+	}
+}
+
+func TestDataBlockIteratorRewindAfterSeek(t *testing.T) {
+	t.Log("---- DATA BLOCK ITERATOR REWIND AFTER SEEK TEST ----")
+	builder := NewDataBlockBuilder(1, 1024)
+	builder.AddRecord(Record{Timestamp: ts(0, 1), Key: []byte("a"), Value: []byte("1")})
+	builder.AddRecord(Record{Timestamp: ts(0, 2), Key: []byte("b"), Value: []byte("2")})
+	block := builder.Finish(CompressionNone)
+	it, _ := NewDataBlockIterator(block)
+	it.Seek([]byte("b"))
+	if string(it.Key()) != "b" {
+		t.Fatalf("expected key b after seek")
+	}
+	it.Rewind()
+	if !it.Valid() {
+		t.Fatalf("iterator invalid after rewind")
+	}
+	if string(it.Key()) != "a" {
+		t.Fatalf("expected key a after rewind, got %s", it.Key())
+	}
+}
