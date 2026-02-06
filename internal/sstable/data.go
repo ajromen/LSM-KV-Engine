@@ -329,15 +329,19 @@ func NewDataBlockIterator(data []byte) (*DataBlockIterator, error) {
 	return iterator, nil
 }
 
-func (iterator *DataBlockIterator) Rewind() {
-	iterator.reader.SeekToRestart(0)
+func (iterator *DataBlockIterator) Rewind() error {
+	if err := iterator.reader.SeekToRestart(0); err != nil {
+		iterator.valid = false
+		return err
+	}
 	rec, err := iterator.reader.ReadRecord()
 	if err != nil {
 		iterator.valid = false
-		return
+		return err
 	}
 	iterator.current = rec
 	iterator.valid = true
+	return nil
 }
 
 func (iterator *DataBlockIterator) HasNext() bool {
@@ -379,19 +383,23 @@ func (iterator *DataBlockIterator) Seek(target []byte) error {
 		if cmp < 0 {
 			best = mid
 			left = mid + 1
+		} else if cmp == 0 {
+			iterator.current = record
+			iterator.valid = true
+			return nil
 		} else {
 			right = mid - 1
 		}
 	}
 	iterator.reader.SeekToRestart(best)
-	iterator.reader.decoder.Reset()
 	for iterator.reader.HasNext() {
 		record, err := iterator.reader.ReadRecord()
 		if err != nil {
 			iterator.valid = false
 			return err
 		}
-		if bytes.Compare(record.Key, target) >= 0 {
+		cmp := bytes.Compare(record.Key, target)
+		if cmp >= 0 {
 			iterator.current = record
 			iterator.valid = true
 			return nil
@@ -423,4 +431,134 @@ func (iterator *DataBlockIterator) Tombstone() bool {
 
 func (iterator *DataBlockIterator) Close() error {
 	return nil
+}
+
+type MergeIterator struct {
+	iterator1 *DataBlockIterator
+	iterator2 *DataBlockIterator
+	current   *DataBlockIterator
+	valid     bool
+}
+
+func NewMergeIterator(iterator1, iterator2 *DataBlockIterator) *MergeIterator {
+	iterator := &MergeIterator{
+		iterator1: iterator1,
+		iterator2: iterator2,
+		valid:     iterator1.Valid() || iterator2.Valid(),
+	}
+	if iterator1 != nil && iterator1.Valid() {
+		iterator.valid = true
+	}
+	if iterator2 != nil && iterator2.Valid() {
+		iterator.valid = true
+	}
+	iterator.selectCurrent()
+	return iterator
+}
+
+func (iterator *MergeIterator) selectCurrent() {
+	if !iterator.iterator1.Valid() && !iterator.iterator2.Valid() {
+		iterator.valid = false
+		return
+	}
+	if !iterator.iterator1.Valid() {
+		iterator.current = iterator.iterator2
+		return
+	}
+	if !iterator.iterator2.Valid() {
+		iterator.current = iterator.iterator1
+		return
+	}
+	if iterator.iterator1 == nil || !iterator.iterator1.Valid() {
+		if iterator.iterator2 == nil || !iterator.iterator2.Valid() {
+			iterator.valid = false
+			return
+		}
+		iterator.current = iterator.iterator2
+		return
+	}
+	cmp := bytes.Compare(iterator.iterator1.Key(), iterator.iterator2.Key())
+	if cmp < 0 {
+		iterator.current = iterator.iterator1
+	} else if cmp > 0 {
+		iterator.current = iterator.iterator2
+	} else {
+		if utils.Uint128GE(iterator.iterator1.Timestamp(), iterator.iterator2.Timestamp()) {
+			iterator.current = iterator.iterator1
+		} else {
+			iterator.current = iterator.iterator2
+		}
+	}
+}
+
+func (iterator *MergeIterator) Advance() error {
+	if !iterator.valid {
+		return nil
+	}
+	if !iterator.iterator1.Valid() && !iterator.iterator2.Valid() {
+		iterator.valid = false
+		return nil
+	}
+	if !iterator.iterator1.Valid() {
+		if err := iterator.iterator2.Next(); err != nil {
+			return err
+		}
+	} else if !iterator.iterator2.Valid() {
+		if err := iterator.iterator1.Next(); err != nil {
+			return err
+		}
+	} else {
+		cmp := bytes.Compare(iterator.iterator1.Key(), iterator.iterator2.Key())
+		if cmp == 0 {
+			if err := iterator.iterator1.Next(); err != nil {
+				return err
+			}
+			if err := iterator.iterator2.Next(); err != nil {
+				return err
+			}
+		} else if iterator.current == iterator.iterator1 {
+			if err := iterator.iterator1.Next(); err != nil {
+				return err
+			}
+		} else {
+			if err := iterator.iterator2.Next(); err != nil {
+				return err
+			}
+		}
+	}
+	iterator.selectCurrent()
+	return nil
+}
+
+func (iterator *MergeIterator) Close() error {
+	iterator.iterator1.Close()
+	iterator.iterator2.Close()
+	return nil
+}
+
+func (iterator *MergeIterator) Valid() bool {
+	return iterator.valid
+}
+
+func (iterator *MergeIterator) Next() error {
+	return iterator.Advance()
+}
+
+func (iterator *MergeIterator) Key() []byte {
+	if iterator.current == nil {
+		return nil
+	}
+	return iterator.current.Key()
+}
+
+func (iterator *MergeIterator) Value() []byte {
+	return iterator.current.Value()
+}
+
+func (iterator *MergeIterator) Timestamp() utils.Uint128 {
+	return iterator.current.Timestamp()
+}
+
+func (iterator *MergeIterator) Tombstone() bool {
+	return iterator.current.Tombstone()
 }

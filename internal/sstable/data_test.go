@@ -432,3 +432,124 @@ func TestDataBlockIteratorRewindAfterSeek(t *testing.T) {
 		t.Fatalf("expected key a after rewind, got %s", it.Key())
 	}
 }
+
+func TestMergeIteratorSimpleMerge(t *testing.T) {
+	t.Log("---- MERGE ITERATOR SIMPLE MERGE TEST ----")
+	builder1 := NewDataBlockBuilder(1, 1024)
+	builder1.AddRecord(Record{Timestamp: ts(0, 1), Key: []byte("a"), Value: []byte("1")})
+	builder1.AddRecord(Record{Timestamp: ts(0, 2), Key: []byte("c"), Value: []byte("3")})
+	builder2 := NewDataBlockBuilder(1, 1024)
+	builder2.AddRecord(Record{Timestamp: ts(0, 1), Key: []byte("b"), Value: []byte("2")})
+	builder2.AddRecord(Record{Timestamp: ts(0, 2), Key: []byte("d"), Value: []byte("4")})
+	it1, _ := NewDataBlockIterator(builder1.Finish(CompressionNone))
+	it2, _ := NewDataBlockIterator(builder2.Finish(CompressionNone))
+	merge := NewMergeIterator(it1, it2)
+	expectedKeys := []string{"a", "b", "c", "d"}
+	i := 0
+	for merge.Valid() {
+		if string(merge.Key()) != expectedKeys[i] {
+			t.Fatalf("expected key %s, got %s", expectedKeys[i], merge.Key())
+		}
+		i++
+		merge.Next()
+	}
+	if i != len(expectedKeys) {
+		t.Fatalf("expected %d keys, got %d", len(expectedKeys), i)
+	}
+}
+
+func TestMergeIteratorSameKeyPickNewestTimestamp(t *testing.T) {
+	t.Log("---- MERGE ITERATOR SAME KEY TIMESTAMP TEST ----")
+	builder1 := NewDataBlockBuilder(1, 1024)
+	builder1.AddRecord(Record{
+		Timestamp: ts(0, 10),
+		Key:       []byte("a"),
+		Value:     []byte("old"),
+	})
+	builder2 := NewDataBlockBuilder(1, 1024)
+	builder2.AddRecord(Record{
+		Timestamp: ts(0, 20),
+		Key:       []byte("a"),
+		Value:     []byte("new"),
+	})
+	it1, _ := NewDataBlockIterator(builder1.Finish(CompressionNone))
+	it2, _ := NewDataBlockIterator(builder2.Finish(CompressionNone))
+	merge := NewMergeIterator(it1, it2)
+	if !merge.Valid() {
+		t.Fatalf("merge iterator invalid")
+	}
+	if string(merge.Key()) != "a" {
+		t.Fatalf("expected key a, got %s", merge.Key())
+	}
+	if string(merge.Value()) != "new" {
+		t.Fatalf("expected value 'new', got %s", merge.Value())
+	}
+	merge.Next()
+	if merge.Valid() {
+		t.Fatalf("merge iterator should be exhausted")
+	}
+}
+
+func emptyIterator(t *testing.T) *DataBlockIterator {
+	builder := NewDataBlockBuilder(1, 1024)
+	block := builder.Finish(CompressionNone)
+	it, err := NewDataBlockIterator(block)
+	if err != nil {
+		t.Fatalf("failed to create empty iterator: %v", err)
+	}
+	return it
+}
+
+func TestMergeIteratorOneEmpty(t *testing.T) {
+	t.Log("---- MERGE ITERATOR ONE EMPTY TEST ----")
+	builder := NewDataBlockBuilder(1, 1024)
+	builder.AddRecord(Record{Timestamp: ts(0, 1), Key: []byte("a"), Value: []byte("1")})
+	builder.AddRecord(Record{Timestamp: ts(0, 2), Key: []byte("b"), Value: []byte("2")})
+	it1, _ := NewDataBlockIterator(builder.Finish(CompressionNone))
+	it2 := emptyIterator(t)
+	merge := NewMergeIterator(it1, it2)
+	if !merge.Valid() {
+		t.Fatalf("merge iterator invalid")
+	}
+	if string(merge.Key()) != "a" {
+		t.Fatalf("expected key a, got %s", merge.Key())
+	}
+}
+
+func TestMergeIteratorTombstoneWinsByTimestamp(t *testing.T) {
+	t.Log("---- MERGE ITERATOR TOMBSTONE TEST ----")
+	builder1 := NewDataBlockBuilder(1, 1024)
+	builder1.AddRecord(Record{
+		Timestamp: ts(0, 5),
+		Key:       []byte("a"),
+		Value:     []byte("alive"),
+	})
+	builder2 := NewDataBlockBuilder(1, 1024)
+	builder2.AddRecord(Record{
+		Timestamp: ts(0, 10),
+		Key:       []byte("a"),
+		Tombstone: true,
+	})
+	it1, _ := NewDataBlockIterator(builder1.Finish(CompressionNone))
+	it2, _ := NewDataBlockIterator(builder2.Finish(CompressionNone))
+	merge := NewMergeIterator(it1, it2)
+	if !merge.Tombstone() {
+		t.Fatalf("expected tombstone to win")
+	}
+}
+
+func TestMergeIteratorExhaustion(t *testing.T) {
+	t.Log("---- MERGE ITERATOR EXHAUSTION TEST ----")
+	builder := NewDataBlockBuilder(1, 1024)
+	builder.AddRecord(Record{Timestamp: ts(0, 1), Key: []byte("a"), Value: []byte("1")})
+	it1, _ := NewDataBlockIterator(builder.Finish(CompressionNone))
+	it2, _ := NewDataBlockIterator(builder.Finish(CompressionNone))
+	merge := NewMergeIterator(it1, it2)
+	if !merge.Valid() {
+		t.Fatalf("merge iterator invalid initially")
+	}
+	merge.Next()
+	if merge.Valid() {
+		t.Fatalf("merge iterator should be invalid after consuming all")
+	}
+}
