@@ -32,7 +32,7 @@ const (
 
 type HyperLogLog struct {
 	precision uint8
-	m 		  uint32
+	m         uint32
 	registers []uint8
 	hashFn    HashWithSeed
 }
@@ -52,7 +52,7 @@ func NewHyperLogLogWithPrecision(precision uint8) *HyperLogLog {
 // NewHyperLogLogWithParams pravi HLL sa preciznoscu i seedom
 // Ako je seed prazan onda se generiše se novi
 
-func NewHyperLogLogWithParams (precision uint8, seed []byte) *HyperLogLog {
+func NewHyperLogLogWithParams(precision uint8, seed []byte) *HyperLogLog {
 	if precision < 4 || precision > 18 {
 		precision = DefaultHLLPrecision
 	}
@@ -75,13 +75,13 @@ func NewHyperLogLogWithParams (precision uint8, seed []byte) *HyperLogLog {
 }
 
 // Params vraca parametre HLLa
-func (h *HyperLogLog) Params() (precision uint8, m uint32, seed []byte, std Error float64) {
-	if h == nil{
-		return 0,0, nil, 0
+func (h *HyperLogLog) Params() (precision uint8, m uint32, seed []byte, stdError float64) {
+	if h == nil {
+		return 0, 0, nil, 0
 	}
 	seedCopy := make([]byte, len(h.hashFn.Seed))
 	copy(seedCopy, h.hashFn.Seed)
-	return h.precision,h.m,seedCopy,h.StdError()
+	return h.precision, h.m, seedCopy, h.StdError()
 }
 
 // StdError vraća standardnu grešku procjene (približno 1.04/sqrt(m))
@@ -89,7 +89,7 @@ func (h *HyperLogLog) StdError() float64 {
 	if h == nil || h.m == 0 {
 		return 0
 	}
-	return 1.04/math.Sqrt(float64(h.m))
+	return 1.04 / math.Sqrt(float64(h.m))
 }
 
 // Registers vraća kopiju registara
@@ -97,7 +97,7 @@ func (h *HyperLogLog) Registers() []uint8 {
 	if h == nil {
 		return nil
 	}
-	
+
 	out := make([]uint8, len(h.registers))
 	copy(out, h.registers)
 	return out
@@ -133,9 +133,8 @@ func (h *HyperLogLog) Add(data []byte) {
 	var rank uint8
 
 	if w == 0 {
-		rank = uint8(64 - int(h.precision)) + 1
-	}
-	else {
+		rank = uint8(64-int(h.precision)) + 1
+	} else {
 		rank = uint8(bits.LeadingZeros64(w) + 1)
 	}
 
@@ -159,7 +158,7 @@ func (h *HyperLogLog) Merge(other *HyperLogLog) error {
 	if h.precision != other.precision || h.m != other.m {
 		return fmt.Errorf("nekompatibilni hyperloglog (različita preciznost)")
 	}
-	
+
 	if !bytes.Equal(h.hashFn.Seed, other.hashFn.Seed) {
 		return fmt.Errorf("nekompatibilni hyperloglog (različit seed)")
 	}
@@ -233,16 +232,16 @@ func (h *HyperLogLog) alpha() float64 {
 	}
 }
 
-
 // Binarna serijalizacija
 // Format:
-//   4 bajta  - magic string HLL1
-//   u64      - precision (p)
-//   u64      - m (broj registara treba da bude 2^p)
-//   u64      - seedLen
-//   []byte   - seed
-//   u64      - regsLen (m)
-//   []byte   - registri (uint8)
+//
+//	4 bajta  - magic string HLL1
+//	u64      - precision (p)
+//	u64      - m (broj registara treba da bude 2^p)
+//	u64      - seedLen
+//	[]byte   - seed
+//	u64      - regsLen (m)
+//	[]byte   - registri (uint8)
 func (h *HyperLogLog) WriteTo(writer io.Writer) (int64, error) {
 	if h == nil {
 		return 0, errors.New("nil hyperloglog")
@@ -442,10 +441,11 @@ func (h *HyperLogLog) UnmarshalJSON(data []byte) error {
 // Merge operator podrška (2.3 zadatak): ADD element se zapisuje kao operand (HLM1)
 // EncodeHLLAddOperand pravi merge operand za dodavanje elementa u HLL
 // Format (BigEndian):
-//   4 bajta - magic string HLM1
-//   1 bajt  - kind = 1
-//   u64     - len(element)
-//   []byte  - element
+//
+//	4 bajta - magic string HLM1
+//	1 bajt  - kind = 1
+//	u64     - len(element)
+//	[]byte  - element
 func EncodeHLLAddOperand(element []byte) []byte {
 	var out []byte
 	out = append(out, []byte(hyperLogLogMergeMagic)...)

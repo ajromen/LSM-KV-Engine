@@ -1,4 +1,4 @@
-package probabilistic
+package probabilistics
 
 import (
 	"bytes"
@@ -217,9 +217,9 @@ func TestHyperLogLog_JSONRoundTrip(t *testing.T) {
 }
 
 func TestHyperLogLog_JSONInvalidCases(t *testing.T) {
-	
+
 	j1 := hyperLogLogJSON{
-		Precision: 3, 
+		Precision: 3,
 		Seed:      []byte{1},
 		Registers: make([]uint8, 16),
 	}
@@ -438,7 +438,7 @@ func TestHyperLogLog_MergeHLLBytesIncompatibleSeed(t *testing.T) {
 
 // helper da izbjegnemo dodatni import samo zbog jedne put funkcije
 func putU64BE(dst []byte, v uint64) {
-	_ = dst[7] 
+	_ = dst[7]
 	dst[0] = byte(v >> 56)
 	dst[1] = byte(v >> 48)
 	dst[2] = byte(v >> 40)
