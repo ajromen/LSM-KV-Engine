@@ -20,6 +20,15 @@ func Uint128GE(a, b Uint128) bool {
 	}
 	return a.Low >= b.Low
 }
+func Uint128LT(a, b Uint128) bool {
+	if a.High < b.High {
+		return true
+	}
+	if a.High > b.High {
+		return false
+	}
+	return a.Low < b.Low
+}
 
 // use this for writing uint32 || uint64
 func WriteUvarint(file *os.File, value uint64) error {

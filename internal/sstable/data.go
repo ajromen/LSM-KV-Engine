@@ -4,8 +4,11 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"hash/crc32"
+	"os"
 
+	"github.com/ajromen/LSM-KV-Engine/internal/block"
 	"github.com/ajromen/LSM-KV-Engine/internal/encoders"
 	"github.com/ajromen/LSM-KV-Engine/internal/utils"
 )
@@ -309,6 +312,37 @@ func (d *DataBlockReader) Close() error {
 	return nil
 }
 
+func (d *DataBlockReader) ReadRecordWithMeta() (*Record, uint64, uint64, []byte, error) {
+	if d.pos >= len(d.data) {
+		return nil, 0, 0, nil, errors.New("out of data")
+	}
+	timestamp, n, err := utils.ReadUvarint128FromSlice(d.data[d.pos:])
+	if err != nil {
+		return nil, 0, 0, nil, err
+	}
+	d.pos += n
+	tombstone := d.data[d.pos] == 1
+	d.pos++
+	shared, suffixLen, suffix, key, err := d.decoder.DecodeWithMeta(d.data, &d.pos)
+	if err != nil {
+		return nil, 0, 0, nil, err
+	}
+	valueLen, n := binary.Uvarint(d.data[d.pos:])
+	if n <= 0 {
+		return nil, 0, 0, nil, errors.New("invalid value size")
+	}
+	d.pos += n
+	value := make([]byte, valueLen)
+	copy(value, d.data[d.pos:d.pos+int(valueLen)])
+	d.pos += int(valueLen)
+	return &Record{
+		Timestamp: timestamp,
+		Tombstone: tombstone,
+		Key:       key,
+		Value:     value,
+	}, shared, suffixLen, suffix, nil
+}
+
 type DataBlockIterator struct {
 	reader  *DataBlockReader
 	current *Record
@@ -561,4 +595,176 @@ func (iterator *MergeIterator) Timestamp() utils.Uint128 {
 
 func (iterator *MergeIterator) Tombstone() bool {
 	return iterator.current.Tombstone()
+}
+
+func VisualizeBlock(blockData []byte) error {
+	reader, err := NewDataBlockReader(blockData)
+	if err != nil {
+		return err
+	}
+	fmt.Println("\n==========================================================================================")
+	fmt.Println("VISUALIZING BLOCK")
+	fmt.Println("==========================================================================================")
+	fmt.Print("\nBLOCK METADATA\n")
+	fmt.Printf("Block size: %d bytes\n", len(blockData))
+	fmt.Printf("Data size: %d bytes\n", reader.dataEnd)
+	fmt.Printf("Padding: %d bytes\n", len(blockData)-reader.dataEnd-17)
+	fmt.Printf("Compression: %b \n", reader.compression)
+	fmt.Printf("Restart points: %d\n", len(reader.restartArray))
+	utilization := float64(reader.dataEnd) / float64(len(blockData)) * 100
+	fmt.Printf("Utilization: %.2f%%\n", utilization)
+	fmt.Printf("Restart points offset: \n")
+	for i, offset := range reader.restartArray {
+		fmt.Printf("[%d]=%d", i, offset)
+		if (i+1)%8 == 0 && i < len(reader.restartArray)-1 {
+			fmt.Printf("\n")
+		}
+	}
+	fmt.Println()
+	fmt.Print("\nRECORDS\n")
+	fmt.Println("==========================================================================================")
+	reader.SeekToRestart(0)
+	recordIdx := 0
+	restartIdx := 0
+	nextRestart := uint32(0)
+	if len(reader.restartArray) > 1 {
+		nextRestart = reader.restartArray[1]
+	} else {
+		nextRestart = ^uint32(0)
+	}
+	for reader.HasNext() {
+		startPos := reader.pos
+		isRestart := false
+		if restartIdx < len(reader.restartArray) && uint32(startPos) == reader.restartArray[restartIdx] {
+			isRestart = true
+			if restartIdx < len(reader.restartArray)-1 {
+				nextRestart = reader.restartArray[restartIdx+1]
+			} else {
+				nextRestart = ^uint32(0)
+			}
+			restartIdx++
+		}
+		rec, err := reader.ReadRecord()
+		if err != nil {
+			break
+		}
+		endPos := reader.pos
+		recordSize := endPos - startPos
+		deleted := " "
+		if rec.Tombstone {
+			deleted = "[del]"
+		}
+		restartMarker := ""
+		if isRestart {
+			restartMarker = "[restart]"
+		}
+		valueDisplay := string(rec.Value)
+		if len(valueDisplay) > 40 {
+			valueDisplay = valueDisplay[:37] + "..."
+		}
+		keyDisplay := string(rec.Key)
+		if len(keyDisplay) > 20 {
+			keyDisplay = keyDisplay[:17] + "..."
+		}
+		fmt.Printf(" [%3d] %s %-20s → %-40s", recordIdx, deleted, keyDisplay, valueDisplay)
+		fmt.Printf(" (%d bytes)%s\n", recordSize, restartMarker)
+		recordIdx++
+	}
+	fmt.Println("==========================================================================================")
+	fmt.Printf("Total Records: %d\n", recordIdx)
+	fmt.Println(nextRestart)
+	return nil
+}
+
+func VisualizeDataSegmentFromSSTable(filePath string, blockManager *block.BlockManager) error {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	stat, err := file.Stat()
+	if err != nil {
+		return err
+	}
+	fileSize := stat.Size()
+	fmt.Println("==========================================================================================")
+	fmt.Println("VISUALIZING DATA SEGMENT")
+	fmt.Println("==========================================================================================")
+	fmt.Println("FILE INFO")
+	fmt.Printf("Path: %s\n", filePath)
+	fmt.Printf("Size: %d bytes (%.2f KB)\n", fileSize, float64(fileSize)/1024)
+	fmt.Printf("Block Size: %d bytes\n", blockManager.BlockSize())
+	numBlocks := int(fileSize) / blockManager.BlockSize()
+	fmt.Printf("Blocks: %d\n", numBlocks)
+	for blockIdx := 0; blockIdx < numBlocks; blockIdx++ {
+		fmt.Println("==========================================================================================")
+		fmt.Printf("\nBLOCK %d (offset: %d bytes)\n", blockIdx, blockIdx*blockManager.BlockSize())
+		fmt.Println("==========================================================================================")
+		blockKey := block.BlockKey{
+			FilePath: filePath,
+			Offset:   uint32(blockIdx),
+		}
+		blockData, err := blockManager.Read(blockKey)
+		if err != nil {
+			fmt.Printf("Error reading block: %v\n", err)
+			continue
+		}
+		reader, err := NewDataBlockReader(blockData)
+		if err != nil {
+			fmt.Printf("Error parsing block: %v\n", err)
+			continue
+		}
+		recordCount := 0
+		reader.SeekToRestart(0)
+		for reader.HasNext() {
+			_, err := reader.ReadRecord()
+			if err != nil {
+				break
+			}
+			recordCount++
+		}
+		fmt.Printf("Records: %d\n", recordCount)
+		fmt.Printf("Data Size: %d bytes\n", reader.dataEnd)
+		fmt.Printf("Restart Points: %d\n", len(reader.restartArray))
+		fmt.Printf("Utilization: %.2f%%\n", float64(reader.dataEnd)/float64(blockManager.BlockSize())*100)
+		reader.SeekToRestart(0)
+		fmt.Printf("\nSample Records (first 5):\n")
+		for i := 0; i < 5 && reader.HasNext(); i++ {
+			rec, shared, suffixLen, suffix, err := reader.ReadRecordWithMeta()
+			if err != nil {
+				break
+			}
+			icon := ""
+			if rec.Tombstone {
+				icon = "[del]️"
+			}
+			keyDisplay := string(rec.Key)
+			if len(keyDisplay) > 25 {
+				keyDisplay = keyDisplay[:22] + "..."
+			}
+			valueDisplay := string(rec.Value)
+			if len(valueDisplay) > 30 {
+				valueDisplay = valueDisplay[:27] + "..."
+			}
+			fmt.Printf("[%d] %s %-25s → %s | shared=%d suffixLen=%d suffix=%q\n",
+				i,
+				icon,
+				keyDisplay,
+				valueDisplay,
+				shared,
+				suffixLen,
+				string(suffix),
+			)
+		}
+		if recordCount > 10 {
+			fmt.Printf("... and %d more records\n", recordCount-5)
+		}
+	}
+	fmt.Println("==========================================================================================")
+	fmt.Printf("Summary:\n")
+	fmt.Printf("Total Blocks: %d\n", numBlocks)
+	fmt.Printf("File Size: %d bytes\n", fileSize)
+	fmt.Printf("Avg/block: %.1f records\n", float64(fileSize)/float64(numBlocks)/70.0)
+	fmt.Println("==========================================================================================")
+	return nil
 }

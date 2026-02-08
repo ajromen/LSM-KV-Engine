@@ -55,6 +55,7 @@ func TestDataBlockFinishAndRead(t *testing.T) {
 		}
 	}
 	block := builder.Finish(CompressionNone)
+	VisualizeBlock(block)
 	reader, err := NewDataBlockReader(block)
 	if err != nil {
 		t.Fatalf("failed to create reader: %v", err)
