@@ -1,13 +1,5 @@
 package config
 
-import (
-	"encoding/json"
-	"fmt"
-	"os"
-
-	"github.com/ajromen/LSM-KV-Engine/internal/cli"
-)
-
 type Config struct {
 	WAL               WALConfig               `json:"wal"`
 	Memtable          MemtableConfig          `json:"memtable"`
@@ -35,8 +27,15 @@ type MemtableConfig struct {
 }
 
 type SSTableConfig struct {
-	// Ovo treba imati Index/Filter/Summary/Metadata... samo ne znam jos nista o tome
-	SSTableDataBlockSize int `json:"data_block_size"`
+	DataSegment DataSegmentConfig
+}
+
+type DataSegmentConfig struct {
+	BlockSize           int     `json:"block_size"`
+	RestartInterval     int     `json:"restart_interval"`
+	Compression         string  `json:"compression"`
+	CompressionLevel    int     `json:"compression_level"` // za zstd
+	MinBlockUtilization float64 `json:"min_block_utilization"`
 }
 
 type LSMTreeConfig struct {
