@@ -4,6 +4,7 @@ import (
 	"os"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/block"
+	"github.com/ajromen/LSM-KV-Engine/internal/utils"
 )
 
 type SSTableReader struct {
@@ -125,6 +126,79 @@ func (sri *SSTableScanIterator) Next() error {
 	if sri.currentBlock >= sri.reader.footer.NumDataBlocks {
 		sri.valid = false
 		return nil
+	}
+	if err := sri.loadBlock(); err != nil {
+		sri.valid = false
+		return err
+	}
+	return nil
+}
+
+func (sri *SSTableScanIterator) loadBlock() error {
+	blockKey := block.BlockKey{
+		FilePath: sri.reader.filePath,
+		Offset:   sri.currentBlock,
+	}
+	blockData, err := sri.reader.blockManager.Read(blockKey)
+	if err != nil {
+		return err
+	}
+	iter, err := NewDataBlockIterator(blockData)
+	if err != nil {
+		return err
+	}
+	sri.blockIterator = iter
+	if sri.currentBlock == 0 && sri.startKey != nil {
+		if err := sri.blockIterator.Seek(sri.startKey); err != nil {
+			return err
+		}
+		if !sri.blockIterator.Valid() {
+			sri.valid = false
+			return nil
+		}
+	}
+	if sri.endKey != nil && sri.blockIterator.Valid() && string(sri.blockIterator.Key()) > string(sri.endKey) {
+		sri.valid = false
+		return nil
+	}
+	return nil
+}
+
+func (sri *SSTableScanIterator) Key() []byte {
+	if sri.blockIterator == nil || !sri.valid {
+		return nil
+	}
+	return sri.blockIterator.Key()
+}
+
+func (sri *SSTableScanIterator) Value() []byte {
+	if sri.blockIterator == nil || !sri.valid {
+		return nil
+	}
+	return sri.blockIterator.Value()
+}
+
+func (sri *SSTableScanIterator) Valid() bool {
+	return sri.valid
+}
+
+func (sri *SSTableScanIterator) Timestamp() utils.Uint128 {
+	if sri.blockIterator == nil || !sri.valid {
+		return utils.Uint128{}
+	}
+	return sri.blockIterator.Timestamp()
+}
+
+func (sri *SSTableScanIterator) Tombstone() bool {
+	if sri.blockIterator == nil || !sri.valid {
+		return false
+	}
+	return sri.blockIterator.Tombstone()
+}
+
+func (sri *SSTableScanIterator) Close() error {
+	if sri.blockIterator != nil {
+		return sri.blockIterator.Close()
 	}
 	return nil
 }
