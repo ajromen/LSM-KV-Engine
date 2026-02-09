@@ -1,6 +1,13 @@
 package sstable
 
-import "github.com/ajromen/LSM-KV-Engine/internal/utils"
+import (
+	"encoding/binary"
+	"fmt"
+	"io"
+	"os"
+
+	"github.com/ajromen/LSM-KV-Engine/internal/utils"
+)
 
 const (
 	FooterSize        = 94
@@ -14,7 +21,6 @@ type SegmentHandler struct {
 }
 
 type Footer struct {
-	DataHandler     SegmentHandler
 	FilterHandler   SegmentHandler
 	IndexHandler    SegmentHandler
 	SummaryHandler  SegmentHandler
@@ -38,6 +44,59 @@ func NewFooter(compressionType byte) *Footer {
 		MagicNumber:     MagicNumber,
 	}
 }
+
+func (f *Footer) Encode() []byte {
+	buf := make([]byte, FooterSize)
+	pos := 0
+	binary.LittleEndian.PutUint64(buf[pos:], f.FilterHandler.Offset)
+	pos += 8
+	binary.LittleEndian.PutUint32(buf[pos:], f.FilterHandler.Size)
+	pos += 4
+	// samo ovako nastavi za sve i odradi checksum nad svime na kraju
+	return buf
+}
+
+func (f *Footer) Decode(buf []byte) error {
+	pos := 0
+	f.FilterHandler.Offset = binary.LittleEndian.Uint64(buf[pos:])
+	pos += 8
+	f.FilterHandler.Size = binary.LittleEndian.Uint32(buf[pos:])
+	pos += 4
+	// isto samo nastavljaj dalje i verifikuj magic number i checksum
+	return nil
+}
+
+func (f *Footer) WriteToFile(file *os.File) error {
+	encoded := f.Encode()
+	_, err := file.Write(encoded)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (f *Footer) ReadFromFile(file *os.File) (*Footer, error) {
+	_, err := file.Seek(-FooterSize, io.SeekEnd)
+	if err != nil {
+		return nil, err
+	}
+	buf := make([]byte, FooterSize)
+	n, err := file.Read(buf)
+	if err != nil {
+		return nil, err
+	}
+	if n != FooterSize {
+		return nil, fmt.Errorf("expected %d bytes, got %d", FooterSize, n)
+	}
+	footer := &Footer{}
+	err = footer.Decode(buf)
+	if err != nil {
+		return nil, err
+	}
+	return footer, nil
+}
+
+// zavrsi znaci samo Encode i Decode i odradi Validate
 
 // TODO : ENCODE/DECODE/WRITEFOOTERTOFILE/READFOOTERFROMFILE/VALIDATE/VISUALIZE -> igraj se strahinja sa fajlovima malo
 /*
