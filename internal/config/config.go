@@ -25,14 +25,13 @@ type MemtableConfig struct {
 }
 
 type SSTableConfig struct {
-	DataSegment DataSegmentConfig
+	DataSegment DataSegmentConfig `json:"data_segment"`
 }
 
 type DataSegmentConfig struct {
 	BlockSize           int     `json:"block_size"`
 	RestartInterval     int     `json:"restart_interval"`
-	Compression         string  `json:"compression"`
-	CompressionLevel    int     `json:"compression_level"` // za zstd
+	Compression         byte    `json:"compression"`
 	MinBlockUtilization float64 `json:"min_block_utilization"`
 }
 
@@ -75,8 +74,8 @@ type BloomFilterConfig struct {
 
 type CountMinSketchConfig struct {
 	Enabled    bool     `json:"enabled"`
-	Accuracy   float64  `json:"accuracy"`
-	Confidence float64  `json:"confidence"`
+	Accuracy   float32  `json:"accuracy"`
+	Confidence float32  `json:"confidence"`
 	Seeds      [][]byte `json:"seeds"`
 }
 
