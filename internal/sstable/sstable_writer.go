@@ -25,6 +25,8 @@ type SSTableWriter struct {
 	firstKey     []byte
 	lastKey      []byte
 
+	indexBlock *IndexBlock
+
 	closed      bool
 	compression byte
 }
@@ -48,6 +50,7 @@ func NewSSTableWriter(filePath string, blockManager *block.BlockManager, restart
 		maxKeyLength: 0,
 		firstKey:     nil,
 		lastKey:      nil,
+		indexBlock:   NewIndexBlock(),
 		compression:  compression,
 		closed:       false,
 	}, nil
@@ -87,6 +90,7 @@ func (sw *SSTableWriter) Flush() error {
 	if err := sw.blockManager.WriteAt(sw.file, blockKey, blockData); err != nil {
 		return err
 	}
+	sw.indexBlock.AddFromDataBlock(sw.blockBuilder, sw.blockOffset)
 	sw.blockOffset++
 	sw.numBlocks++
 	sw.blockBuilder.Reset()
@@ -123,9 +127,16 @@ func (sw *SSTableWriter) Close() error {
 	if err := sw.Flush(); err != nil {
 		return fmt.Errorf("failed to flush final block: %w", err)
 	}
+	if _, err := sw.indexBlock.WriteToFile(sw.file); err != nil {
+		return fmt.Errorf("failed to write index block: %w", err)
+	}
 	if err := sw.file.Close(); err != nil {
 		return fmt.Errorf("failed to close file: %w", err)
 	}
 	sw.closed = true
 	return nil
+}
+
+func (sw *SSTableWriter) DebugIndex() *IndexBlock {
+	return sw.indexBlock
 }

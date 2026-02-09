@@ -59,7 +59,7 @@ func TestSSTableMultipleBlocks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create writer: %v", err)
 	}
-	for i := 0; i < 100; i++ {
+	for i := 0; i < 150; i++ {
 		key := []byte(fmt.Sprintf("key_%03d", i))
 		value := []byte("some relatively long value to fill the block faster")
 		rec := Record{
@@ -97,4 +97,15 @@ func TestSSTableMultipleBlocks(t *testing.T) {
 		t.Logf("Successfully created multiple blocks")
 	}
 	VisualizeDataSegmentFromSSTable(testFile, blockManager)
+	t.Logf("\n================ IN-MEMORY INDEX =================")
+	index := writer.DebugIndex()
+	t.Logf("Index entries: %d", len(index.Entries))
+	for i, entry := range index.Entries {
+		t.Logf(
+			"  [%02d] key=%q → blockOffset=%d",
+			i,
+			string(entry.Key),
+			entry.Offset,
+		)
+	}
 }

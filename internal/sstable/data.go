@@ -25,6 +25,7 @@ type DataBlockBuilder struct {
 	restartInterval int
 	recordCount     int
 	blockSize       int
+	firstKey        []byte
 }
 
 func NewDataBlockBuilder(restartInterval int, blockSize int) *DataBlockBuilder {
@@ -37,6 +38,9 @@ func NewDataBlockBuilder(restartInterval int, blockSize int) *DataBlockBuilder {
 }
 
 func (d *DataBlockBuilder) AddRecord(record Record) bool {
+	if d.recordCount == 0 {
+		d.firstKey = append([]byte(nil), record.Key...)
+	}
 	estimatedRestartSize := len(d.encoder.RestartArray)*4 + 4 + 1 + 4
 	estimatedRecordSize := 20 + 1 + 10 + 10 + len(record.Key) + 10 + len(record.Value)
 	if len(d.buf) > 0 && len(d.buf)+estimatedRecordSize+estimatedRestartSize > d.blockSize {
@@ -116,10 +120,15 @@ func (d *DataBlockBuilder) BlockSize() int {
 	return d.blockSize
 }
 
+func (d *DataBlockBuilder) FirstKey() []byte {
+	return d.firstKey
+}
+
 func (d *DataBlockBuilder) Reset() {
 	d.buf = d.buf[:0]
 	d.encoder.Reset()
 	d.recordCount = 0
+	d.firstKey = nil
 }
 
 type DataBlockReader struct {

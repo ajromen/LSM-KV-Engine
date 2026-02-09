@@ -12,6 +12,7 @@ type SSTableReader struct {
 	blockManager *block.BlockManager
 	footer       *Footer
 	fileSize     int64
+	indexBlock   *IndexBlock
 }
 
 func OpenSSTable(filePath string, blockManager *block.BlockManager) (*SSTableReader, error) {
@@ -38,16 +39,23 @@ func (sr *SSTableReader) Get(key []byte) (*Record, bool, error) {
 	// MAIN FUNCTION FOR GET IN SS TABLE
 	// AFTER IMPLEMENTING FILTER,INDEX... THIS WILL BE OPTIMIZED
 	// FOR NOW I ONLY LINEAR SCAN THROUGH ALL BLOCKS JUST CHECKING HOW DATA WORKS
-	for blockIdx := uint32(0); blockIdx < sr.footer.NumDataBlocks; blockIdx++ {
-		record, found, err := sr.getFromBlock(blockIdx, key)
-		if err != nil {
-			return nil, false, err
-		}
-		if found {
-			return record, true, nil
+	if sr.indexBlock == nil || len(sr.indexBlock.Entries) == 0 {
+		for blockIdx := uint32(0); blockIdx < sr.footer.NumDataBlocks; blockIdx++ {
+			record, found, err := sr.getFromBlock(blockIdx, key)
+			if err != nil {
+				return nil, false, err
+			}
+			if found {
+				return record, true, nil
+			}
 		}
 	}
-	return nil, false, nil
+	blockIdx := sr.indexBlock.FindBlock(key)
+	if blockIdx < 0 || blockIdx >= len(sr.indexBlock.Entries) {
+		return nil, false, nil
+	}
+	offset := sr.indexBlock.Entries[blockIdx].Offset
+	return sr.getFromBlock(uint32(offset), key)
 }
 
 func (sr *SSTableReader) getFromBlock(blockIdx uint32, key []byte) (*Record, bool, error) {

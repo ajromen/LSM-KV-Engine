@@ -6,46 +6,61 @@ import (
 	"errors"
 	"hash/crc32"
 	"os"
-
-	"github.com/ajromen/LSM-KV-Engine/internal/utils"
 )
 
 type IndexEntry struct {
-	KeyLength uint64
-	Key       []byte
-	Offset    uint64
+	Key    []byte
+	Offset uint64
+}
+
+func (entry *IndexEntry) EncodedSize() int {
+	keyLen := uint64(len(entry.Key))
+	buf := make([]byte, binary.MaxVarintLen64)
+	varintLen := binary.PutUvarint(buf, keyLen)
+	return varintLen + len(entry.Key) + 8
+}
+
+func (entry *IndexEntry) EncodeTo(buf []byte) int {
+	keyLen := uint64(len(entry.Key))
+	pos := 0
+	n := binary.PutUvarint(buf[pos:], keyLen)
+	pos += n
+	copy(buf[pos:], entry.Key)
+	pos += len(entry.Key)
+	binary.LittleEndian.PutUint64(buf[pos:], entry.Offset)
+	pos += 8
+	return pos
 }
 
 func (entry *IndexEntry) EncodeIndexEntry() []byte {
-	buf := make([]byte, 0, 8+len(entry.Key)+8)
-	buf = utils.AppendUvarint(buf, entry.KeyLength)
-	buf = append(buf, entry.Key...)
-	temp := make([]byte, 8)
-	binary.LittleEndian.PutUint64(temp, entry.Offset)
-	buf = append(buf, temp...)
+	size := entry.EncodedSize()
+	buf := make([]byte, size)
+	entry.EncodeTo(buf)
 	return buf
 }
 
 func DecodeIndexEntry(buf []byte) (*IndexEntry, int, error) {
-	numRead := 0
+	if len(buf) < 9 {
+		return nil, 0, errors.New("Buffer too small")
+	}
 	pos := 0
 	keyLength, n := binary.Uvarint(buf[pos:])
 	if n <= 0 {
-		return nil, 0, errors.New("invalid index key length")
+		return nil, 0, errors.New("Invalid index key length")
 	}
 	pos += n
-	numRead += n
-	key := make([]byte, int(keyLength))
+	if pos+int(keyLength)+8 > len(buf) {
+		return nil, 0, errors.New("Buffer too small")
+	}
+	key := make([]byte, keyLength)
 	copy(key, buf[pos:pos+int(keyLength)])
 	pos += int(keyLength)
-	numRead += int(keyLength)
-	offset := binary.LittleEndian.Uint64(buf[pos : pos+8])
-	numRead += 8
+	offset := binary.LittleEndian.Uint64(buf[pos:])
+	pos += 8
 	return &IndexEntry{
-		KeyLength: keyLength,
-		Key:       key,
-		Offset:    offset,
-	}, numRead, nil
+		Key:    key,
+		Offset: offset,
+	}, pos, nil
 }
 
 type IndexBlock struct {
@@ -54,7 +69,7 @@ type IndexBlock struct {
 
 func NewIndexBlock() *IndexBlock {
 	return &IndexBlock{
-		Entries: make([]IndexEntry, 0),
+		Entries: make([]IndexEntry, 0, 256),
 	}
 }
 
@@ -63,26 +78,34 @@ func (block *IndexBlock) AddEntry(entry IndexEntry) {
 }
 
 func (block *IndexBlock) EncodeIndexBlock() []byte {
-	buf := make([]byte, 4)
-	binary.LittleEndian.PutUint32(buf, uint32(len(block.Entries)))
-	for _, entry := range block.Entries {
-		buf = append(buf, entry.EncodeIndexEntry()...)
+	totalSize := block.Size()
+	buf := make([]byte, totalSize)
+	pos := 0
+	binary.LittleEndian.PutUint32(buf[pos:], uint32(len(block.Entries)))
+	pos += 4
+	for i := range block.Entries {
+		n := block.Entries[i].EncodeTo(buf[pos:])
+		pos += n
 	}
-	crc := crc32.ChecksumIEEE(buf)
-	temp := make([]byte, 4)
-	binary.LittleEndian.PutUint32(temp, crc)
-	buf = append(buf, temp...)
+	crc := crc32.ChecksumIEEE(buf[:pos])
+	binary.LittleEndian.PutUint32(buf[pos:], crc)
 	return buf
 }
 
 func DecodeIndexBlock(buf []byte) (*IndexBlock, error) {
+	if len(buf) < 8 {
+		return nil, errors.New("Buffer too small")
+	}
 	crcPos := len(buf) - 4
-	expected := binary.LittleEndian.Uint32(buf[crcPos : crcPos+4])
+	expected := binary.LittleEndian.Uint32(buf[crcPos:])
 	crc := crc32.ChecksumIEEE(buf[:crcPos])
 	if expected != crc {
 		return nil, errors.New("crc mismatch")
 	}
 	numEntries := binary.LittleEndian.Uint32(buf[0:4])
+	if numEntries == 0 {
+		return &IndexBlock{Entries: []IndexEntry{}}, nil
+	}
 	pos := 4
 	entries := make([]IndexEntry, 0, numEntries)
 	for i := 0; i < int(numEntries); i++ {
@@ -102,14 +125,23 @@ func (block *IndexBlock) FindBlock(key []byte) int {
 	if len(block.Entries) == 0 {
 		return -1
 	}
+	if bytes.Compare(key, block.Entries[0].Key) < 0 {
+		return -1
+	}
+	lastIdx := len(block.Entries) - 1
+	if bytes.Compare(key, block.Entries[lastIdx].Key) >= 0 {
+		return lastIdx
+	}
 	left := 0
-	right := len(block.Entries) - 1
+	right := lastIdx
 	result := -1
 	for left <= right {
 		mid := left + (right-left)/2
 		cmp := bytes.Compare(key, block.Entries[mid].Key)
 		if cmp < 0 {
 			right = mid - 1
+		} else if cmp == 0 {
+			return mid
 		} else {
 			result = mid
 			left = mid + 1
@@ -119,7 +151,12 @@ func (block *IndexBlock) FindBlock(key []byte) int {
 }
 
 func (block *IndexBlock) Size() int {
-	return len(block.EncodeIndexBlock())
+	size := 4
+	for i := range block.Entries {
+		size += block.Entries[i].EncodedSize()
+	}
+	size += 4
+	return size
 }
 
 func (block *IndexBlock) WriteToFile(file *os.File) (int, error) {
@@ -140,4 +177,17 @@ func ReadFromFile(file *os.File, offset uint64, size int) (*IndexBlock, error) {
 		return nil, err
 	}
 	return DecodeIndexBlock(data)
+}
+
+func (block *IndexBlock) AddFromDataBlock(dataBlock *DataBlockBuilder, offset uint32) {
+	firstKey := dataBlock.FirstKey()
+	if firstKey == nil || len(firstKey) == 0 {
+		return
+	}
+	keyCopy := make([]byte, len(firstKey))
+	copy(keyCopy, firstKey)
+	block.AddEntry(IndexEntry{
+		Key:    keyCopy,
+		Offset: uint64(offset),
+	})
 }
