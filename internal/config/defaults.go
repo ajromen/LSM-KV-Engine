@@ -1,7 +1,12 @@
 package config
 
 // Za sva podešavanja koja nedostaju u konfiguracionom fajlu sistem treba da dodeli
-//default vrednosti koje se navode u kodu
+// default vrednosti koje se navode u kodu
+const (
+	CompressionNone   byte = 0
+	CompressionSnappy byte = 1
+	CompressionZSTD   byte = 2
+)
 
 // Engine defaults
 const (
@@ -13,7 +18,10 @@ const (
 	DefaultMemtableMaxEntries = 1000
 
 	//SSTable
-	DefaultSSTableBlockSize = 16
+	DefaultSSTableBlockSize           = 16
+	DefaultSSTableRestartInterval     = 4
+	DefaultSSTableCompression         = CompressionNone
+	DefaultSSTableMinBlockUtilization = 0.8
 
 	//SkipList
 	DefaultSkipListMaxLevel = 16
@@ -37,7 +45,12 @@ func NewDefaultConfig() *Config {
 			MemtableMaxSize: DefaultMemtableMaxEntries,
 		},
 		SSTable: SSTableConfig{
-			SSTableDataBlockSize: DefaultSSTableBlockSize,
+			DataSegment: DataSegmentConfig{
+				BlockSize:           DefaultSSTableBlockSize,
+				RestartInterval:     DefaultSSTableRestartInterval,
+				Compression:         DefaultSSTableCompression,
+				MinBlockUtilization: DefaultSSTableMinBlockUtilization,
+			},
 		},
 		SkipList: SkipListConfig{
 			MaxLevel: DefaultSkipListMaxLevel,
