@@ -5,7 +5,6 @@ type Config struct {
 	Memtable          MemtableConfig          `json:"memtable"`
 	SSTable           SSTableConfig           `json:"sstable"`
 	LSMTree           LSMTreeConfig           `json:"lsmtree"`
-	Cache             CacheConfig             `json:"cache"`
 	BlockManager      BlockManagerConfig      `json:"blockmanager"`
 	Snapshot          SnapshotConfig          `json:"snapshot"`
 	Checkpoint        CheckpointConfig        `json:"checkpoint"`
@@ -39,10 +38,6 @@ type DataSegmentConfig struct {
 type LSMTreeConfig struct {
 	// Ovde ce jos trebati sa Compaction raditi
 	LSMTreeMaxLevels int `json:"lsmtree_max_levels"`
-}
-
-type CacheConfig struct {
-	CacheMaxSize int `json:"cache_max_size"`
 }
 
 type BlockManagerConfig struct {
