@@ -7,7 +7,6 @@ type Config struct {
 	LSMTree           LSMTreeConfig           `json:"lsmtree"`
 	Cache             CacheConfig             `json:"cache"`
 	BlockManager      BlockManagerConfig      `json:"blockmanager"`
-	BlockCache        BlockCacheConfig        `json:"blockcache"`
 	Snapshot          SnapshotConfig          `json:"snapshot"`
 	Checkpoint        CheckpointConfig        `json:"checkpoint"`
 	Backup            BackupConfig            `json:"backup"`
@@ -27,14 +26,13 @@ type MemtableConfig struct {
 }
 
 type SSTableConfig struct {
-	DataSegment DataSegmentConfig
+	DataSegment DataSegmentConfig `json:"data_segment"`
 }
 
 type DataSegmentConfig struct {
 	BlockSize           int     `json:"block_size"`
 	RestartInterval     int     `json:"restart_interval"`
-	Compression         string  `json:"compression"`
-	CompressionLevel    int     `json:"compression_level"` // za zstd
+	Compression         byte    `json:"compression"`
 	MinBlockUtilization float64 `json:"min_block_utilization"`
 }
 
@@ -48,10 +46,7 @@ type CacheConfig struct {
 }
 
 type BlockManagerConfig struct {
-	BlockSize int `json:"block_size"`
-}
-
-type BlockCacheConfig struct {
+	BlockSize           int `json:"block_size"`
 	BlockCacheMaxBlocks int `json:"blockcache_max_blocks"`
 }
 
@@ -83,7 +78,10 @@ type BloomFilterConfig struct {
 }
 
 type CountMinSketchConfig struct {
-	Enabled bool `json:"enabled"`
+	Enabled    bool     `json:"enabled"`
+	Accuracy   float32  `json:"accuracy"`
+	Confidence float32  `json:"confidence"`
+	Seeds      [][]byte `json:"seeds"`
 }
 
 type HyperLogLogConfig struct {
