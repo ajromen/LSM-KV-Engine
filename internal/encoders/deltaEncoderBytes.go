@@ -87,3 +87,27 @@ func (de *DeltaEncoderBytes) WriteRestartArray(buf []byte) []byte {
 	buf = binary.LittleEndian.AppendUint32(buf, uint32(len(de.restartArray)))
 	return buf
 }
+
+func (d *DeltaEncoderBytes) DecodeWithMeta(data []byte, pos *int) (shared uint64, suffixLen uint64, suffix []byte, key []byte, err error) {
+	start := *pos
+	shared, n := binary.Uvarint(data[*pos:])
+	if n <= 0 {
+		return 0, 0, nil, nil, errors.New("invalid shared len")
+	}
+	*pos += n
+	suffixLen, n = binary.Uvarint(data[*pos:])
+	if n <= 0 {
+		return 0, 0, nil, nil, errors.New("invalid suffix len")
+	}
+	*pos += n
+	if *pos+int(suffixLen) > len(data) {
+		return 0, 0, nil, nil, errors.New("suffix overflow")
+	}
+	suffix = data[*pos : *pos+int(suffixLen)]
+	*pos += int(suffixLen)
+	prefix := d.prevKey[:shared]
+	key = append(append([]byte{}, prefix...), suffix...)
+	d.prevKey = key
+	_ = start
+	return
+}
