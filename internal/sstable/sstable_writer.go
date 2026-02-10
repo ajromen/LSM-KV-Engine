@@ -3,18 +3,18 @@ package sstable
 import (
 	"errors"
 	"fmt"
-	"os"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/block"
+	"github.com/ajromen/LSM-KV-Engine/internal/config"
 	"github.com/ajromen/LSM-KV-Engine/internal/utils"
 )
 
 type SSTableWriter struct {
 	filePath     string
-	file         *os.File
+	config       *config.Config
+	storage      SegmentStorage
 	blockManager *block.BlockManager
 	blockBuilder *DataBlockBuilder
-	blockOffset  uint32
 
 	numBlocks    uint32
 	numRecords   uint64
@@ -31,17 +31,20 @@ type SSTableWriter struct {
 	compression byte
 }
 
-func NewSSTableWriter(filePath string, blockManager *block.BlockManager, restartInterval int, compression byte) (*SSTableWriter, error) {
-	file, err := os.OpenFile(filePath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644)
+func NewSSTableWriter(filePath string, blockManager *block.BlockManager, cnfig *config.Config) (*SSTableWriter, error) {
+	if cnfig == nil {
+		cnfig = config.NewDefaultConfig()
+	}
+	storage, err := CreateStorage(filePath, cnfig)
 	if err != nil {
 		return nil, err
 	}
 	return &SSTableWriter{
 		filePath:     filePath,
-		file:         file,
+		config:       cnfig,
+		storage:      storage,
 		blockManager: blockManager,
-		blockBuilder: NewDataBlockBuilder(restartInterval, blockManager.BlockSize()),
-		blockOffset:  0,
+		blockBuilder: NewDataBlockBuilder(cnfig.SSTable.DataSegment.RestartInterval, blockManager.BlockSize()),
 		numBlocks:    0,
 		numRecords:   0,
 		minTimestamp: utils.Uint128{High: ^uint64(0), Low: ^uint64(0)},
@@ -51,7 +54,7 @@ func NewSSTableWriter(filePath string, blockManager *block.BlockManager, restart
 		firstKey:     nil,
 		lastKey:      nil,
 		indexBlock:   NewIndexBlock(),
-		compression:  compression,
+		compression:  cnfig.SSTable.DataSegment.Compression,
 		closed:       false,
 	}, nil
 }
@@ -76,22 +79,16 @@ func (sw *SSTableWriter) Add(record Record) error {
 }
 
 func (sw *SSTableWriter) Flush() error {
-	if sw.file == nil {
-		return nil
-	}
 	if sw.blockBuilder.recordCount == 0 {
 		return errors.New("no records to write")
 	}
 	blockData := sw.blockBuilder.Finish(sw.compression)
-	blockKey := block.BlockKey{
-		FilePath: sw.filePath,
-		Offset:   sw.blockOffset,
-	}
-	if err := sw.blockManager.WriteAt(sw.file, blockKey, blockData); err != nil {
+	_, _, err := sw.storage.WriteSegment(config.SegmentData, blockData)
+	if err != nil {
 		return err
 	}
-	sw.indexBlock.AddFromDataBlock(sw.blockBuilder, sw.blockOffset)
-	sw.blockOffset++
+	blockOffset := sw.numBlocks
+	sw.indexBlock.AddFromDataBlock(sw.blockBuilder, blockOffset)
 	sw.numBlocks++
 	sw.blockBuilder.Reset()
 	return nil
@@ -124,14 +121,35 @@ func (sw *SSTableWriter) Close() error {
 	if sw.closed {
 		return nil
 	}
-	if err := sw.Flush(); err != nil {
-		return fmt.Errorf("failed to flush final block: %w", err)
+	if sw.blockBuilder.RecordCount() > 0 {
+		if err := sw.Flush(); err != nil {
+			return fmt.Errorf("failed to flush final block: %w", err)
+		}
 	}
-	if _, err := sw.indexBlock.WriteToFile(sw.file); err != nil {
+	indexData := sw.indexBlock.EncodeIndexBlock()
+	indexOffset, indexSize, err := sw.storage.WriteSegment(config.SegmentIndex, indexData)
+	if err != nil {
 		return fmt.Errorf("failed to write index block: %w", err)
 	}
-	if err := sw.file.Close(); err != nil {
-		return fmt.Errorf("failed to close file: %w", err)
+	footer := NewFooter(sw.config.SSTable)
+	footer.NumDataBlocks = sw.numBlocks
+	footer.TotalRecords = sw.numRecords
+	footer.MinTimeStamp = sw.minTimestamp
+	footer.MaxTimeStamp = sw.maxTimestamp
+	footer.MinKeyLength = sw.minKeyLength
+	footer.MaxKeyLength = sw.maxKeyLength
+	footer.IndexHandler = SegmentHandler{
+		Offset: indexOffset,
+		Size:   indexSize,
+	}
+	if err := footer.WriteToStorage(sw.storage); err != nil {
+		return fmt.Errorf("failed to write footer: %w", err)
+	}
+	if err := sw.storage.Sync(); err != nil {
+		return fmt.Errorf("failed to sync storage: %w", err)
+	}
+	if err := sw.storage.Close(); err != nil {
+		return fmt.Errorf("failed to close storage: %w", err)
 	}
 	sw.closed = true
 	return nil

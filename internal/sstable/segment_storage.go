@@ -202,15 +202,15 @@ func (m *MultiFileStorage) Sync() error {
 	return lastErr
 }
 
-func CreateStorage(basePath string, config config.SSTableConfig) (SegmentStorage, error) {
-	if config.Format == 0 {
+func CreateStorage(basePath string, config *config.Config) (SegmentStorage, error) {
+	if config.SSTable.Format == 0 {
 		return NewSingleFileStorage(basePath)
 	}
 	return NewMultiFileStorage(basePath)
 }
 
-func OpenStorage(basePath string, config config.SSTableConfig) (SegmentStorage, error) {
-	if config.Format == 1 {
+func OpenStorage(basePath string, config *config.Config) (SegmentStorage, error) {
+	if config.SSTable.Format == 0 {
 		return OpenSingleFileStorage(basePath)
 	}
 	return OpenMultiFileStorage(basePath)

@@ -1,43 +1,68 @@
 package sstable
 
 import (
-	"os"
+	"fmt"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/block"
+	"github.com/ajromen/LSM-KV-Engine/internal/config"
 	"github.com/ajromen/LSM-KV-Engine/internal/utils"
 )
 
 type SSTableReader struct {
 	filePath     string
+	config       *config.Config
+	storage      SegmentStorage
 	blockManager *block.BlockManager
 	footer       *Footer
-	fileSize     int64
 	indexBlock   *IndexBlock
 }
 
-func OpenSSTable(filePath string, blockManager *block.BlockManager) (*SSTableReader, error) {
-	file, err := os.Open(filePath)
-	if err != nil {
-		return nil, err
+func OpenSSTable(filePath string, blockManager *block.BlockManager, cnfig *config.Config) (*SSTableReader, error) {
+	if cnfig == nil {
+		cnfig = config.NewDefaultConfig()
 	}
-	defer file.Close()
-	fileInfo, err := file.Stat()
+	footer, err := ReadFooterFromFile(filePath)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to read footer: %w", err)
 	}
-	fileSize := fileInfo.Size()
-	footer := &Footer{} // READ FOOTER SHOULD BE CALLED WAITING TO BE IMPLEMENTED ALSO VALIDATION AND SO
+	if err := footer.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid footer: %w", err)
+	}
+	if footer.Format == 0 {
+		cnfig.SSTable.Format = 0
+	} else {
+		cnfig.SSTable.Format = 1
+	}
+	storage, err := OpenStorage(filePath, cnfig)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open storage: %w", err)
+	}
+	var indexBlock *IndexBlock
+	if footer.IndexHandler.Size > 0 {
+		indexData, err := storage.ReadSegment(config.SegmentIndex, footer.IndexHandler.Offset, footer.IndexHandler.Size)
+		if err != nil {
+			storage.Close()
+			return nil, fmt.Errorf("failed to read index block: %w", err)
+		}
+		indexBlock, err = DecodeIndexBlock(indexData)
+		if err != nil {
+			storage.Close()
+			return nil, fmt.Errorf("failed to decode index block: %w", err)
+		}
+	}
 	return &SSTableReader{
 		filePath:     filePath,
+		config:       cnfig,
+		storage:      storage,
 		blockManager: blockManager,
 		footer:       footer,
-		fileSize:     fileSize,
+		indexBlock:   indexBlock,
 	}, nil
 }
 
 func (sr *SSTableReader) Get(key []byte) (*Record, bool, error) {
 	// MAIN FUNCTION FOR GET IN SS TABLE
-	// AFTER IMPLEMENTING FILTER,INDEX... THIS WILL BE OPTIMIZED
+	// AFTER IMPLEMENTING FILTER THIS WILL BE OPTIMIZED
 	// FOR NOW I ONLY LINEAR SCAN THROUGH ALL BLOCKS JUST CHECKING HOW DATA WORKS
 	if sr.indexBlock == nil || len(sr.indexBlock.Entries) == 0 {
 		for blockIdx := uint32(0); blockIdx < sr.footer.NumDataBlocks; blockIdx++ {
@@ -49,9 +74,10 @@ func (sr *SSTableReader) Get(key []byte) (*Record, bool, error) {
 				return record, true, nil
 			}
 		}
+		return nil, false, nil
 	}
 	blockIdx := sr.indexBlock.FindBlock(key)
-	if blockIdx < 0 || blockIdx >= len(sr.indexBlock.Entries) {
+	if blockIdx < 0 {
 		return nil, false, nil
 	}
 	offset := sr.indexBlock.Entries[blockIdx].Offset

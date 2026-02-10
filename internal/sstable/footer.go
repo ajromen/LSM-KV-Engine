@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	FooterSize  = 110
+	FooterSize  = 111
 	MagicNumber = 0x53535442
 )
 
@@ -184,7 +184,7 @@ func (f *Footer) Decode(buf []byte) error {
 	return nil
 }
 
-func (f *Footer) Validate(buf []byte) error {
+func (f *Footer) Validate() error {
 	if f.MagicNumber != MagicNumber {
 		return fmt.Errorf("invalid magic number: %x", f.MagicNumber)
 	}
