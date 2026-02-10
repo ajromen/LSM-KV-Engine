@@ -33,32 +33,25 @@ func (m *Memtables) Put(key string, value []byte) {
 	active := m.tables[m.activeIndex]
 	active.Put(key, value)
 	if active.Flush() {
-		m.rotateOrFlushAll()
+		m.flushOldestAndRotate()
 	}
 }
 
-func (m *Memtables) rotateOrFlushAll() {
-	if m.activeIndex < m.maxTables-1 {
-		m.activeIndex++
-		return
-	}
-	allEntries := make([]MemtableEntry, 0)
-	for i := 0; i < m.maxTables; i++ {
-		entries := m.tables[i].FlushEntries()
-		allEntries = append(allEntries, entries...)
-	}
+func (m *Memtables) flushOldestAndRotate() {
+	oldestIndex := (m.activeIndex + 1) % m.maxTables
+	oldest := m.tables[oldestIndex]
+	entries := oldest.FlushEntries()
 	if m.flushHandler != nil {
-		m.flushHandler(allEntries)
+		m.flushHandler(entries)
 	}
-	for i := 0; i < m.maxTables; i++ {
-		m.tables[i].Reset()
-	}
-	m.activeIndex = 0
+	oldest.Reset()
+	m.activeIndex = oldestIndex
 }
 
 func (m *Memtables) Get(key string) (MemtableEntry, bool) {
-	for i := m.activeIndex; i >= 0; i-- {
-		entry, ok := m.tables[i].Get(key)
+	for i := 0; i < m.maxTables; i++ {
+		idx := (m.activeIndex - i + m.maxTables) % m.maxTables
+		entry, ok := m.tables[idx].Get(key)
 		if ok {
 			if entry.Tombstone {
 				return MemtableEntry{}, false
@@ -73,7 +66,7 @@ func (m *Memtables) Delete(key string) {
 	active := m.tables[m.activeIndex]
 	active.Delete(key)
 	if active.Flush() {
-		m.rotateOrFlushAll()
+		m.flushOldestAndRotate()
 	}
 }
 

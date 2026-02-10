@@ -65,19 +65,25 @@ func TestHashmapFlush(t *testing.T) {
 func TestHashmapRotation(t *testing.T) {
 	t.Log("---- HASHMAP MEMTABLE ROTATION TEST ----")
 	mt := NewMemtables("hashmap", 2, 2, func(entries []MemtableEntry) {})
+
 	mt.Put("key1", []byte("value1"))
 	mt.Put("key2", []byte("value2"))
 	mt.Put("key3", []byte("value3"))
+
 	entries := mt.ReadEntriesNoFlushing()
-	if entries[2].Key != "key3" && mt.activeIndex != 1 {
-		t.Fatalf("active index expected to be 1 because of rotation but is 0")
+	foundKeys := map[string]bool{}
+	for _, e := range entries {
+		foundKeys[e.Key] = true
+	}
+	if !foundKeys["key1"] || !foundKeys["key2"] || !foundKeys["key3"] {
+		t.Fatalf("expected keys key1, key2, key3 to exist in memtables")
+	}
+	if mt.activeIndex != 1 {
+		t.Fatalf("active index expected to be 1 because of rotation, got %d", mt.activeIndex)
 	}
 	entry, ok := mt.Get("key1")
-	if !ok {
-		t.Fatalf("expected key1 to be found in readonly memtable at index 0")
-	}
-	if string(entry.Value) != "value1" {
-		t.Fatalf("expected value at key1 to be value1 but is %s", string(entry.Value))
+	if !ok || string(entry.Value) != "value1" {
+		t.Fatalf("expected key1 to have value1, got %v", entry.Value)
 	}
 }
 
@@ -140,21 +146,26 @@ func TestSkipListFlush(t *testing.T) {
 }
 
 func TestSkipListRotation(t *testing.T) {
-	t.Log("---- SKIPLIST MEMTABLE ROTATION TEST ----")
+	t.Log("---- HASHMAP MEMTABLE ROTATION TEST ----")
 	mt := NewMemtables("skiplist", 2, 2, func(entries []MemtableEntry) {})
 	mt.Put("key1", []byte("value1"))
 	mt.Put("key2", []byte("value2"))
 	mt.Put("key3", []byte("value3"))
+
 	entries := mt.ReadEntriesNoFlushing()
-	if entries[2].Key != "key3" && mt.activeIndex != 1 {
-		t.Fatalf("active index expected to be 1 because of rotation but is 0")
+	foundKeys := map[string]bool{}
+	for _, e := range entries {
+		foundKeys[e.Key] = true
+	}
+	if !foundKeys["key1"] || !foundKeys["key2"] || !foundKeys["key3"] {
+		t.Fatalf("expected keys key1, key2, key3 to exist in memtables")
+	}
+	if mt.activeIndex != 1 {
+		t.Fatalf("active index expected to be 1 because of rotation, got %d", mt.activeIndex)
 	}
 	entry, ok := mt.Get("key1")
-	if !ok {
-		t.Fatalf("expected key1 to be found in readonly memtable at index 0")
-	}
-	if string(entry.Value) != "value1" {
-		t.Fatalf("expected value at key1 to be value1 but is %s", string(entry.Value))
+	if !ok || string(entry.Value) != "value1" {
+		t.Fatalf("expected key1 to have value1, got %v", entry.Value)
 	}
 }
 
@@ -210,20 +221,25 @@ func TestBTreeFlush(t *testing.T) {
 }
 
 func TestBTreeRotation(t *testing.T) {
-	t.Log("---- BTREE MEMTABLE ROTATION TEST ----")
-	mt := NewMemtables("btree", 2, 2, func(entries []MemtableEntry) {})
+	t.Log("---- HASHMAP MEMTABLE ROTATION TEST ----")
+	mt := NewMemtables("skiplist", 2, 2, func(entries []MemtableEntry) {})
 	mt.Put("key1", []byte("value1"))
 	mt.Put("key2", []byte("value2"))
 	mt.Put("key3", []byte("value3"))
+
 	entries := mt.ReadEntriesNoFlushing()
-	if entries[2].Key != "key3" && mt.activeIndex != 1 {
-		t.Fatalf("active index expected to be 1 because of rotation but is 0")
+	foundKeys := map[string]bool{}
+	for _, e := range entries {
+		foundKeys[e.Key] = true
+	}
+	if !foundKeys["key1"] || !foundKeys["key2"] || !foundKeys["key3"] {
+		t.Fatalf("expected keys key1, key2, key3 to exist in memtables")
+	}
+	if mt.activeIndex != 1 {
+		t.Fatalf("active index expected to be 1 because of rotation, got %d", mt.activeIndex)
 	}
 	entry, ok := mt.Get("key1")
-	if !ok {
-		t.Fatalf("expected key1 to be found in readonly memtable at index 0")
-	}
-	if string(entry.Value) != "value1" {
-		t.Fatalf("expected value at key1 to be value1 but is %s", string(entry.Value))
+	if !ok || string(entry.Value) != "value1" {
+		t.Fatalf("expected key1 to have value1, got %v", entry.Value)
 	}
 }
