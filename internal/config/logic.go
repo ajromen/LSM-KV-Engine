@@ -8,6 +8,17 @@ import (
 	"github.com/ajromen/LSM-KV-Engine/internal/cli"
 )
 
+type SegmentType int
+
+const (
+	SegmentData     SegmentType = 0
+	SegmentFilter   SegmentType = 1
+	SegmentIndex    SegmentType = 2
+	SegmentSummary  SegmentType = 3
+	SegmentMetadata SegmentType = 4
+	SegmentFooter   SegmentType = 5
+)
+
 func LoadConfig(flags *cli.FLags) (*Config, error) {
 	cfg := NewDefaultConfig()
 	if flags.ConfigPath != nil {
@@ -82,4 +93,25 @@ func (c *Config) loadFromFile(path string) error {
 		return fmt.Errorf("invalid config format: %w", err)
 	}
 	return nil
+}
+
+func (c *SSTableConfig) SegmentPaths(basePath string) map[SegmentType]string {
+	paths := make(map[SegmentType]string)
+	if c.Format == FormatSingleFile {
+		for _, segType := range []SegmentType{
+			SegmentData, SegmentFilter, SegmentIndex,
+			SegmentSummary, SegmentMetadata, SegmentFooter,
+		} {
+			paths[segType] = basePath
+		}
+	} else {
+		// Each segment has its own file
+		paths[SegmentData] = basePath
+		paths[SegmentFilter] = basePath + ".filter"
+		paths[SegmentIndex] = basePath + ".index"
+		paths[SegmentSummary] = basePath + ".summary"
+		paths[SegmentMetadata] = basePath + ".metadata"
+		paths[SegmentFooter] = basePath + ".footer"
+	}
+	return paths
 }
