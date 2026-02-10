@@ -191,3 +191,50 @@ func (block *IndexBlock) AddFromDataBlock(dataBlock *DataBlockBuilder, offset ui
 		Offset: uint64(offset),
 	})
 }
+
+type IndexSegment struct {
+	Blocks []*IndexBlock
+}
+
+func NewIndexSegment() *IndexSegment {
+	return &IndexSegment{
+		Blocks: make([]*IndexBlock, 0),
+	}
+}
+
+func (seg *IndexSegment) AddBlock(block *IndexBlock) {
+	seg.Blocks = append(seg.Blocks, block)
+}
+
+func (seg *IndexSegment) WriteToFile(file *os.File) ([]uint64, error) {
+	var offsets []uint64
+	var currentOffset uint64 = 0
+	for _, block := range seg.Blocks {
+		offsets = append(offsets, currentOffset)
+		data := block.EncodeIndexBlock()
+		n, err := file.Write(data)
+		if err != nil {
+			return nil, err
+		}
+		currentOffset += uint64(n)
+	}
+	return offsets, nil
+}
+
+func (seg *IndexSegment) ReadBlockFromFile(file *os.File, offset uint64, size int) (*IndexBlock, error) {
+	if _, err := file.Seek(int64(offset), 0); err != nil {
+		return nil, err
+	}
+	data := make([]byte, size)
+	if _, err := file.Read(data); err != nil {
+		return nil, err
+	}
+	return DecodeIndexBlock(data)
+}
+
+func (seg *IndexSegment) AddEntryToBlock(entry IndexEntry, blockSize int) {
+	if len(seg.Blocks) == 0 || len(seg.Blocks[len(seg.Blocks)-1].Entries) >= blockSize {
+		seg.Blocks = append(seg.Blocks, NewIndexBlock())
+	}
+	seg.Blocks[len(seg.Blocks)-1].AddEntry(entry)
+}
