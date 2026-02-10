@@ -25,6 +25,7 @@ type MemtableConfig struct {
 }
 
 type SSTableConfig struct {
+	Format      byte              `json:"format"`
 	DataSegment DataSegmentConfig `json:"data_segment"`
 }
 

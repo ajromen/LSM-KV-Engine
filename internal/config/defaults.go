@@ -8,6 +8,11 @@ const (
 	CompressionZSTD   byte = 2
 )
 
+const (
+	FormatSingleFile byte = 0
+	FormatMultiFile  byte = 1
+)
+
 // Engine defaults
 const (
 	//WAL
@@ -45,6 +50,7 @@ func NewDefaultConfig() *Config {
 			MemtableMaxSize: DefaultMemtableMaxEntries,
 		},
 		SSTable: SSTableConfig{
+			Format: FormatSingleFile,
 			DataSegment: DataSegmentConfig{
 				BlockSize:           DefaultSSTableBlockSize,
 				RestartInterval:     DefaultSSTableRestartInterval,
