@@ -3,169 +3,89 @@ package sstable
 import (
 	"bytes"
 	"testing"
-
-	"github.com/ajromen/LSM-KV-Engine/internal/config"
 )
 
-func TestIndexEntry_EncodeDecode(t *testing.T) {
+// --- MOCK DataBlockBuilder ---
+type MockDataBlockBuilder struct {
+	keys [][]byte
+}
+
+func (m *MockDataBlockBuilder) FirstKey() []byte {
+	if len(m.keys) == 0 {
+		return nil
+	}
+	return m.keys[0]
+}
+
+// ----------------------------
+
+func TestIndexBlockAddEntry(t *testing.T) {
+	t.Log("---- INDEXBLOCK ADD ENTRY TEST ----")
+	ib := NewIndexBlock()
 	entry := IndexEntry{
 		Key:    []byte("apple"),
-		Offset: 12345,
+		Offset: 42,
 	}
-	buf := entry.EncodeIndexEntry()
-	decoded, n, err := DecodeIndexEntry(buf)
-	if err != nil {
-		t.Fatalf("decode failed: %v", err)
+	ib.AddEntry(entry)
+
+	if len(ib.Entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(ib.Entries))
 	}
-	if n != len(buf) {
-		t.Fatalf("decoded bytes mismatch: %d != %d", n, len(buf))
+	if !bytes.Equal(ib.Entries[0].Key, []byte("apple")) {
+		t.Fatalf("expected key apple, got %s", ib.Entries[0].Key)
 	}
-	if !bytes.Equal(decoded.Key, entry.Key) {
-		t.Fatalf("key mismatch")
-	}
-	if decoded.Offset != entry.Offset {
-		t.Fatalf("offset mismatch")
+	if ib.Entries[0].Offset != 42 {
+		t.Fatalf("expected offset 42, got %d", ib.Entries[0].Offset)
 	}
 }
 
-func TestIndexBlock_EncodeDecode(t *testing.T) {
-	cfg := config.NewDefaultConfig()
-	ib := NewIndexBlock(cfg)
-	ib.AddEntry(IndexEntry{Key: []byte("apple"), Offset: 10})
-	ib.AddEntry(IndexEntry{Key: []byte("banana"), Offset: 20})
-	ib.AddEntry(IndexEntry{Key: []byte("carrot"), Offset: 30})
-	data := ib.Encode()
+func TestIndexBlockEncodeDecode(t *testing.T) {
+	t.Log("---- INDEXBLOCK ENCODE/DECODE TEST ----")
+	ib := NewIndexBlock()
+	ib.AddEntry(IndexEntry{Key: []byte("apple"), Offset: 1})
+	ib.AddEntry(IndexEntry{Key: []byte("banana"), Offset: 2})
+
+	data := ib.EncodeIndexBlock()
 	decoded, err := DecodeIndexBlock(data)
 	if err != nil {
-		t.Fatalf("decode failed: %v", err)
+		t.Fatalf("failed to decode: %v", err)
 	}
-	if len(decoded.Entries) != 3 {
-		t.Fatalf("expected 3 entries, got %d", len(decoded.Entries))
-	}
-	for i := range ib.Entries {
-		if !bytes.Equal(decoded.Entries[i].Key, ib.Entries[i].Key) {
-			t.Fatalf("key mismatch at %d", i)
-		}
-		if decoded.Entries[i].Offset != ib.Entries[i].Offset {
-			t.Fatalf("offset mismatch at %d", i)
-		}
-	}
-}
 
-func TestIndexBlock_FindBlock(t *testing.T) {
-	cfg := config.NewDefaultConfig()
-	ib := NewIndexBlock(cfg)
-	keys := []string{"apple", "banana", "carrot", "date"}
-	for i, k := range keys {
-		ib.AddEntry(IndexEntry{Key: []byte(k), Offset: uint64(i)})
-	}
-	tests := []struct {
-		key  string
-		want int
-	}{
-		{"apple", 0},
-		{"banana", 1},
-		{"blueberry", 1},
-		{"carrot", 2},
-		{"zzz", 3},
-		{"aardvark", -1},
-	}
-	for _, tt := range tests {
-		got := ib.FindBlock([]byte(tt.key))
-		if got != tt.want {
-			t.Fatalf("FindBlock(%s) = %d, want %d", tt.key, got, tt.want)
-		}
-	}
-}
-
-func TestIndexBlock_CRCMismatch(t *testing.T) {
-	cfg := config.NewDefaultConfig()
-	ib := NewIndexBlock(cfg)
-	ib.AddEntry(IndexEntry{Key: []byte("apple"), Offset: 1})
-	data := ib.Encode()
-	data[len(data)-1] ^= 0xff
-	if _, err := DecodeIndexBlock(data); err == nil {
-		t.Fatalf("expected CRC error")
-	}
-}
-
-func TestTopLevelIndex_EncodeDecode(t *testing.T) {
-	cfg := config.NewDefaultConfig()
-	tli := NewTopLevelIndex(cfg)
-	tli.AddEntry(TopLevelIndexEntry{
-		FirstKey: []byte("apple"),
-		Offset:   100,
-		Size:     50,
-	})
-	tli.AddEntry(TopLevelIndexEntry{
-		FirstKey: []byte("carrot"),
-		Offset:   200,
-		Size:     60,
-	})
-	data := tli.EncodeTopLevelIndex()
-	decoded, err := DecodeTopLevelIndex(data)
-	if err != nil {
-		t.Fatalf("decode failed: %v", err)
-	}
 	if len(decoded.Entries) != 2 {
-		t.Fatalf("expected 2 entries")
+		t.Fatalf("expected 2 entries after decode, got %d", len(decoded.Entries))
 	}
-	for i := range tli.Entries {
-		if !bytes.Equal(decoded.Entries[i].FirstKey, tli.Entries[i].FirstKey) {
-			t.Fatalf("key mismatch at %d", i)
-		}
-		if decoded.Entries[i].Offset != tli.Entries[i].Offset {
-			t.Fatalf("offset mismatch at %d", i)
-		}
-		if decoded.Entries[i].Size != tli.Entries[i].Size {
-			t.Fatalf("size mismatch at %d", i)
-		}
+	if !bytes.Equal(decoded.Entries[1].Key, []byte("banana")) {
+		t.Fatalf("expected second key banana, got %s", decoded.Entries[1].Key)
+	}
+	if decoded.Entries[1].Offset != 2 {
+		t.Fatalf("expected second offset 2, got %d", decoded.Entries[1].Offset)
 	}
 }
 
-func TestTopLevelIndex_FindIndexBlock(t *testing.T) {
-	cfg := config.NewDefaultConfig()
-	tli := NewTopLevelIndex(cfg)
-	tli.AddEntry(TopLevelIndexEntry{FirstKey: []byte("apple")})
-	tli.AddEntry(TopLevelIndexEntry{FirstKey: []byte("carrot")})
-	tli.AddEntry(TopLevelIndexEntry{FirstKey: []byte("eggplant")})
+func TestIndexBlockFindBlock(t *testing.T) {
+	t.Log("---- INDEXBLOCK FIND BLOCK TEST ----")
+	ib := NewIndexBlock()
+	keys := [][]byte{[]byte("apple"), []byte("banana"), []byte("cherry")}
+	for i, k := range keys {
+		ib.AddEntry(IndexEntry{Key: k, Offset: uint64(i)})
+	}
+
 	tests := []struct {
-		key  string
-		want int
+		key      []byte
+		expected int
 	}{
-		{"apple", 0},
-		{"banana", 0},
-		{"carrot", 1},
-		{"date", 1},
-		{"zzz", 2},
-		{"aardvark", -1},
+		{[]byte("aardvark"), -1},
+		{[]byte("apple"), 0},
+		{[]byte("banana"), 1},
+		{[]byte("blueberry"), 1},
+		{[]byte("cherry"), 2},
+		{[]byte("date"), 2},
 	}
-	for _, tt := range tests {
-		got := tli.FindIndexBlock([]byte(tt.key))
-		if got != tt.want {
-			t.Fatalf("FindIndexBlock(%s) = %d, want %d", tt.key, got, tt.want)
-		}
-	}
-}
 
-func TestTwoLevelIndexBuilder_Build(t *testing.T) {
-	cfg := config.NewDefaultConfig()
-	builder := NewTwoLevelIndexBuilder(2, cfg)
-	builder.AddDataBlock([]byte("apple"), 10)
-	builder.AddDataBlock([]byte("banana"), 20)
-	builder.AddDataBlock([]byte("carrot"), 30)
-	builder.AddDataBlock([]byte("date"), 40)
-	top, blocks := builder.Build()
-	if len(blocks) != 2 {
-		t.Fatalf("expected 2 index blocks, got %d", len(blocks))
-	}
-	if len(top.Entries) != 2 {
-		t.Fatalf("expected 2 top-level entries, got %d", len(top.Entries))
-	}
-	if !bytes.Equal(top.Entries[0].FirstKey, []byte("apple")) {
-		t.Fatalf("wrong first key in block 0")
-	}
-	if !bytes.Equal(top.Entries[1].FirstKey, []byte("carrot")) {
-		t.Fatalf("wrong first key in block 1")
+	for _, tt := range tests {
+		idx := ib.FindBlock(tt.key)
+		if idx != tt.expected {
+			t.Fatalf("FindBlock(%s) = %d; want %d", tt.key, idx, tt.expected)
+		}
 	}
 }

@@ -9,13 +9,12 @@ import (
 )
 
 type SSTableReader struct {
-	filePath      string
-	config        *config.Config
-	storage       SegmentStorage
-	blockManager  *block.BlockManager
-	footer        *Footer
-	topLevelIndex *TopLevelIndex
-	indexCache    *IndexBlockCache
+	filePath     string
+	config       *config.Config
+	storage      SegmentStorage
+	blockManager *block.BlockManager
+	footer       *Footer
+	indexBlock   *IndexBlock
 }
 
 func OpenSSTable(filePath string, blockManager *block.BlockManager, cnfig *config.Config) (*SSTableReader, error) {
@@ -38,58 +37,34 @@ func OpenSSTable(filePath string, blockManager *block.BlockManager, cnfig *confi
 	if err != nil {
 		return nil, fmt.Errorf("failed to open storage: %w", err)
 	}
-	var topLevel *TopLevelIndex
+	var indexBlock *IndexBlock
 	if footer.IndexHandler.Size > 0 {
-		indexData, err := storage.ReadSegment(
-			config.SegmentIndex,
-			footer.IndexHandler.Offset,
-			footer.IndexHandler.Size,
-		)
+		indexData, err := storage.ReadSegment(config.SegmentIndex, footer.IndexHandler.Offset, footer.IndexHandler.Size)
 		if err != nil {
 			storage.Close()
-			return nil, fmt.Errorf("failed to read top level index: %w", err)
+			return nil, fmt.Errorf("failed to read index block: %w", err)
 		}
-		topLevel, err = DecodeTopLevelIndex(indexData)
+		indexBlock, err = DecodeIndexBlock(indexData)
 		if err != nil {
 			storage.Close()
-			return nil, fmt.Errorf("failed to decode top level index: %w", err)
+			return nil, fmt.Errorf("failed to decode index block: %w", err)
 		}
 	}
 	return &SSTableReader{
-		filePath:      filePath,
-		config:        cnfig,
-		storage:       storage,
-		blockManager:  blockManager,
-		footer:        footer,
-		topLevelIndex: topLevel,
-		indexCache:    NewIndexBlockCache(32),
+		filePath:     filePath,
+		config:       cnfig,
+		storage:      storage,
+		blockManager: blockManager,
+		footer:       footer,
+		indexBlock:   indexBlock,
 	}, nil
 }
 
-func (sr *SSTableReader) loadIndexBlock(idx int) (*IndexBlock, error) {
-	entry := sr.topLevelIndex.Entries[idx]
-	cacheKey := fmt.Sprintf("%d", idx)
-	if block, ok := sr.indexCache.Get(cacheKey); ok {
-		return block, nil
-	}
-	data, err := sr.storage.ReadSegment(
-		config.SegmentIndex,
-		entry.Offset,
-		entry.Size,
-	)
-	if err != nil {
-		return nil, err
-	}
-	block, err := DecodeIndexBlock(data)
-	if err != nil {
-		return nil, err
-	}
-	sr.indexCache.Put(cacheKey, block)
-	return block, nil
-}
-
 func (sr *SSTableReader) Get(key []byte) (*Record, bool, error) {
-	if sr.topLevelIndex == nil || len(sr.topLevelIndex.Entries) == 0 {
+	// MAIN FUNCTION FOR GET IN SS TABLE
+	// AFTER IMPLEMENTING FILTER THIS WILL BE OPTIMIZED
+	// FOR NOW I ONLY LINEAR SCAN THROUGH ALL BLOCKS JUST CHECKING HOW DATA WORKS
+	if sr.indexBlock == nil || len(sr.indexBlock.Entries) == 0 {
 		for blockIdx := uint32(0); blockIdx < sr.footer.NumDataBlocks; blockIdx++ {
 			record, found, err := sr.getFromBlock(blockIdx, key)
 			if err != nil {
@@ -101,19 +76,11 @@ func (sr *SSTableReader) Get(key []byte) (*Record, bool, error) {
 		}
 		return nil, false, nil
 	}
-	indexBlockIdx := sr.topLevelIndex.FindIndexBlock(key)
-	if indexBlockIdx < 0 {
+	blockIdx := sr.indexBlock.FindBlock(key)
+	if blockIdx < 0 {
 		return nil, false, nil
 	}
-	indexBlock, err := sr.loadIndexBlock(indexBlockIdx)
-	if err != nil {
-		return nil, false, err
-	}
-	dataBlockIdx := indexBlock.FindBlock(key)
-	if dataBlockIdx < 0 {
-		return nil, false, nil
-	}
-	offset := indexBlock.Entries[dataBlockIdx].Offset
+	offset := sr.indexBlock.Entries[blockIdx].Offset
 	return sr.getFromBlock(uint32(offset), key)
 }
 
@@ -164,22 +131,14 @@ type SSTableScanIterator struct {
 }
 
 func (sr *SSTableReader) NewSSTableScanIterator(startKey []byte, endKey []byte) (*SSTableScanIterator, error) {
-	iter := &SSTableScanIterator{
+	return &SSTableScanIterator{
 		reader:        sr,
 		startKey:      startKey,
 		endKey:        endKey,
 		currentBlock:  0,
 		blockIterator: nil,
 		valid:         true,
-	}
-	if sr.footer.NumDataBlocks > 0 {
-		if err := iter.loadBlock(); err != nil {
-			return nil, fmt.Errorf("failed to load first block: %w", err)
-		}
-	} else {
-		iter.valid = false
-	}
-	return iter, nil
+	}, nil
 }
 
 func (sri *SSTableScanIterator) Next() error {

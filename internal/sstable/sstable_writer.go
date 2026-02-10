@@ -25,7 +25,7 @@ type SSTableWriter struct {
 	firstKey     []byte
 	lastKey      []byte
 
-	indexBuilder *TwoLevelIndexBuilder
+	indexBlock *IndexBlock
 
 	closed      bool
 	compression byte
@@ -39,7 +39,6 @@ func NewSSTableWriter(filePath string, blockManager *block.BlockManager, cnfig *
 	if err != nil {
 		return nil, err
 	}
-
 	return &SSTableWriter{
 		filePath:     filePath,
 		config:       cnfig,
@@ -54,7 +53,7 @@ func NewSSTableWriter(filePath string, blockManager *block.BlockManager, cnfig *
 		maxKeyLength: 0,
 		firstKey:     nil,
 		lastKey:      nil,
-		indexBuilder: NewTwoLevelIndexBuilder(config.NewDefaultConfig().SSTable.IndexSegment.IndexBlockSize, cnfig),
+		indexBlock:   NewIndexBlock(),
 		compression:  cnfig.SSTable.DataSegment.Compression,
 		closed:       false,
 	}, nil
@@ -80,24 +79,16 @@ func (sw *SSTableWriter) Add(record Record) error {
 }
 
 func (sw *SSTableWriter) Flush() error {
-	if sw.blockBuilder.recordCount > 0 {
-		if err := sw.Flush(); err != nil {
-			return err
-		}
-	}
 	if sw.blockBuilder.recordCount == 0 {
 		return errors.New("no records to write")
 	}
-	firstKey := sw.blockBuilder.FirstKey()
-	if firstKey == nil {
-		return errors.New("block has no first key")
-	}
 	blockData := sw.blockBuilder.Finish(sw.compression)
-	blockOffset, _, err := sw.storage.WriteSegment(config.SegmentData, blockData)
+	_, _, err := sw.storage.WriteSegment(config.SegmentData, blockData)
 	if err != nil {
 		return err
 	}
-	sw.indexBuilder.AddDataBlock(firstKey, blockOffset)
+	blockOffset := sw.numBlocks
+	sw.indexBlock.AddFromDataBlock(sw.blockBuilder, blockOffset)
 	sw.numBlocks++
 	sw.blockBuilder.Reset()
 	return nil
@@ -127,33 +118,18 @@ func (sw *SSTableWriter) updateStats(record Record) {
 }
 
 func (sw *SSTableWriter) Close() error {
-	if sw.blockBuilder.recordCount > 0 {
+	if sw.closed {
+		return nil
+	}
+	if sw.blockBuilder.RecordCount() > 0 {
 		if err := sw.Flush(); err != nil {
 			return fmt.Errorf("failed to flush final block: %w", err)
 		}
 	}
-	topLevel, indexBlocks := sw.indexBuilder.Build()
-	indexBlockOffsets := make([]uint64, len(indexBlocks))
-	indexBlockSizes := make([]uint32, len(indexBlocks))
-	for i, indexBlock := range indexBlocks {
-		indexData := indexBlock.Encode()
-		offset, size, err := sw.storage.WriteSegment(config.SegmentIndex, indexData)
-		if err != nil {
-			return fmt.Errorf("failed to write index block %d: %w", i, err)
-		}
-		indexBlockOffsets[i] = offset
-		indexBlockSizes[i] = uint32(size)
-	}
-	for i, entry := range topLevel.Entries {
-		entry.Offset = indexBlockOffsets[i]
-		entry.Size = indexBlockSizes[i]
-		entry.FirstKey = indexBlocks[i].Entries[0].Key
-		topLevel.Entries[i] = entry
-	}
-	topLevelData := topLevel.EncodeTopLevelIndex()
-	topLevelOffset, topLevelSize, err := sw.storage.WriteSegment(config.SegmentIndex, topLevelData)
+	indexData := sw.indexBlock.EncodeIndexBlock()
+	indexOffset, indexSize, err := sw.storage.WriteSegment(config.SegmentIndex, indexData)
 	if err != nil {
-		return fmt.Errorf("failed to write top-level index: %w", err)
+		return fmt.Errorf("failed to write index block: %w", err)
 	}
 	footer := NewFooter(sw.config.SSTable)
 	footer.NumDataBlocks = sw.numBlocks
@@ -163,15 +139,22 @@ func (sw *SSTableWriter) Close() error {
 	footer.MinKeyLength = sw.minKeyLength
 	footer.MaxKeyLength = sw.maxKeyLength
 	footer.IndexHandler = SegmentHandler{
-		Offset: topLevelOffset,
-		Size:   topLevelSize,
+		Offset: indexOffset,
+		Size:   indexSize,
 	}
 	if err := footer.WriteToStorage(sw.storage); err != nil {
 		return fmt.Errorf("failed to write footer: %w", err)
 	}
+	if err := sw.storage.Sync(); err != nil {
+		return fmt.Errorf("failed to sync storage: %w", err)
+	}
+	if err := sw.storage.Close(); err != nil {
+		return fmt.Errorf("failed to close storage: %w", err)
+	}
+	sw.closed = true
 	return nil
 }
 
-func (sw *SSTableWriter) DebugTwoLevelIndex() (*TopLevelIndex, []*IndexBlock) {
-	return sw.indexBuilder.Build()
+func (sw *SSTableWriter) DebugIndex() *IndexBlock {
+	return sw.indexBlock
 }
