@@ -25,8 +25,9 @@ type MemtableConfig struct {
 }
 
 type SSTableConfig struct {
-	Format      byte              `json:"format"`
-	DataSegment DataSegmentConfig `json:"data_segment"`
+	Format       byte               `json:"format"`
+	DataSegment  DataSegmentConfig  `json:"data_segment"`
+	IndexSegment IndexSegmentConfig `json:"index_segment"`
 }
 
 type DataSegmentConfig struct {
@@ -34,6 +35,11 @@ type DataSegmentConfig struct {
 	RestartInterval     int     `json:"restart_interval"`
 	Compression         byte    `json:"compression"`
 	MinBlockUtilization float64 `json:"min_block_utilization"`
+}
+
+type IndexSegmentConfig struct {
+	IndexBlockSize int `json:"index_block_size"`
+	MaxCache       int `json:"max_cache_size"`
 }
 
 type LSMTreeConfig struct {
