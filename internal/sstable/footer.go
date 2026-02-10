@@ -3,6 +3,7 @@ package sstable
 import (
 	"encoding/binary"
 	"fmt"
+	"hash/crc32"
 	"io"
 	"os"
 
@@ -10,9 +11,8 @@ import (
 )
 
 const (
-	FooterSize        = 94
-	MagicNumber       = 0x53535442 // SSTB IN HEX
-	MagicNumberOffset = FooterSize - 8
+	FooterSize  = 110
+	MagicNumber = 0x53535442
 )
 
 type SegmentHandler struct {
@@ -48,31 +48,140 @@ func NewFooter(compressionType byte) *Footer {
 func (f *Footer) Encode() []byte {
 	buf := make([]byte, FooterSize)
 	pos := 0
+
 	binary.LittleEndian.PutUint64(buf[pos:], f.FilterHandler.Offset)
 	pos += 8
 	binary.LittleEndian.PutUint32(buf[pos:], f.FilterHandler.Size)
 	pos += 4
-	// samo ovako nastavi za sve i odradi checksum nad svime na kraju
+
+	binary.LittleEndian.PutUint64(buf[pos:], f.IndexHandler.Offset)
+	pos += 8
+	binary.LittleEndian.PutUint32(buf[pos:], f.IndexHandler.Size)
+	pos += 4
+
+	binary.LittleEndian.PutUint64(buf[pos:], f.SummaryHandler.Offset)
+	pos += 8
+	binary.LittleEndian.PutUint32(buf[pos:], f.SummaryHandler.Size)
+	pos += 4
+
+	binary.LittleEndian.PutUint64(buf[pos:], f.MetaDataHandler.Offset)
+	pos += 8
+	binary.LittleEndian.PutUint32(buf[pos:], f.MetaDataHandler.Size)
+	pos += 4
+
+	binary.LittleEndian.PutUint32(buf[pos:], f.NumDataBlocks)
+	pos += 4
+
+	binary.LittleEndian.PutUint64(buf[pos:], f.MinTimeStamp.Low)
+	binary.LittleEndian.PutUint64(buf[pos+8:], f.MinTimeStamp.High)
+	pos += 16
+
+	binary.LittleEndian.PutUint64(buf[pos:], f.MaxTimeStamp.Low)
+	binary.LittleEndian.PutUint64(buf[pos+8:], f.MaxTimeStamp.High)
+	pos += 16
+
+	binary.LittleEndian.PutUint32(buf[pos:], f.MinKeyLength)
+	pos += 4
+	binary.LittleEndian.PutUint32(buf[pos:], f.MaxKeyLength)
+	pos += 4
+
+	binary.LittleEndian.PutUint64(buf[pos:], f.TotalRecords)
+	pos += 8
+
+	buf[pos] = f.CompressionType
+	pos++
+	buf[pos] = f.Version
+	pos++
+
+	binary.LittleEndian.PutUint32(buf[pos:], f.MagicNumber)
+	pos += 4
+
+	crc := crc32.ChecksumIEEE(buf[:pos])
+	binary.LittleEndian.PutUint32(buf[pos:], crc)
+
 	return buf
 }
 
 func (f *Footer) Decode(buf []byte) error {
+	if len(buf) != FooterSize {
+		return fmt.Errorf("invalid footer size: expected %d, got %d", FooterSize, len(buf))
+	}
+
 	pos := 0
+
 	f.FilterHandler.Offset = binary.LittleEndian.Uint64(buf[pos:])
 	pos += 8
 	f.FilterHandler.Size = binary.LittleEndian.Uint32(buf[pos:])
 	pos += 4
-	// isto samo nastavljaj dalje i verifikuj magic number i checksum
+
+	f.IndexHandler.Offset = binary.LittleEndian.Uint64(buf[pos:])
+	pos += 8
+	f.IndexHandler.Size = binary.LittleEndian.Uint32(buf[pos:])
+	pos += 4
+
+	f.SummaryHandler.Offset = binary.LittleEndian.Uint64(buf[pos:])
+	pos += 8
+	f.SummaryHandler.Size = binary.LittleEndian.Uint32(buf[pos:])
+	pos += 4
+
+	f.MetaDataHandler.Offset = binary.LittleEndian.Uint64(buf[pos:])
+	pos += 8
+	f.MetaDataHandler.Size = binary.LittleEndian.Uint32(buf[pos:])
+	pos += 4
+
+	f.NumDataBlocks = binary.LittleEndian.Uint32(buf[pos:])
+	pos += 4
+
+	f.MinTimeStamp.Low = binary.LittleEndian.Uint64(buf[pos:])
+	f.MinTimeStamp.High = binary.LittleEndian.Uint64(buf[pos+8:])
+	pos += 16
+
+	f.MaxTimeStamp.Low = binary.LittleEndian.Uint64(buf[pos:])
+	f.MaxTimeStamp.High = binary.LittleEndian.Uint64(buf[pos+8:])
+	pos += 16
+
+	f.MinKeyLength = binary.LittleEndian.Uint32(buf[pos:])
+	pos += 4
+	f.MaxKeyLength = binary.LittleEndian.Uint32(buf[pos:])
+	pos += 4
+
+	f.TotalRecords = binary.LittleEndian.Uint64(buf[pos:])
+	pos += 8
+
+	f.CompressionType = buf[pos]
+	pos++
+	f.Version = buf[pos]
+	pos++
+
+	f.MagicNumber = binary.LittleEndian.Uint32(buf[pos:])
+	pos += 4
+
+	f.CRC = binary.LittleEndian.Uint32(buf[pos:])
+
+	return f.Validate(buf)
+}
+
+func (f *Footer) Validate(buf []byte) error {
+	if f.MagicNumber != MagicNumber {
+		return fmt.Errorf("invalid magic number: %x", f.MagicNumber)
+	}
+
+	if f.Version != 1 {
+		return fmt.Errorf("unsupported footer version: %d", f.Version)
+	}
+
+	calculated := crc32.ChecksumIEEE(buf[:FooterSize-4])
+	if calculated != f.CRC {
+		return fmt.Errorf("footer checksum mismatch")
+	}
+
 	return nil
 }
 
 func (f *Footer) WriteToFile(file *os.File) error {
-	encoded := f.Encode()
-	_, err := file.Write(encoded)
-	if err != nil {
-		return err
-	}
-	return nil
+	buf := f.Encode()
+	_, err := file.Write(buf)
+	return err
 }
 
 func (f *Footer) ReadFromFile(file *os.File) (*Footer, error) {
@@ -80,47 +189,21 @@ func (f *Footer) ReadFromFile(file *os.File) (*Footer, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	buf := make([]byte, FooterSize)
 	n, err := file.Read(buf)
 	if err != nil {
 		return nil, err
 	}
+
 	if n != FooterSize {
 		return nil, fmt.Errorf("expected %d bytes, got %d", FooterSize, n)
 	}
+
 	footer := &Footer{}
-	err = footer.Decode(buf)
-	if err != nil {
+	if err := footer.Decode(buf); err != nil {
 		return nil, err
 	}
+
 	return footer, nil
 }
-
-// zavrsi znaci samo Encode i Decode i odradi Validate
-
-// TODO : ENCODE/DECODE/WRITEFOOTERTOFILE/READFOOTERFROMFILE/VALIDATE/VISUALIZE -> igraj se strahinja sa fajlovima malo
-/*
-├─────────────────────────────────────────────────┤
-│                 FOOTER                          │
-│  - Filter Block Offset (8 bytes)                │
-│  - Filter Block Size (4 bytes)                  │
-│  - Index Block Offset (8 bytes)                 │
-│  - Index Block Size (4 bytes)                   │
-│  - Summary Block Offset (8 bytes)               │
-│  - Summary Block Size (4 bytes)                 │
-│  - Metadata Block Offset (8 bytes)              │
-│  - Metadata Block Size (4 bytes)                │
-│  - Number of Data Blocks (4 bytes)              │
-│  - Min Timestamp (16 bytes - uint128)           │
-│  - Max Timestamp (16 bytes - uint128)           │
-│  - Min Key Length (2 bytes)                     │
-│  - Max Key Length (2 bytes)                     │
-│  - Total Records (8 bytes)                      │
-│  - Compression Type (1 byte)                    │
-│  - Version (1 byte)                             │
-│  - Magic Number (4 bytes) "SSTB"                │
-│  - Footer CRC32 (4 bytes)                       │
-│                                                 │
-│              TOTAL: 94 bytes                    │
-└─────────────────────────────────────────────────┘
-*/
