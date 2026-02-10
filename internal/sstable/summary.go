@@ -8,7 +8,7 @@ type SummaryEntry struct {
 	MaxDataOffset uint64 //maximum data block offset in the index block
 }
 
-type Summary struct {
+type SummarySegment struct {
 	MinKey           []byte         //min key (border of index file)
 	Entries          []SummaryEntry //entries (first record of every samplingdegree-nth block
 	MaxKey           []byte         //max key (rigiht border of index file)
