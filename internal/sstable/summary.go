@@ -24,8 +24,8 @@ import (
 )
 
 type SummaryEntry struct {
-	Key    []byte
-	Offset uint64
+	Key              []byte
+	IndexBlockOffset uint64
 }
 
 type SummarySegment struct {
@@ -83,7 +83,7 @@ func (s *SummarySegment) Encode() []byte {
 		copy(buf[pos:], e.Key)
 		pos += len(e.Key)
 
-		binary.LittleEndian.PutUint64(buf[pos:], e.Offset)
+		binary.LittleEndian.PutUint64(buf[pos:], e.IndexBlockOffset)
 		pos += 8
 	}
 
@@ -153,8 +153,8 @@ func DecodeSummarySegment(buf []byte) (*SummarySegment, error) {
 		pos += 8
 
 		entries = append(entries, SummaryEntry{
-			Key:    key,
-			Offset: offset,
+			Key:              key,
+			IndexBlockOffset: offset,
 		})
 	}
 
@@ -248,7 +248,7 @@ func (s *SummarySegment) EstimatedSize() int {
 ////////////////////////////////////////////////////////////
 
 func BuildSummaryFromIndex(
-	indexOffsets []uint64,
+	indexBlockOffsets []uint64,
 	indexBlocks []*IndexBlock,
 	samplingDegree uint32,
 ) *SummarySegment {
@@ -282,8 +282,8 @@ func BuildSummaryFromIndex(
 		keyCopy := append([]byte{}, block.Entries[0].Key...)
 
 		summary.Entries = append(summary.Entries, SummaryEntry{
-			Key:    keyCopy,
-			Offset: indexOffsets[i],
+			Key:              keyCopy,
+			IndexBlockOffset: indexBlockOffsets[i],
 		})
 	}
 

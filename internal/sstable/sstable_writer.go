@@ -1,11 +1,13 @@
 package sstable
 
 import (
+	"crypto/sha256"
 	"errors"
 	"fmt"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/block"
 	"github.com/ajromen/LSM-KV-Engine/internal/config"
+	"github.com/ajromen/LSM-KV-Engine/internal/probabilistics"
 	"github.com/ajromen/LSM-KV-Engine/internal/utils"
 )
 
@@ -25,7 +27,14 @@ type SSTableWriter struct {
 	firstKey     []byte
 	lastKey      []byte
 
-	indexBlock *IndexBlock
+	filterSegment  *FilterSegment
+	indexSegment   *IndexSegment
+	summarySegment *SummarySegment
+	merkleTree     *MerkleTree
+
+	keysForFilter [][]byte
+
+	summarySampling uint32
 
 	closed      bool
 	compression byte
@@ -39,23 +48,29 @@ func NewSSTableWriter(filePath string, blockManager *block.BlockManager, cnfig *
 	if err != nil {
 		return nil, err
 	}
+	var filterSegment *FilterSegment
 	return &SSTableWriter{
-		filePath:     filePath,
-		config:       cnfig,
-		storage:      storage,
-		blockManager: blockManager,
-		blockBuilder: NewDataBlockBuilder(cnfig.SSTable.DataSegment.RestartInterval, blockManager.BlockSize()),
-		numBlocks:    0,
-		numRecords:   0,
-		minTimestamp: utils.Uint128{High: ^uint64(0), Low: ^uint64(0)},
-		maxTimestamp: utils.Uint128{High: 0, Low: 0},
-		minKeyLength: ^uint32(0),
-		maxKeyLength: 0,
-		firstKey:     nil,
-		lastKey:      nil,
-		indexBlock:   NewIndexBlock(),
-		compression:  cnfig.SSTable.DataSegment.Compression,
-		closed:       false,
+		filePath:        filePath,
+		config:          cnfig,
+		storage:         storage,
+		blockManager:    blockManager,
+		blockBuilder:    NewDataBlockBuilder(cnfig.SSTable.DataSegment.RestartInterval, blockManager.BlockSize()),
+		numBlocks:       0,
+		numRecords:      0,
+		minTimestamp:    utils.Uint128{High: ^uint64(0), Low: ^uint64(0)},
+		maxTimestamp:    utils.Uint128{High: 0, Low: 0},
+		minKeyLength:    ^uint32(0),
+		maxKeyLength:    0,
+		firstKey:        nil,
+		lastKey:         nil,
+		keysForFilter:   nil,
+		indexSegment:    NewIndexSegment(),
+		summarySegment:  nil,
+		filterSegment:   filterSegment,
+		merkleTree:      NewMerkleTree(),
+		summarySampling: 1,
+		compression:     cnfig.SSTable.DataSegment.Compression,
+		closed:          false,
 	}, nil
 }
 
@@ -67,6 +82,9 @@ func (sw *SSTableWriter) Add(record Record) error {
 		return errors.New("Keys must be sorted")
 	}
 	sw.updateStats(record)
+	keyCopy := make([]byte, len(record.Key))
+	copy(keyCopy, record.Key)
+	sw.keysForFilter = append(sw.keysForFilter, keyCopy)
 	if !sw.blockBuilder.AddRecord(record) {
 		if err := sw.Flush(); err != nil {
 			return err
@@ -83,12 +101,25 @@ func (sw *SSTableWriter) Flush() error {
 		return errors.New("no records to write")
 	}
 	blockData := sw.blockBuilder.Finish(sw.compression)
+	if sw.merkleTree != nil {
+		blockHash := sha256.Sum256(blockData)
+		sw.merkleTree.AddLeaf(blockHash)
+	}
 	_, _, err := sw.storage.WriteSegment(config.SegmentData, blockData)
 	if err != nil {
 		return err
 	}
-	blockOffset := sw.numBlocks
-	sw.indexBlock.AddFromDataBlock(sw.blockBuilder, blockOffset)
+	logicalBlockIndex := sw.numBlocks
+	firstKey := sw.blockBuilder.FirstKey()
+	if firstKey != nil {
+		indexBlockSize := sw.config.SSTable.IndexSegment.IndexBlockSize
+		keyCopy := make([]byte, len(firstKey))
+		copy(keyCopy, firstKey)
+		sw.indexSegment.AddEntryToBlock(IndexEntry{
+			Key:        keyCopy,
+			BlockIndex: logicalBlockIndex,
+		}, indexBlockSize)
+	}
 	sw.numBlocks++
 	sw.blockBuilder.Reset()
 	return nil
@@ -126,10 +157,61 @@ func (sw *SSTableWriter) Close() error {
 			return fmt.Errorf("failed to flush final block: %w", err)
 		}
 	}
-	indexData := sw.indexBlock.EncodeIndexBlock()
-	indexOffset, indexSize, err := sw.storage.WriteSegment(config.SegmentIndex, indexData)
+	if sw.merkleTree != nil {
+		if err := sw.merkleTree.Build(); err != nil {
+			return fmt.Errorf("failed to build merkle tree: %w", err)
+		}
+	}
+	expectedElements := uint(sw.numRecords)
+	falsePositiveRate := sw.config.ProbabilisticType.BloomFilter.FalsePositiveRate
+	bloom := probabilistics.NewBloomFilterWithParams(
+		expectedElements,
+		float64(falsePositiveRate),
+		nil,
+	)
+	for _, key := range sw.keysForFilter {
+		bloom.Add(key)
+	}
+	sw.filterSegment = NewFilterSegment(bloom)
+	sw.keysForFilter = nil
+	indexBlockOffsets, indexTotalSize, err := sw.writeIndexSegment()
 	if err != nil {
-		return fmt.Errorf("failed to write index block: %w", err)
+		return fmt.Errorf("failed to write index segment: %w", err)
+	}
+	sw.summarySegment = BuildSummaryFromIndex(
+		indexBlockOffsets, // PHYSICAL offsets!
+		sw.indexSegment.Blocks,
+		sw.summarySampling,
+	)
+	summaryData := sw.summarySegment.Encode()
+	summaryOffset, summarySize, err := sw.storage.WriteSegment(config.SegmentSummary, summaryData)
+	if err != nil {
+		return fmt.Errorf("failed to write summary: %w", err)
+	}
+	var filterOffset uint64
+	var filterSize uint32
+	if sw.filterSegment != nil {
+		filterData, err := sw.filterSegment.Encode()
+		if err != nil {
+			return fmt.Errorf("failed to encode filter: %w", err)
+		}
+		filterOffset, filterSize, err = sw.storage.WriteSegment(config.SegmentFilter, filterData)
+		if err != nil {
+			return fmt.Errorf("failed to write filter: %w", err)
+		}
+	}
+	var metadataOffset uint64
+	var metadataSize uint32
+	if sw.merkleTree != nil {
+		merkleData := sw.merkleTree.Encode()
+		metadataOffset, metadataSize, err = sw.storage.WriteSegment(config.SegmentMetadata, merkleData)
+		if err != nil {
+			return fmt.Errorf("failed to write merkle tree: %w", err)
+		}
+	}
+	var indexStartOffset uint64 = 0
+	if len(indexBlockOffsets) > 0 {
+		indexStartOffset = indexBlockOffsets[0]
 	}
 	footer := NewFooter(sw.config.SSTable)
 	footer.NumDataBlocks = sw.numBlocks
@@ -139,8 +221,20 @@ func (sw *SSTableWriter) Close() error {
 	footer.MinKeyLength = sw.minKeyLength
 	footer.MaxKeyLength = sw.maxKeyLength
 	footer.IndexHandler = SegmentHandler{
-		Offset: indexOffset,
-		Size:   indexSize,
+		Offset: indexStartOffset,
+		Size:   indexTotalSize,
+	}
+	footer.SummaryHandler = SegmentHandler{
+		Offset: summaryOffset,
+		Size:   summarySize,
+	}
+	footer.FilterHandler = SegmentHandler{
+		Offset: filterOffset,
+		Size:   filterSize,
+	}
+	footer.MetaDataHandler = SegmentHandler{
+		Offset: metadataOffset,
+		Size:   metadataSize,
 	}
 	if err := footer.WriteToStorage(sw.storage); err != nil {
 		return fmt.Errorf("failed to write footer: %w", err)
@@ -155,6 +249,37 @@ func (sw *SSTableWriter) Close() error {
 	return nil
 }
 
-func (sw *SSTableWriter) DebugIndex() *IndexBlock {
-	return sw.indexBlock
+func (sw *SSTableWriter) writeIndexSegment() ([]uint64, uint32, error) {
+	if len(sw.indexSegment.Blocks) == 0 {
+		return nil, 0, nil
+	}
+	var indexBlockOffsets []uint64
+	var currentOffset uint64 = 0
+	for _, indexBlock := range sw.indexSegment.Blocks {
+		indexBlockData := indexBlock.EncodeIndexBlock()
+		offset, size, err := sw.storage.WriteSegment(config.SegmentIndex, indexBlockData)
+		if err != nil {
+			return nil, 0, err
+		}
+		indexBlockOffsets = append(indexBlockOffsets, offset)
+		currentOffset += uint64(size)
+	}
+	totalSize := uint32(currentOffset)
+	return indexBlockOffsets, totalSize, nil
+}
+
+func (sw *SSTableWriter) GetMerkleTree() *MerkleTree {
+	return sw.merkleTree
+}
+
+func (sw *SSTableWriter) GetIndexSegment() *IndexSegment {
+	return sw.indexSegment
+}
+
+func (sw *SSTableWriter) GetSummarySegment() *SummarySegment {
+	return sw.summarySegment
+}
+
+func (sw *SSTableWriter) GetFilterSegment() *FilterSegment {
+	return sw.filterSegment
 }

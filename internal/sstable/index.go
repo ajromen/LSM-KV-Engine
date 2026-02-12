@@ -9,15 +9,15 @@ import (
 )
 
 type IndexEntry struct {
-	Key    []byte
-	Offset uint64
+	Key        []byte
+	BlockIndex uint32
 }
 
 func (entry *IndexEntry) EncodedSize() int {
 	keyLen := uint64(len(entry.Key))
 	buf := make([]byte, binary.MaxVarintLen64)
 	varintLen := binary.PutUvarint(buf, keyLen)
-	return varintLen + len(entry.Key) + 8
+	return varintLen + len(entry.Key) + 4
 }
 
 func (entry *IndexEntry) EncodeTo(buf []byte) int {
@@ -27,8 +27,8 @@ func (entry *IndexEntry) EncodeTo(buf []byte) int {
 	pos += n
 	copy(buf[pos:], entry.Key)
 	pos += len(entry.Key)
-	binary.LittleEndian.PutUint64(buf[pos:], entry.Offset)
-	pos += 8
+	binary.LittleEndian.PutUint32(buf[pos:], entry.BlockIndex)
+	pos += 4
 	return pos
 }
 
@@ -40,7 +40,7 @@ func (entry *IndexEntry) EncodeIndexEntry() []byte {
 }
 
 func DecodeIndexEntry(buf []byte) (*IndexEntry, int, error) {
-	if len(buf) < 9 {
+	if len(buf) < 5 {
 		return nil, 0, errors.New("Buffer too small")
 	}
 	pos := 0
@@ -49,17 +49,17 @@ func DecodeIndexEntry(buf []byte) (*IndexEntry, int, error) {
 		return nil, 0, errors.New("Invalid index key length")
 	}
 	pos += n
-	if pos+int(keyLength)+8 > len(buf) {
+	if pos+int(keyLength)+4 > len(buf) {
 		return nil, 0, errors.New("Buffer too small")
 	}
 	key := make([]byte, keyLength)
 	copy(key, buf[pos:pos+int(keyLength)])
 	pos += int(keyLength)
-	offset := binary.LittleEndian.Uint64(buf[pos:])
+	blockIndex := binary.LittleEndian.Uint32(buf[pos:])
 	pos += 8
 	return &IndexEntry{
-		Key:    key,
-		Offset: offset,
+		Key:        key,
+		BlockIndex: blockIndex,
 	}, pos, nil
 }
 
@@ -179,7 +179,7 @@ func ReadFromFile(file *os.File, offset uint64, size int) (*IndexBlock, error) {
 	return DecodeIndexBlock(data)
 }
 
-func (block *IndexBlock) AddFromDataBlock(dataBlock *DataBlockBuilder, offset uint32) {
+func (block *IndexBlock) AddFromDataBlock(dataBlock *DataBlockBuilder, blockIdx uint32) {
 	firstKey := dataBlock.FirstKey()
 	if firstKey == nil || len(firstKey) == 0 {
 		return
@@ -187,8 +187,8 @@ func (block *IndexBlock) AddFromDataBlock(dataBlock *DataBlockBuilder, offset ui
 	keyCopy := make([]byte, len(firstKey))
 	copy(keyCopy, firstKey)
 	block.AddEntry(IndexEntry{
-		Key:    keyCopy,
-		Offset: uint64(offset),
+		Key:        keyCopy,
+		BlockIndex: blockIdx,
 	})
 }
 
@@ -209,7 +209,7 @@ func (seg *IndexSegment) AddBlock(block *IndexBlock) {
 func (seg *IndexSegment) WriteToFile(file *os.File) ([]uint64, error) {
 	var offsets []uint64
 	var currentOffset uint64 = 0
-	for _, block := range seg.Blocks {
+	for i, block := range seg.Blocks {
 		offsets = append(offsets, currentOffset)
 		data := block.EncodeIndexBlock()
 		n, err := file.Write(data)
@@ -217,6 +217,9 @@ func (seg *IndexSegment) WriteToFile(file *os.File) ([]uint64, error) {
 			return nil, err
 		}
 		currentOffset += uint64(n)
+		for j := range block.Entries {
+			block.Entries[j].BlockIndex = uint32(i)
+		}
 	}
 	return offsets, nil
 }
@@ -237,4 +240,12 @@ func (seg *IndexSegment) AddEntryToBlock(entry IndexEntry, blockSize int) {
 		seg.Blocks = append(seg.Blocks, NewIndexBlock())
 	}
 	seg.Blocks[len(seg.Blocks)-1].AddEntry(entry)
+}
+
+func (seg *IndexSegment) GetBlockSizes() []int {
+	sizes := make([]int, len(seg.Blocks))
+	for i, block := range seg.Blocks {
+		sizes[i] = block.Size()
+	}
+	return sizes
 }
