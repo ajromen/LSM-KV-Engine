@@ -2,6 +2,7 @@ package block
 
 import (
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/cache"
@@ -14,7 +15,7 @@ type BlockManager struct {
 
 type BlockKey struct {
 	filePath string
-	offset   uint32 // ako je blok 1kb dozvoljava segment size od 4 terabajta (16 bitova daje max 64mb)
+	offset   uint32
 }
 
 func NewBlockManager(blockSize, maxLRUSize int) *BlockManager {
@@ -22,6 +23,11 @@ func NewBlockManager(blockSize, maxLRUSize int) *BlockManager {
 		blockSize: blockSize,
 		cache:     cache.NewLRU[BlockKey, []byte](maxLRUSize),
 	}
+}
+
+// Getter (WAL needs to validate cfg.BlockSize == bm.BlockSize())
+func (bm *BlockManager) BlockSize() int {
+	return bm.blockSize
 }
 
 func (bm *BlockManager) Read(key BlockKey) ([]byte, error) {
@@ -36,57 +42,79 @@ func (bm *BlockManager) Read(key BlockKey) ([]byte, error) {
 	defer f.Close()
 
 	val := make([]byte, bm.blockSize)
-
-	if _, err = f.ReadAt(val, int64(bm.blockSize)*int64(key.offset)); err != nil {
+	_, err = f.ReadAt(val, int64(bm.blockSize)*int64(key.offset))
+	if err != nil && err != io.EOF {
+		// io.EOF might be partial at the end
+		// WAL reads whole blocks, eof shouldnt happen
 		return nil, err
 	}
 
 	bm.cache.Put(key, val)
-
 	return val, nil
 }
 
-// Koristiti ako fajl nije vec otvoren
 func (bm *BlockManager) Write(key BlockKey, value []byte) error {
 	if len(value) != bm.blockSize {
 		return fmt.Errorf("invalid block size")
 	}
 
-	f, err := os.OpenFile(key.filePath, os.O_CREATE|os.O_WRONLY, 0644)
+	f, err := os.OpenFile(key.filePath, os.O_CREATE|os.O_RDWR, 0o644)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
 
 	offset := int64(bm.blockSize) * int64(key.offset)
-
 	if _, err = f.WriteAt(value, offset); err != nil {
 		return err
 	}
 
 	bm.cache.Put(key, value)
-
 	return nil
 }
 
-// WriteAt Sluzi za dopisivanje bloka na kraj fajla (ako mu se prosledi pogresan offset u BlockKey-u nece biti zapisano na kraju)
+func (bm *BlockManager) SyncFile(path string) error {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	return f.Sync()
+}
+
 func (bm *BlockManager) WriteAt(f *os.File, key BlockKey, value []byte) error {
 	if len(value) != bm.blockSize {
 		return fmt.Errorf("invalid block size")
 	}
 
 	offset := int64(bm.blockSize) * int64(key.offset)
-
 	if _, err := f.WriteAt(value, offset); err != nil {
 		return err
 	}
 
 	bm.cache.Put(key, value)
-
 	return nil
 }
 
-// Helper da drugi paketi mogu da naprave BlockKey bez diranja struct polja
 func NewBlockKey(filePath string, offset uint32) BlockKey {
 	return BlockKey{filePath: filePath, offset: offset}
+}
+
+// EnsureSize for fixed segment size (in blocks)
+func (bm *BlockManager) EnsureSize(path string, sizeBytes int64) error {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	info, err := f.Stat()
+	if err != nil {
+		return err
+	}
+	if info.Size() >= sizeBytes {
+		return nil
+	}
+	// Truncate file
+	return f.Truncate(sizeBytes)
 }
