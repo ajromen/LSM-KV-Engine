@@ -47,12 +47,12 @@ func (tree *MerkleTree) Build() error {
 	copy(currentLevel, tree.LeafNodes)
 	for len(currentLevel) > 1 {
 		nextLevel := make([]*MerkleNode, 0)
-		for i := 0; i < len(tree.LeafNodes); i++ {
+		for i := 0; i < len(currentLevel); i += 2 {
 			var newNode *MerkleNode
 			if i+1 < len(currentLevel) {
 				combined := make([]byte, 64)
 				copy(combined[0:32], currentLevel[i].Hash[0:32])
-				copy(combined[32:64], currentLevel[i].Hash[0:32])
+				copy(combined[32:64], currentLevel[i+1].Hash[0:32])
 				newHash := sha256.Sum256(combined)
 				newNode = &MerkleNode{
 					Hash:       newHash,
@@ -68,7 +68,7 @@ func (tree *MerkleTree) Build() error {
 				newNode = &MerkleNode{
 					Hash:       newHash,
 					LeftChild:  currentLevel[i],
-					RightChild: currentLevel[i+1],
+					RightChild: currentLevel[i],
 					IsLeaf:     false,
 				}
 			}
@@ -114,6 +114,7 @@ func (tree *MerkleTree) Encode() []byte {
 	}
 	if tree.Root != nil {
 		copy(buf[pos:pos+32], tree.Root.Hash[0:32])
+		pos += 32
 	} else {
 		pos += 32
 	}
@@ -125,7 +126,7 @@ func (tree *MerkleTree) Encode() []byte {
 func (tree *MerkleTree) Decode(buf []byte) (*MerkleTree, error) {
 	crcPos := len(buf) - 4
 	expectedCRC := binary.LittleEndian.Uint32(buf[crcPos : crcPos+4])
-	crc := crc32.ChecksumIEEE(buf[:crcPos+4])
+	crc := crc32.ChecksumIEEE(buf[:crcPos])
 	if crc != expectedCRC {
 		return nil, errors.New("CRC mismatch")
 	}
@@ -145,11 +146,10 @@ func (tree *MerkleTree) Decode(buf []byte) (*MerkleTree, error) {
 		var hash [32]byte
 		copy(hash[:], buf[pos:pos+32])
 		pos += 32
-		leaf := &MerkleNode{
+		tree.LeafNodes[i] = &MerkleNode{
 			Hash:   hash,
 			IsLeaf: true,
 		}
-		tree.LeafNodes = append(tree.LeafNodes, leaf)
 	}
 	if pos+32 > crcPos {
 		return nil, errors.New("buffer too small for root hash")
