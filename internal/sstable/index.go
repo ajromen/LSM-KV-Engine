@@ -56,7 +56,7 @@ func DecodeIndexEntry(buf []byte) (*IndexEntry, int, error) {
 	copy(key, buf[pos:pos+int(keyLength)])
 	pos += int(keyLength)
 	blockIndex := binary.LittleEndian.Uint32(buf[pos:])
-	pos += 8
+	pos += 4
 	return &IndexEntry{
 		Key:        key,
 		BlockIndex: blockIndex,
@@ -89,19 +89,17 @@ func (block *IndexBlock) EncodeIndexBlock() []byte {
 	}
 	crc := crc32.ChecksumIEEE(buf[:pos])
 	binary.LittleEndian.PutUint32(buf[pos:], crc)
+	pos += 4
 	return buf
 }
 
 func DecodeIndexBlock(buf []byte) (*IndexBlock, error) {
-	if len(buf) < 8 {
-		return nil, errors.New("Buffer too small")
-	}
-	crcPos := len(buf) - 4
-	expected := binary.LittleEndian.Uint32(buf[crcPos:])
-	crc := crc32.ChecksumIEEE(buf[:crcPos])
-	if expected != crc {
-		return nil, errors.New("crc mismatch")
-	}
+	//crcPos := len(buf) - 4
+	//expected := binary.LittleEndian.Uint32(buf[crcPos:])
+	//crc := crc32.ChecksumIEEE(buf[:crcPos])
+	//if expected != crc {
+	//return nil, errors.New("crc mismatch")
+	//}
 	numEntries := binary.LittleEndian.Uint32(buf[0:4])
 	if numEntries == 0 {
 		return &IndexBlock{Entries: []IndexEntry{}}, nil
@@ -109,7 +107,7 @@ func DecodeIndexBlock(buf []byte) (*IndexBlock, error) {
 	pos := 4
 	entries := make([]IndexEntry, 0, numEntries)
 	for i := 0; i < int(numEntries); i++ {
-		entry, n, err := DecodeIndexEntry(buf[pos:crcPos])
+		entry, n, err := DecodeIndexEntry(buf[pos:])
 		if err != nil {
 			return nil, err
 		}
@@ -180,7 +178,7 @@ func ReadFromFile(file *os.File, offset uint64, size int) (*IndexBlock, error) {
 }
 
 func (block *IndexBlock) AddFromDataBlock(dataBlock *DataBlockBuilder, blockIdx uint32) {
-	firstKey := dataBlock.FirstKey()
+	firstKey := dataBlock.firstKey
 	if firstKey == nil || len(firstKey) == 0 {
 		return
 	}
@@ -193,12 +191,14 @@ func (block *IndexBlock) AddFromDataBlock(dataBlock *DataBlockBuilder, blockIdx 
 }
 
 type IndexSegment struct {
-	Blocks []*IndexBlock
+	Blocks       []*IndexBlock
+	BlockOffsets []uint32
 }
 
 func NewIndexSegment() *IndexSegment {
 	return &IndexSegment{
-		Blocks: make([]*IndexBlock, 0),
+		Blocks:       make([]*IndexBlock, 0),
+		BlockOffsets: make([]uint32, 0),
 	}
 }
 
@@ -206,21 +206,22 @@ func (seg *IndexSegment) AddBlock(block *IndexBlock) {
 	seg.Blocks = append(seg.Blocks, block)
 }
 
-func (seg *IndexSegment) WriteToFile(file *os.File) ([]uint64, error) {
-	var offsets []uint64
-	var currentOffset uint64 = 0
+func (seg *IndexSegment) WriteToFile(file *os.File) ([]uint32, error) {
+	offsets := make([]uint32, len(seg.Blocks))
+	var currentOffset int32 = 0
 	for i, block := range seg.Blocks {
-		offsets = append(offsets, currentOffset)
+		offsets[i] = uint32(currentOffset)
 		data := block.EncodeIndexBlock()
 		n, err := file.Write(data)
 		if err != nil {
 			return nil, err
 		}
-		currentOffset += uint64(n)
+		currentOffset += int32(n)
 		for j := range block.Entries {
-			block.Entries[j].BlockIndex = uint32(i)
+			block.Entries[j].BlockIndex = offsets[i]
 		}
 	}
+	seg.BlockOffsets = offsets
 	return offsets, nil
 }
 

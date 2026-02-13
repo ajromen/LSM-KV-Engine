@@ -173,11 +173,6 @@ func DecodeSummarySegment(buf []byte) (*SummarySegment, error) {
 
 // Returns index block number where key should be
 func (s *SummarySegment) FindIndexBlockNumber(key []byte) int {
-	if bytes.Compare(key, s.MinKey) < 0 ||
-		bytes.Compare(key, s.MaxKey) > 0 {
-		return -1
-	}
-
 	left := 0
 	right := len(s.Entries) - 1
 	result := -1

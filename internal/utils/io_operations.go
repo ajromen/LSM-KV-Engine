@@ -29,6 +29,15 @@ func Uint128LT(a, b Uint128) bool {
 	}
 	return a.Low < b.Low
 }
+func Uint128GT(a, b Uint128) bool {
+	if a.High > b.High {
+		return true
+	}
+	if a.High < b.High {
+		return false
+	}
+	return a.Low > b.Low
+}
 
 // use this for writing uint32 || uint64
 func WriteUvarint(file *os.File, value uint64) error {
@@ -139,19 +148,29 @@ func ReadUvarint128FromSlice(data []byte) (Uint128, int, error) {
 	var value Uint128
 	var shift uint
 	var bytesRead int
-	for i := 0; i < 20 && bytesRead < len(data); i++ {
+
+	for bytesRead < len(data) {
+		if shift >= 128 {
+			return Uint128{}, 0, errors.New("uint128 overflow")
+		}
+
 		b := data[bytesRead]
 		bytesRead++
 
+		part := uint64(b & 0x7F)
+
 		if shift < 64 {
-			value.Low |= uint64(b&0x7F) << shift
+			value.Low |= part << shift
 		} else {
-			value.High |= uint64(b&0x7F) << (shift - 64)
+			value.High |= part << (shift - 64)
 		}
+
 		if b&0x80 == 0 {
 			return value, bytesRead, nil
 		}
+
 		shift += 7
 	}
-	return value, 0, errors.New("invalid uint128 encoding")
+
+	return Uint128{}, 0, errors.New("incomplete uint128")
 }

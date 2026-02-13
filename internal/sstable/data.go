@@ -4,11 +4,8 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
-	"fmt"
 	"hash/crc32"
-	"os"
 
-	"github.com/ajromen/LSM-KV-Engine/internal/block"
 	"github.com/ajromen/LSM-KV-Engine/internal/encoders"
 	"github.com/ajromen/LSM-KV-Engine/internal/utils"
 )
@@ -21,211 +18,171 @@ const (
 
 type DataBlockBuilder struct {
 	encoder         *encoders.DeltaEncoderBytes
-	buf             []byte
+	data            []byte
 	restartInterval int
 	recordCount     int
-	blockSize       int
 	firstKey        []byte
 }
 
-func NewDataBlockBuilder(restartInterval int, blockSize int) *DataBlockBuilder {
+func NewDataBlockBuilder(restartInterval, blockSize int) *DataBlockBuilder {
 	return &DataBlockBuilder{
 		encoder:         encoders.NewDeltaEncoderBytes(restartInterval),
-		buf:             make([]byte, 0, blockSize),
+		data:            make([]byte, 0, blockSize),
 		restartInterval: restartInterval,
-		blockSize:       blockSize,
 	}
 }
 
-func (d *DataBlockBuilder) AddRecord(record Record) bool {
-	if d.recordCount == 0 {
-		d.firstKey = append([]byte(nil), record.Key...)
+func AppendUvarint128ToSlice2(buf []byte, v utils.Uint128) []byte {
+	buf = binary.AppendUvarint(buf, v.Low)
+	buf = binary.AppendUvarint(buf, v.High)
+	return buf
+}
+
+func (builder *DataBlockBuilder) AddRecord(record Record) bool {
+	if builder.recordCount == 0 {
+		builder.firstKey = append([]byte(nil), record.Key...)
 	}
-	estimatedRestartSize := len(d.encoder.RestartArray)*4 + 4 + 1 + 4
-	estimatedRecordSize := 20 + 1 + 10 + 10 + len(record.Key) + 10 + len(record.Value)
-	if len(d.buf) > 0 && len(d.buf)+estimatedRecordSize+estimatedRestartSize > d.blockSize {
+	estimatedSize := len(record.Key) + len(record.Value) + 20
+	if len(builder.data)+estimatedSize > cap(builder.data) && builder.recordCount > 0 {
 		return false
 	}
-	blockOffset := uint32(len(d.buf))
-	d.buf = utils.AppendUvarint128ToSlice(d.buf, record.Timestamp)
+	keyOffset := uint32(len(builder.data))
+	builder.data = AppendUvarint128ToSlice2(builder.data, record.Timestamp)
 	if record.Tombstone {
-		d.buf = append(d.buf, 1)
+		builder.data = append(builder.data, 1)
 	} else {
-		d.buf = append(d.buf, 0)
+		builder.data = append(builder.data, 0)
 	}
-	d.buf = d.encoder.Encode(record.Key, blockOffset, d.buf)
-	d.buf = utils.AppendUvarint(d.buf, uint64(len(record.Value)))
-	d.buf = append(d.buf, record.Value...)
-	d.recordCount++
+	builder.data = builder.encoder.Encode(record.Key, keyOffset, builder.data)
+	builder.data = utils.AppendUvarint(builder.data, uint64(len(record.Value)))
+	builder.data = append(builder.data, record.Value...)
+	builder.recordCount++
 	return true
 }
 
-func (d *DataBlockBuilder) Finish(compression byte) []byte {
-	block := make([]byte, d.blockSize)
-	data := d.buf
-	switch compression {
-	case CompressionNone:
-		break
-	case CompressionSnappy:
-		// TODO : IMPLEMENT SNAPPY COMPRESSION
-	case CompressionZSTD:
-		// TODO : IMPLEMENT ZSTD COMPRESSION
+func (builder *DataBlockBuilder) Finish(blockSize int) ([]byte, error) {
+	if builder.recordCount == 0 {
+		return nil, errors.New("empty block")
 	}
+	data := builder.data
+	restarts := builder.encoder.RestartArray
+	restartCount := uint32(len(restarts))
+	block := make([]byte, blockSize)
 	pos := 0
+	if len(data)+int(restartCount)*4+4+4+4 > blockSize {
+		return nil, errors.New("data for block too large")
+	}
 	copy(block[pos:], data)
 	pos += len(data)
-	for _, off := range d.encoder.RestartArray {
-		binary.LittleEndian.PutUint32(block[pos:], uint32(off))
+	for _, restart := range restarts {
+		binary.LittleEndian.PutUint32(block[pos:], restart)
 		pos += 4
 	}
-	binary.LittleEndian.PutUint32(block[pos:], uint32(len(d.encoder.RestartArray)))
+	binary.LittleEndian.PutUint32(block[pos:], uint32(len(data)))
 	pos += 4
-	block[pos] = compression
-	pos += 1
-	dataEndPos := pos
-	binary.LittleEndian.PutUint32(block[pos:], uint32(dataEndPos))
+	binary.LittleEndian.PutUint32(block[pos:], restartCount)
 	pos += 4
-	checksum := crc32.ChecksumIEEE(block[:pos])
-	binary.LittleEndian.PutUint32(block[pos:], checksum)
-	return block
+	crc := crc32.ChecksumIEEE(block[:blockSize-4])
+	binary.LittleEndian.PutUint32(block[blockSize-4:], crc)
+	return block, nil
 }
 
-func (d *DataBlockBuilder) Restart() {
-	d.buf = d.buf[:0]
-	d.encoder.Reset()
-	d.recordCount = 0
+func (builder *DataBlockBuilder) Reset() {
+	builder.data = builder.data[:0]
+	builder.encoder.Reset()
+	builder.recordCount = 0
+	builder.firstKey = nil
 }
 
-func (d *DataBlockBuilder) Size() int {
-	return len(d.buf)
+func (builder *DataBlockBuilder) FirstKey() []byte {
+	return builder.firstKey
 }
 
-func (d *DataBlockBuilder) Encoder() *encoders.DeltaEncoderBytes {
-	return d.encoder
-}
-
-func (d *DataBlockBuilder) Buffer() []byte {
-	return d.buf
-}
-
-func (d *DataBlockBuilder) RestartInterval() int {
-	return d.restartInterval
-}
-
-func (d *DataBlockBuilder) RecordCount() int {
-	return d.recordCount
-}
-
-func (d *DataBlockBuilder) BlockSize() int {
-	return d.blockSize
-}
-
-func (d *DataBlockBuilder) FirstKey() []byte {
-	return d.firstKey
-}
-
-func (d *DataBlockBuilder) Reset() {
-	d.buf = d.buf[:0]
-	d.encoder.Reset()
-	d.recordCount = 0
-	d.firstKey = nil
+func (builder *DataBlockBuilder) RecordCount() int {
+	return builder.recordCount
 }
 
 type DataBlockReader struct {
 	data         []byte
 	decoder      *encoders.DeltaEncoderBytes
 	restartArray []uint32
-	compression  byte
 	pos          int
-	dataEnd      int
+	dataSize     int
 }
 
-func NewDataBlockReader(data []byte) (*DataBlockReader, error) {
-	if len(data) < 13 {
+func NewDataBlockReader(block []byte) (*DataBlockReader, error) {
+	if len(block) < 12 {
 		return nil, errors.New("block too small")
 	}
-	pos := len(data) - 1
-	for pos >= 0 && data[pos] == 0 {
-		pos--
-	}
-	crcPos := pos - 3
-	if crcPos < 0 {
-		return nil, errors.New("invalid block format")
-	}
-	expectedCRC := binary.LittleEndian.Uint32(data[crcPos : crcPos+4])
-	dataEndPos := crcPos - 4
-	if dataEndPos < 0 {
-		return nil, errors.New("invalid block format")
-	}
-	dataEnd := binary.LittleEndian.Uint32(data[dataEndPos : dataEndPos+4])
-	actualCRC := crc32.ChecksumIEEE(data[:crcPos])
+	expectedCRC := binary.LittleEndian.Uint32(block[len(block)-4:])
+	actualCRC := crc32.ChecksumIEEE(block[:len(block)-4])
 	if expectedCRC != actualCRC {
 		return nil, errors.New("CRC mismatch")
 	}
-	pos = int(dataEnd) - 1
-	compression := data[pos]
-	pos--
-	restartCount := binary.LittleEndian.Uint32(data[pos-3 : pos+1])
-	pos -= 4
-	restartArraySize := int(restartCount) * 4
-	restartArrayPos := pos - restartArraySize + 1
-	if restartArrayPos < 0 {
-		return nil, errors.New("invalid block format")
+	endData := len(block) - 5
+	for endData > 0 && block[endData-4] == 0 {
+		endData--
 	}
+	restartCount := binary.LittleEndian.Uint32(block[endData-4 : endData])
+	dataSize := binary.LittleEndian.Uint32(block[endData-8 : endData-4])
 	restartArray := make([]uint32, restartCount)
+	startRestart := int(dataSize)
 	for i := 0; i < int(restartCount); i++ {
-		offset := restartArrayPos + i*4
-		restartArray[i] = binary.LittleEndian.Uint32(data[offset : offset+4])
+		offset := startRestart + i*4
+		restartArray[i] = binary.LittleEndian.Uint32(block[offset : offset+4])
 	}
-	actualDataEnd := restartArrayPos
-	actualData := data[:actualDataEnd]
-	switch compression {
-	case CompressionNone:
-		break
-	case CompressionSnappy:
-		// TODO : IMPLEMENT SNAPPY DECOMPRESSION
-	case CompressionZSTD:
-		// TODO : IMPLEMENT ZSTD DECOMPRESSION
-	}
+	data := block[:dataSize]
 	return &DataBlockReader{
-		data:         actualData,
-		decoder:      encoders.NewDeltaEncoderBytes(0),
+		data:         data,
+		decoder:      encoders.NewDeltaEncoderBytes(2),
 		restartArray: restartArray,
-		compression:  compression,
 		pos:          0,
-		dataEnd:      actualDataEnd,
+		dataSize:     int(dataSize),
 	}, nil
 }
 
-func (d *DataBlockReader) ReadRecord() (*Record, error) {
-	if d.pos >= len(d.data) {
+func (r *DataBlockReader) Restart() {
+	r.pos = 0
+}
+
+func (r *DataBlockReader) ReadRecord() (*Record, error) {
+	if r.pos >= r.dataSize {
 		return nil, errors.New("out of data")
 	}
-	timestamp, n, err := utils.ReadUvarint128FromSlice(d.data[d.pos:])
+	low, n1 := binary.Uvarint(r.data[r.pos:])
+	if n1 <= 0 {
+		return nil, errors.New("invalid low uint64")
+	}
+	r.pos += n1
+	high, n2 := binary.Uvarint(r.data[r.pos:])
+	if n2 <= 0 {
+		return nil, errors.New("invalid high uint64")
+	}
+	r.pos += n2
+	timestamp := utils.Uint128{
+		High: high,
+		Low:  low,
+	}
+
+	if r.pos >= r.dataSize {
+		return nil, errors.New("unexpected end")
+	}
+	tombstone := r.data[r.pos] == 1
+	r.pos++
+	key, err := r.decoder.Decode(r.data, &r.pos)
 	if err != nil {
 		return nil, err
 	}
-	d.pos += n
-	if d.pos >= len(d.data) {
-		return nil, errors.New("out of data")
-	}
-	tombstone := d.data[d.pos] == 1
-	d.pos++
-	key, err := d.decoder.Decode(d.data, &d.pos)
-	if err != nil {
-		return nil, err
-	}
-	valueLen, n := binary.Uvarint(d.data[d.pos:])
+	valLen, n := binary.Uvarint(r.data[r.pos:])
 	if n <= 0 {
 		return nil, errors.New("invalid value size")
 	}
-	d.pos += n
-	if d.pos+int(valueLen) > len(d.data) {
+	r.pos += n
+	if r.pos+int(valLen) > len(r.data) {
 		return nil, errors.New("value exceeds block bounds")
 	}
-	value := make([]byte, valueLen)
-	copy(value, d.data[d.pos:d.pos+int(valueLen)])
-	d.pos += int(valueLen)
+	value := append([]byte(nil), r.data[r.pos:r.pos+int(valLen)]...)
+	r.pos += int(valLen)
 	return &Record{
 		Timestamp: timestamp,
 		Tombstone: tombstone,
@@ -234,116 +191,63 @@ func (d *DataBlockReader) ReadRecord() (*Record, error) {
 	}, nil
 }
 
-func (d *DataBlockReader) SeekToRestart(restartIndex int) error {
-	if restartIndex < 0 || restartIndex >= len(d.restartArray) {
+func (r *DataBlockReader) SeekToRestart(idx int) error {
+	if idx < 0 || idx >= len(r.restartArray) {
 		return errors.New("invalid restart index")
 	}
-	d.pos = int(d.restartArray[restartIndex])
-	d.decoder.Reset()
+	r.pos = int(r.restartArray[idx])
+	r.decoder.Reset()
 	return nil
 }
 
-func (d *DataBlockReader) HasNext() bool {
-	return d.pos < len(d.data)
-}
-
-func (d *DataBlockReader) Next() (*Record, error) {
-	if d.pos >= len(d.data) {
-		return nil, errors.New("out of data")
-	}
-	timestamp, n, err := utils.ReadUvarint128FromSlice(d.data[d.pos:])
-	if err != nil {
-		return nil, err
-	}
-	d.pos += n
-	if d.pos >= len(d.data) {
-		return nil, errors.New("out of data")
-	}
-	tombstone := d.data[d.pos] == 1
-	d.pos++
-	key, err := d.decoder.Decode(d.data, &d.pos)
-	if err != nil {
-		return nil, err
-	}
-	valueLen, n := binary.Uvarint(d.data[d.pos:])
-	if n <= 0 {
-		return nil, errors.New("invalid value size")
-	}
-	d.pos += n
-	if d.pos+int(valueLen) > len(d.data) {
-		return nil, errors.New("value exceeds block bounds")
-	}
-	value := make([]byte, valueLen)
-	copy(value, d.data[d.pos:d.pos+int(valueLen)])
-	d.pos += int(valueLen)
-	return &Record{
-		Timestamp: timestamp,
-		Tombstone: tombstone,
-		Key:       key,
-		Value:     value,
-	}, nil
-}
-
-func (d *DataBlockReader) Data() []byte {
-	return d.data
-}
-
-func (d *DataBlockReader) Decoder() *encoders.DeltaEncoderBytes {
-	return d.decoder
-}
-
-func (d *DataBlockReader) RestartArray() []uint32 {
-	return d.restartArray
-}
-
-func (d *DataBlockReader) Compression() string {
-	switch d.compression {
-	case CompressionNone:
-		return "NONE"
-	case CompressionSnappy:
-		return "SNAPPY"
-	case CompressionZSTD:
-		return "ZSTD"
-	default:
-		return "UNKNOWN"
-	}
-}
-
-func (d *DataBlockReader) Position() int {
-	return d.pos
-}
-
-func (d *DataBlockReader) DataEnd() int {
-	return d.dataEnd
-}
-
-func (d *DataBlockReader) Close() error {
+func (r *DataBlockReader) Close() error {
 	return nil
 }
 
-func (d *DataBlockReader) ReadRecordWithMeta() (*Record, uint64, uint64, []byte, error) {
-	if d.pos >= len(d.data) {
+func (r *DataBlockReader) Data() []byte {
+	return r.data
+}
+
+func (r *DataBlockReader) DataSize() int {
+	return r.dataSize
+}
+
+func (r *DataBlockReader) HasNext() bool {
+	return r.pos < r.dataSize
+}
+
+func (r *DataBlockReader) ReadRecordWithMeta() (*Record, uint64, uint64, []byte, error) {
+	if r.pos >= len(r.data) {
 		return nil, 0, 0, nil, errors.New("out of data")
 	}
-	timestamp, n, err := utils.ReadUvarint128FromSlice(d.data[d.pos:])
+	low, n1 := binary.Uvarint(r.data[r.pos:])
+	if n1 <= 0 {
+		return nil, 0, 0, nil, errors.New("out of data")
+	}
+	r.pos += n1
+	high, n2 := binary.Uvarint(r.data[r.pos:])
+	if n2 <= 0 {
+		return nil, 0, 0, nil, errors.New("out of data")
+	}
+	r.pos += n2
+	timestamp := utils.Uint128{
+		High: high,
+		Low:  low,
+	}
+	tombstone := r.data[r.pos] == 1
+	r.pos++
+	shared, suffixLen, suffix, key, err := r.decoder.DecodeWithMeta(r.data, &r.pos)
 	if err != nil {
 		return nil, 0, 0, nil, err
 	}
-	d.pos += n
-	tombstone := d.data[d.pos] == 1
-	d.pos++
-	shared, suffixLen, suffix, key, err := d.decoder.DecodeWithMeta(d.data, &d.pos)
-	if err != nil {
-		return nil, 0, 0, nil, err
-	}
-	valueLen, n := binary.Uvarint(d.data[d.pos:])
+	valueLen, n := binary.Uvarint(r.data[r.pos:])
 	if n <= 0 {
 		return nil, 0, 0, nil, errors.New("invalid value size")
 	}
-	d.pos += n
+	r.pos += n
 	value := make([]byte, valueLen)
-	copy(value, d.data[d.pos:d.pos+int(valueLen)])
-	d.pos += int(valueLen)
+	copy(value, r.data[r.pos:r.pos+int(valueLen)])
+	r.pos += int(valueLen)
 	return &Record{
 		Timestamp: timestamp,
 		Tombstone: tombstone,
@@ -358,8 +262,24 @@ type DataBlockIterator struct {
 	valid   bool
 }
 
-func NewDataBlockIterator(data []byte) (*DataBlockIterator, error) {
-	reader, err := NewDataBlockReader(data)
+func (i *DataBlockIterator) Reader() *DataBlockReader {
+	return i.reader
+}
+
+func (i *DataBlockIterator) Current() *Record {
+	return i.current
+}
+
+func (i *DataBlockIterator) Valid() bool {
+	return i.valid
+}
+
+func (i *DataBlockIterator) Close() error {
+	return nil
+}
+
+func NewDataBlockIterator(block []byte) (*DataBlockIterator, error) {
+	reader, err := NewDataBlockReader(block)
 	if err != nil {
 		return nil, err
 	}
@@ -368,118 +288,102 @@ func NewDataBlockIterator(data []byte) (*DataBlockIterator, error) {
 		current: nil,
 		valid:   false,
 	}
-	iterator.Rewind()
 	return iterator, nil
 }
 
-func (iterator *DataBlockIterator) Rewind() error {
-	if err := iterator.reader.SeekToRestart(0); err != nil {
-		iterator.valid = false
+func (i *DataBlockIterator) Rewind() error {
+	if err := i.reader.SeekToRestart(0); err != nil {
+		i.valid = false
 		return err
 	}
-	rec, err := iterator.reader.ReadRecord()
+	record, err := i.reader.ReadRecord()
 	if err != nil {
-		iterator.valid = false
+		i.valid = false
 		return err
 	}
-	iterator.current = rec
-	iterator.valid = true
+	i.current = record
+	i.valid = true
 	return nil
 }
 
-func (iterator *DataBlockIterator) HasNext() bool {
-	return iterator.valid && iterator.reader.HasNext()
-}
-
-func (iterator *DataBlockIterator) Next() error {
-	if !iterator.valid {
+func (i *DataBlockIterator) Next() error {
+	if !i.valid {
 		return nil
 	}
-	if !iterator.reader.HasNext() {
-		iterator.valid = false
+	if !i.reader.HasNext() {
+		i.valid = false
 		return nil
 	}
-	record, err := iterator.reader.ReadRecord()
+	record, err := i.reader.ReadRecord()
 	if err != nil {
-		iterator.valid = false
+		i.valid = false
 		return err
 	}
-	iterator.current = record
-	iterator.valid = true
+	i.current = record
+	i.valid = true
 	return nil
 }
 
-func (iterator *DataBlockIterator) Seek(target []byte) error {
-	restarts := iterator.reader.restartArray
+func (i *DataBlockIterator) Seek(target []byte) error {
+	restarts := i.reader.restartArray
 	left := 0
 	right := len(restarts) - 1
 	best := 0
 	for left <= right {
 		mid := left + (right-left)/2
-		iterator.reader.SeekToRestart(mid)
-		record, err := iterator.reader.ReadRecord()
+		r := i.reader
+		r.SeekToRestart(mid)
+		record, err := i.reader.ReadRecord()
 		if err != nil {
-			iterator.valid = false
+			i.valid = false
 			return err
 		}
 		cmp := bytes.Compare(record.Key, target)
 		if cmp < 0 {
 			best = mid
 			left = mid + 1
-		} else if cmp == 0 {
-			iterator.current = record
-			iterator.valid = true
-			return nil
 		} else {
 			right = mid - 1
 		}
 	}
-	iterator.reader.SeekToRestart(best)
-	for iterator.reader.HasNext() {
-		record, err := iterator.reader.ReadRecord()
+	i.reader.SeekToRestart(best)
+	for i.reader.HasNext() {
+		record, err := i.reader.ReadRecord()
 		if err != nil {
-			iterator.valid = false
+			i.valid = false
 			return err
 		}
 		cmp := bytes.Compare(record.Key, target)
 		if cmp >= 0 {
-			iterator.current = record
-			iterator.valid = true
+			i.current = record
+			i.valid = true
 			return nil
 		}
 	}
-	iterator.valid = false
+	i.valid = false
 	return nil
 }
 
-func (iterator *DataBlockIterator) Valid() bool {
-	return iterator.valid
+func (i *DataBlockIterator) Key() []byte {
+	return i.current.Key
 }
 
-func (iterator *DataBlockIterator) Key() []byte {
-	return iterator.current.Key
+func (i *DataBlockIterator) Value() []byte {
+	return i.current.Value
 }
 
-func (iterator *DataBlockIterator) Value() []byte {
-	return iterator.current.Value
+func (i *DataBlockIterator) Timestamp() utils.Uint128 {
+	return i.current.Timestamp
 }
 
-func (iterator *DataBlockIterator) Timestamp() utils.Uint128 {
-	return iterator.current.Timestamp
-}
-
-func (iterator *DataBlockIterator) Tombstone() bool {
-	return iterator.current.Tombstone
-}
-
-func (iterator *DataBlockIterator) Close() error {
-	return nil
+func (i *DataBlockIterator) Tombstone() bool {
+	return i.current.Tombstone
 }
 
 type MergeIterator struct {
 	iterator1 *DataBlockIterator
 	iterator2 *DataBlockIterator
-	current   *DataBlockIterator
+	Current   *DataBlockIterator
 	valid     bool
 }
 
@@ -505,11 +409,11 @@ func (iterator *MergeIterator) selectCurrent() {
 		return
 	}
 	if !iterator.iterator1.Valid() {
-		iterator.current = iterator.iterator2
+		iterator.Current = iterator.iterator2
 		return
 	}
 	if !iterator.iterator2.Valid() {
-		iterator.current = iterator.iterator1
+		iterator.Current = iterator.iterator1
 		return
 	}
 	if iterator.iterator1 == nil || !iterator.iterator1.Valid() {
@@ -517,19 +421,19 @@ func (iterator *MergeIterator) selectCurrent() {
 			iterator.valid = false
 			return
 		}
-		iterator.current = iterator.iterator2
+		iterator.Current = iterator.iterator2
 		return
 	}
 	cmp := bytes.Compare(iterator.iterator1.Key(), iterator.iterator2.Key())
 	if cmp < 0 {
-		iterator.current = iterator.iterator1
+		iterator.Current = iterator.iterator1
 	} else if cmp > 0 {
-		iterator.current = iterator.iterator2
+		iterator.Current = iterator.iterator2
 	} else {
 		if utils.Uint128GE(iterator.iterator1.Timestamp(), iterator.iterator2.Timestamp()) {
-			iterator.current = iterator.iterator1
+			iterator.Current = iterator.iterator1
 		} else {
-			iterator.current = iterator.iterator2
+			iterator.Current = iterator.iterator2
 		}
 	}
 }
@@ -559,7 +463,7 @@ func (iterator *MergeIterator) Advance() error {
 			if err := iterator.iterator2.Next(); err != nil {
 				return err
 			}
-		} else if iterator.current == iterator.iterator1 {
+		} else if iterator.Current == iterator.iterator1 {
 			if err := iterator.iterator1.Next(); err != nil {
 				return err
 			}
@@ -588,192 +492,20 @@ func (iterator *MergeIterator) Next() error {
 }
 
 func (iterator *MergeIterator) Key() []byte {
-	if iterator.current == nil {
+	if iterator.Current == nil {
 		return nil
 	}
-	return iterator.current.Key()
+	return iterator.Current.Key()
 }
 
 func (iterator *MergeIterator) Value() []byte {
-	return iterator.current.Value()
+	return iterator.Current.Value()
 }
 
 func (iterator *MergeIterator) Timestamp() utils.Uint128 {
-	return iterator.current.Timestamp()
+	return iterator.Current.Timestamp()
 }
 
 func (iterator *MergeIterator) Tombstone() bool {
-	return iterator.current.Tombstone()
-}
-
-func VisualizeBlock(blockData []byte) error {
-	reader, err := NewDataBlockReader(blockData)
-	if err != nil {
-		return err
-	}
-	fmt.Println("\n==========================================================================================")
-	fmt.Println("VISUALIZING BLOCK")
-	fmt.Println("==========================================================================================")
-	fmt.Print("\nBLOCK METADATA\n")
-	fmt.Printf("Block size: %d bytes\n", len(blockData))
-	fmt.Printf("Data size: %d bytes\n", reader.dataEnd)
-	fmt.Printf("Padding: %d bytes\n", len(blockData)-reader.dataEnd-17)
-	fmt.Printf("Compression: %b \n", reader.compression)
-	fmt.Printf("Restart points: %d\n", len(reader.restartArray))
-	utilization := float64(reader.dataEnd) / float64(len(blockData)) * 100
-	fmt.Printf("Utilization: %.2f%%\n", utilization)
-	fmt.Printf("Restart points offset: \n")
-	for i, offset := range reader.restartArray {
-		fmt.Printf("[%d]=%d", i, offset)
-		if (i+1)%8 == 0 && i < len(reader.restartArray)-1 {
-			fmt.Printf("\n")
-		}
-	}
-	fmt.Println()
-	fmt.Print("\nRECORDS\n")
-	fmt.Println("==========================================================================================")
-	reader.SeekToRestart(0)
-	recordIdx := 0
-	restartIdx := 0
-	nextRestart := uint32(0)
-	if len(reader.restartArray) > 1 {
-		nextRestart = reader.restartArray[1]
-	} else {
-		nextRestart = ^uint32(0)
-	}
-	for reader.HasNext() {
-		startPos := reader.pos
-		isRestart := false
-		if restartIdx < len(reader.restartArray) && uint32(startPos) == reader.restartArray[restartIdx] {
-			isRestart = true
-			if restartIdx < len(reader.restartArray)-1 {
-				nextRestart = reader.restartArray[restartIdx+1]
-			} else {
-				nextRestart = ^uint32(0)
-			}
-			restartIdx++
-		}
-		rec, err := reader.ReadRecord()
-		if err != nil {
-			break
-		}
-		endPos := reader.pos
-		recordSize := endPos - startPos
-		deleted := " "
-		if rec.Tombstone {
-			deleted = "[del]"
-		}
-		restartMarker := ""
-		if isRestart {
-			restartMarker = "[restart]"
-		}
-		valueDisplay := string(rec.Value)
-		if len(valueDisplay) > 40 {
-			valueDisplay = valueDisplay[:37] + "..."
-		}
-		keyDisplay := string(rec.Key)
-		if len(keyDisplay) > 20 {
-			keyDisplay = keyDisplay[:17] + "..."
-		}
-		fmt.Printf(" [%3d] %s %-20s → %-40s", recordIdx, deleted, keyDisplay, valueDisplay)
-		fmt.Printf(" (%d bytes)%s\n", recordSize, restartMarker)
-		recordIdx++
-	}
-	fmt.Println("==========================================================================================")
-	fmt.Printf("Total Records: %d\n", recordIdx)
-	fmt.Println(nextRestart)
-	return nil
-}
-
-func VisualizeDataSegmentFromSSTable(filePath string, blockManager *block.BlockManager) error {
-	file, err := os.Open(filePath)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-	stat, err := file.Stat()
-	if err != nil {
-		return err
-	}
-	fileSize := stat.Size()
-	fmt.Println("==========================================================================================")
-	fmt.Println("VISUALIZING DATA SEGMENT")
-	fmt.Println("==========================================================================================")
-	fmt.Println("FILE INFO")
-	fmt.Printf("Path: %s\n", filePath)
-	fmt.Printf("Size: %d bytes (%.2f KB)\n", fileSize, float64(fileSize)/1024)
-	fmt.Printf("Block Size: %d bytes\n", blockManager.BlockSize())
-	numBlocks := int(fileSize) / blockManager.BlockSize()
-	fmt.Printf("Blocks: %d\n", numBlocks)
-	for blockIdx := 0; blockIdx < numBlocks; blockIdx++ {
-		fmt.Println("==========================================================================================")
-		fmt.Printf("\nBLOCK %d (offset: %d bytes)\n", blockIdx, blockIdx*blockManager.BlockSize())
-		fmt.Println("==========================================================================================")
-		blockKey := block.BlockKey{
-			FilePath: filePath,
-			Offset:   uint32(blockIdx),
-		}
-		blockData, err := blockManager.Read(blockKey)
-		if err != nil {
-			fmt.Printf("Error reading block: %v\n", err)
-			continue
-		}
-		reader, err := NewDataBlockReader(blockData)
-		if err != nil {
-			fmt.Printf("Error parsing block: %v\n", err)
-			continue
-		}
-		recordCount := 0
-		reader.SeekToRestart(0)
-		for reader.HasNext() {
-			_, err := reader.ReadRecord()
-			if err != nil {
-				break
-			}
-			recordCount++
-		}
-		fmt.Printf("Records: %d\n", recordCount)
-		fmt.Printf("Data Size: %d bytes\n", reader.dataEnd)
-		fmt.Printf("Restart Points: %d\n", len(reader.restartArray))
-		fmt.Printf("Utilization: %.2f%%\n", float64(reader.dataEnd)/float64(blockManager.BlockSize())*100)
-		reader.SeekToRestart(0)
-		fmt.Printf("\nSample Records (first 5):\n")
-		for i := 0; i < 5 && reader.HasNext(); i++ {
-			rec, shared, suffixLen, suffix, err := reader.ReadRecordWithMeta()
-			if err != nil {
-				break
-			}
-			icon := ""
-			if rec.Tombstone {
-				icon = "[del]️"
-			}
-			keyDisplay := string(rec.Key)
-			if len(keyDisplay) > 25 {
-				keyDisplay = keyDisplay[:22] + "..."
-			}
-			valueDisplay := string(rec.Value)
-			if len(valueDisplay) > 30 {
-				valueDisplay = valueDisplay[:27] + "..."
-			}
-			fmt.Printf("[%d] %s %-25s → %s | shared=%d suffixLen=%d suffix=%q\n",
-				i,
-				icon,
-				keyDisplay,
-				valueDisplay,
-				shared,
-				suffixLen,
-				string(suffix),
-			)
-		}
-		if recordCount > 10 {
-			fmt.Printf("... and %d more records\n", recordCount-5)
-		}
-	}
-	fmt.Println("==========================================================================================")
-	fmt.Printf("Summary:\n")
-	fmt.Printf("Total Blocks: %d\n", numBlocks)
-	fmt.Printf("File Size: %d bytes\n", fileSize)
-	fmt.Printf("Avg/block: %.1f records\n", float64(fileSize)/float64(numBlocks)/70.0)
-	fmt.Println("==========================================================================================")
-	return nil
+	return iterator.Current.Tombstone()
 }

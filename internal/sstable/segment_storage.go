@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 
+	"github.com/ajromen/LSM-KV-Engine/internal/block"
 	"github.com/ajromen/LSM-KV-Engine/internal/config"
 )
 
@@ -16,16 +17,17 @@ type SegmentStorage interface {
 }
 
 type SingleFileStorage struct {
-	file   *os.File
-	offset uint64
+	file         *os.File
+	offset       uint64
+	blockManager *block.BlockManager
 }
 
-func NewSingleFileStorage(filePath string) (*SingleFileStorage, error) {
+func NewSingleFileStorage(filePath string, blockManager *block.BlockManager) (*SingleFileStorage, error) {
 	file, err := os.OpenFile(filePath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0600)
 	if err != nil {
 		return nil, err
 	}
-	return &SingleFileStorage{file: file, offset: 0}, nil
+	return &SingleFileStorage{file: file, offset: 0, blockManager: blockManager}, nil
 }
 
 func OpenSingleFileStorage(filePath string) (*SingleFileStorage, error) {
@@ -37,27 +39,53 @@ func OpenSingleFileStorage(filePath string) (*SingleFileStorage, error) {
 }
 
 func (s *SingleFileStorage) WriteSegment(segType config.SegmentType, data []byte) (uint64, uint32, error) {
+	offset := s.offset
+	if segType == config.SegmentData && s.blockManager != nil {
+		if len(data) < s.blockManager.BlockSize() {
+			padding := make([]byte, s.blockManager.BlockSize()-len(data))
+			data = append(data, padding...)
+		}
+		blockKey := block.BlockKey{
+			FilePath: s.file.Name(),
+			Offset:   uint32(s.offset / uint64(s.blockManager.BlockSize())),
+		}
+		if err := s.blockManager.Write(blockKey, data); err != nil {
+			return 0, 0, err
+		}
+		if _, err := s.file.Seek(int64(len(data)), io.SeekCurrent); err != nil {
+			return 0, 0, err
+		}
+		s.offset += uint64(len(data))
+		return offset, uint32(len(data)), nil
+	}
+
 	n, err := s.file.Write(data)
 	if err != nil {
 		return 0, 0, err
 	}
-	offset := s.offset
 	s.offset += uint64(n)
 	return offset, uint32(n), nil
 }
 
 func (s *SingleFileStorage) ReadSegment(segType config.SegmentType, offset uint64, size uint32) ([]byte, error) {
 	data := make([]byte, size)
+	nTotal := 0
 	_, err := s.file.Seek(int64(offset), io.SeekStart)
 	if err != nil {
 		return nil, err
 	}
-	n, err := s.file.Read(data)
-	if err != nil {
-		return nil, err
+	for nTotal < int(size) {
+		n, err := s.file.Read(data[nTotal:])
+		if err != nil {
+			return nil, err
+		}
+		if n == 0 {
+			break
+		}
+		nTotal += n
 	}
-	if n != int(size) {
-		return nil, fmt.Errorf("expected to read %d bytes, got %d", size, n)
+	if nTotal != int(size) {
+		return nil, fmt.Errorf("expected to read %d bytes, got %d", size, nTotal)
 	}
 	return data, nil
 }
@@ -81,16 +109,18 @@ func (s *SingleFileStorage) File() *os.File {
 }
 
 type MultiFileStorage struct {
-	basePath string
-	files    map[config.SegmentType]*os.File
-	offsets  map[config.SegmentType]uint64
+	basePath     string
+	files        map[config.SegmentType]*os.File
+	offsets      map[config.SegmentType]uint64
+	blockManager *block.BlockManager
 }
 
-func NewMultiFileStorage(basePath string) (*MultiFileStorage, error) {
+func NewMultiFileStorage(basePath string, blockManager *block.BlockManager) (*MultiFileStorage, error) {
 	return &MultiFileStorage{
-		basePath: basePath,
-		files:    make(map[config.SegmentType]*os.File),
-		offsets:  make(map[config.SegmentType]uint64),
+		basePath:     basePath,
+		files:        make(map[config.SegmentType]*os.File),
+		offsets:      make(map[config.SegmentType]uint64),
+		blockManager: blockManager,
 	}, nil
 }
 
@@ -153,11 +183,27 @@ func (m *MultiFileStorage) WriteSegment(segType config.SegmentType, data []byte)
 	if err != nil {
 		return 0, 0, err
 	}
+	offset := m.offsets[segType]
+	if segType == config.SegmentData && m.blockManager != nil {
+		if len(data) < m.blockManager.BlockSize() {
+			padding := make([]byte, m.blockManager.BlockSize()-len(data))
+			data = append(data, padding...)
+		}
+		blockKey := block.BlockKey{
+			FilePath: file.Name(),
+			Offset:   uint32(offset / uint64(m.blockManager.BlockSize())),
+		}
+		if err := m.blockManager.Write(blockKey, data); err != nil {
+			return 0, 0, err
+		}
+
+		m.offsets[segType] += uint64(len(data))
+		return offset, uint32(len(data)), nil
+	}
 	n, err := file.Write(data)
 	if err != nil {
 		return 0, 0, err
 	}
-	offset := m.offsets[segType]
 	m.offsets[segType] += uint64(n)
 	return offset, uint32(n), nil
 }
@@ -202,11 +248,11 @@ func (m *MultiFileStorage) Sync() error {
 	return lastErr
 }
 
-func CreateStorage(basePath string, config *config.Config) (SegmentStorage, error) {
+func CreateStorage(basePath string, config *config.Config, blockManager *block.BlockManager) (SegmentStorage, error) {
 	if config.SSTable.Format == 0 {
-		return NewSingleFileStorage(basePath)
+		return NewSingleFileStorage(basePath, blockManager)
 	}
-	return NewMultiFileStorage(basePath)
+	return NewMultiFileStorage(basePath, blockManager)
 }
 
 func OpenStorage(basePath string, config *config.Config) (SegmentStorage, error) {
@@ -214,4 +260,12 @@ func OpenStorage(basePath string, config *config.Config) (SegmentStorage, error)
 		return OpenSingleFileStorage(basePath)
 	}
 	return OpenMultiFileStorage(basePath)
+}
+
+func (s *SingleFileStorage) Size() (uint64, error) {
+	info, err := s.file.Stat()
+	if err != nil {
+		return 0, err
+	}
+	return uint64(info.Size()), nil
 }
