@@ -23,10 +23,11 @@ const (
 	DefaultMemtableMaxEntries = 1000
 
 	//SSTable
-	DefaultSSTableBlockSize           = 16
-	DefaultSSTableRestartInterval     = 4
+	DefaultSSTableBlockSize           = 160
+	DefaultSSTableRestartInterval     = 3
 	DefaultSSTableCompression         = CompressionNone
 	DefaultSSTableMinBlockUtilization = 0.8
+	DefaultIndexBlockSize             = 20
 
 	//SkipList
 	DefaultSkipListMaxLevel = 16
@@ -56,6 +57,9 @@ func NewDefaultConfig() *Config {
 				RestartInterval:     DefaultSSTableRestartInterval,
 				Compression:         DefaultSSTableCompression,
 				MinBlockUtilization: DefaultSSTableMinBlockUtilization,
+			},
+			IndexSegment: IndexSegmentConfig{
+				IndexBlockSize: DefaultIndexBlockSize,
 			},
 		},
 		SkipList: SkipListConfig{
