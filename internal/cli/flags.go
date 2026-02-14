@@ -5,7 +5,6 @@ import (
 	"strconv"
 )
 
-// FLags should be pointers to allow nil value when flag is not explicitly provided
 type FLags struct {
 	ConfigPath          *string
 	Debug               *bool
@@ -13,6 +12,12 @@ type FLags struct {
 	MemtableMaxSizeKb   *int
 	MemtableType        *string
 	BlockCacheMaxBlocks *int
+
+	BlockSize *int
+
+	WALSegmentSize  *int
+	WALSyncInterval *int
+	WALMaxSegments  *int
 }
 
 func ParseFlags() *FLags {
@@ -21,25 +26,45 @@ func ParseFlags() *FLags {
 	var mtMaxSizeOpt OptionalInt
 	var mtMaxSizeKbOpt OptionalInt
 	var mtTypeOpt OptionalString
-	var BlockCacheMaxBlocksOpt OptionalInt
+	var blockCacheMaxBlocksOpt OptionalInt
+
+	var blockSizeOpt OptionalInt
+	var walSegSizeOpt OptionalInt
+	var walSyncOpt OptionalInt
+	var walMaxSegOpt OptionalInt
 
 	flagString(&configPathOpt, "config", "Path to config file")
 	flagString(&configPathOpt, "c", "Path to config file")
+
 	flagBool(&debugOpt, "debug", "Debug mode")
 	flagBool(&debugOpt, "d", "Debug mode")
-	flagInt(&mtMaxSizeOpt, "memtable-max-size", "Max memtable size in bytes")
+
+	flagInt(&mtMaxSizeOpt, "memtable-max-size", "Max memtable size (entries or bytes, depending on implementation)")
 	flagInt(&mtMaxSizeKbOpt, "memtable-max-size-kb", "Max memtable size in kilobytes")
 	flagString(&mtTypeOpt, "memtable-type", "hashmap, skiplist or btree")
-	flagInt(&BlockCacheMaxBlocksOpt, "block-cache-max-blocks", "Max number of blocks in the block cache")
+
+	flagInt(&blockCacheMaxBlocksOpt, "block-cache-max-blocks", "Max number of blocks in the block cache")
+
+	flagInt(&blockSizeOpt, "block-size", "Block size in bytes")
+
+	flagInt(&walSegSizeOpt, "wal-segment-size", "WAL segment size in bytes")
+	flagInt(&walSyncOpt, "wal-sync-interval", "WAL sync interval in milliseconds (0=only on commit/flush)")
+	flagInt(&walMaxSegOpt, "wal-max-segments", "Max WAL segments to keep (0=unlimited)")
 
 	flag.Parse()
 
 	return &FLags{
-		ConfigPath:        configPathOpt.Get(),
-		Debug:             debugOpt.Get(),
-		MemtableMaxSize:   mtMaxSizeOpt.Get(),
-		MemtableMaxSizeKb: mtMaxSizeKbOpt.Get(),
-		MemtableType:      mtTypeOpt.Get(),
+		ConfigPath:          configPathOpt.Get(),
+		Debug:               debugOpt.Get(),
+		MemtableMaxSize:     mtMaxSizeOpt.Get(),
+		MemtableMaxSizeKb:   mtMaxSizeKbOpt.Get(),
+		MemtableType:        mtTypeOpt.Get(),
+		BlockCacheMaxBlocks: blockCacheMaxBlocksOpt.Get(),
+
+		BlockSize:       blockSizeOpt.Get(),
+		WALSegmentSize:  walSegSizeOpt.Get(),
+		WALSyncInterval: walSyncOpt.Get(),
+		WALMaxSegments:  walMaxSegOpt.Get(),
 	}
 }
 
