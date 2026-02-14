@@ -22,6 +22,7 @@ func createTestRecord(key string, value string, timestamp uint64, tombstone bool
 
 func TestSSTableWriterBasic(t *testing.T) {
 	tempFile := filepath.Join("test_sstable_basic.sst")
+	defer os.Remove(tempFile)
 	cfg := config.NewDefaultConfig()
 	blockManager := block.NewBlockManager(cfg.SSTable.DataSegment.BlockSize, 100)
 	writer, err := NewSSTableWriter(tempFile, blockManager, cfg, 100)
@@ -37,7 +38,7 @@ func TestSSTableWriterBasic(t *testing.T) {
 		createTestRecord("key006", "value005", 5, false),
 		createTestRecord("key007", "value007", 5, false),
 		createTestRecord("key008", "value008", 5, false),
-		createTestRecord("key009", "value005", 5, false),
+		createTestRecord("key009", "value009", 5, false),
 		createTestRecord("key010", "value005", 5, false),
 		createTestRecord("key011", "value005", 5, false),
 		createTestRecord("key012", "value005", 5, false),
@@ -66,6 +67,8 @@ func TestSSTableWriterBasic(t *testing.T) {
 	fmt.Println("FILE SIZE:", info.Size())
 	fmt.Println("SUMMARY OFFSET:", reader.footer.SummaryHandler.Offset)
 	fmt.Println("SUMMARY SIZE:", reader.footer.SummaryHandler.Size)
+	fmt.Println("SUMMARY OFFSET:", reader.footer.IndexHandler.Offset)
+	fmt.Println("SUMMARY SIZE:", reader.footer.IndexHandler.Size)
 	fmt.Println("NUMBER OF BLOCKS: ", reader.footer.NumDataBlocks)
 	f, _ := os.Open(tempFile)
 	defer f.Close()
@@ -82,13 +85,9 @@ func TestSSTableWriterBasic(t *testing.T) {
 	}
 	fmt.Println("INDEX RAW BYTES:", buf)
 	fmt.Println(reader.footer.TotalRecords)
-	fmt.Println(reader.footer.SummaryHandler.Size)
-	fmt.Println(reader.footer.SummaryHandler.Offset)
-	fmt.Println(reader.footer.IndexHandler.Size)
-	fmt.Println(reader.footer.IndexHandler.Offset)
 	fmt.Println("SUMMARY ENTRIES", reader.summarySegment.Entries)
 	fmt.Println("INDEX BLOCK OFFSET", reader.summarySegment.Entries[0].IndexBlockOffset)
-	record, err := reader.Get([]byte("key020"))
+	record, err := reader.Get([]byte("key001"))
 	if err != nil {
 		t.Fatalf("ReadAt failed: %v", err)
 	}
@@ -109,16 +108,33 @@ func TestSSTableMultiFileFormat(t *testing.T) {
 	cfg.SSTable.Format = 1
 	blockManager := block.NewBlockManager(cfg.SSTable.DataSegment.BlockSize, 100)
 	writer, err := NewSSTableWriter(tempFile, blockManager, cfg, 100)
-	if err != nil {
-		t.Fatalf("Failed to create writer: %v", err)
+	records := []Record{
+		createTestRecord("key001", "value001", 1, false),
+		createTestRecord("key002", "value002", 2, false),
+		createTestRecord("key003", "value003", 3, false),
+		createTestRecord("key004", "value004", 4, false),
+		createTestRecord("key005", "value005", 5, false),
+		createTestRecord("key006", "value005", 5, false),
+		createTestRecord("key007", "value007", 5, false),
+		createTestRecord("key008", "value008", 5, false),
+		createTestRecord("key009", "value009", 5, false),
+		createTestRecord("key010", "value005", 5, false),
+		createTestRecord("key011", "value005", 5, false),
+		createTestRecord("key012", "value005", 5, false),
+		createTestRecord("key013", "value005", 5, false),
+		createTestRecord("key014", "value005", 5, false),
+		createTestRecord("key015", "value005", 5, false),
+		createTestRecord("key016", "value016", 5, false),
+		createTestRecord("key017", "value005", 5, false),
 	}
-	for i := 0; i < 20; i++ {
-		key := fmt.Sprintf("key%03d", i)
-		value := fmt.Sprintf("value%03d", i)
-		rec := createTestRecord(key, value, uint64(i), false)
-		writer.AddRecord(rec)
+	for _, rec := range records {
+		if err := writer.AddRecord(rec); err != nil {
+			t.Fatalf("Failed to add record: %v", err)
+		}
 	}
-	writer.Finalize()
+	if err := writer.Finalize(); err != nil {
+		t.Fatalf("Failed to finalize: %v", err)
+	}
 	files := []string{
 		tempFile,
 		tempFile + ".filter",
@@ -131,5 +147,44 @@ func TestSSTableMultiFileFormat(t *testing.T) {
 		if _, err := os.Stat(file); os.IsNotExist(err) {
 			t.Errorf("Expected file %s to exist", file)
 		}
+	}
+	reader, err := NewSSTableReader(tempFile, blockManager, cfg)
+	if err != nil {
+		t.Fatalf("Failed to create sstable reader: %v", err)
+	}
+	fmt.Println("INDEX OFFSET:", reader.footer.IndexHandler.Offset)
+	fmt.Println("INDEX SIZE:", reader.footer.IndexHandler.Size)
+	fmt.Println("SUMMARY OFFSET:", reader.footer.SummaryHandler.Offset)
+	fmt.Println("SUMMARY SIZE:", reader.footer.SummaryHandler.Size)
+	fmt.Println("FILTER OFFSET:", reader.footer.FilterHandler.Offset)
+	fmt.Println("FILTER SIZE:", reader.footer.FilterHandler.Size)
+	fmt.Println("METADATA OFFSET:", reader.footer.MetaDataHandler.Offset)
+	fmt.Println("METADATA SIZE:", reader.footer.MetaDataHandler.Size)
+	fmt.Println("NUMBER OF BLOCKS: ", reader.footer.NumDataBlocks)
+	summary_f, _ := os.Open(tempFile + ".summary")
+	defer summary_f.Close()
+	buf := make([]byte, reader.footer.SummaryHandler.Size)
+	_, err = summary_f.ReadAt(buf, int64(reader.footer.SummaryHandler.Offset))
+	if err != nil {
+		t.Fatalf("ReadAt failed: %v", err)
+	}
+	fmt.Println("SUMMARY RAW BYTES:", buf)
+	index_f, _ := os.Open(tempFile + ".index")
+	defer summary_f.Close()
+	buf = make([]byte, reader.footer.IndexHandler.Size)
+	_, err = index_f.ReadAt(buf, int64(reader.footer.IndexHandler.Offset))
+	if err != nil {
+		t.Fatalf("ReadAt failed: %v", err)
+	}
+	fmt.Println("INDEX RAW BYTES:", buf)
+	fmt.Println(reader.footer.TotalRecords)
+	fmt.Println("SUMMARY ENTRIES", reader.summarySegment.Entries)
+	fmt.Println("INDEX BLOCK OFFSET", reader.summarySegment.Entries[0].IndexBlockOffset)
+	record, err := reader.Get([]byte("key001"))
+	if err != nil {
+		t.Fatalf("ReadAt failed: %v", err)
+	}
+	if record != nil {
+		fmt.Println("USPIO GET: ", string(record.Value))
 	}
 }

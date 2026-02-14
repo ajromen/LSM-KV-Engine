@@ -94,12 +94,6 @@ func (block *IndexBlock) EncodeIndexBlock() []byte {
 }
 
 func DecodeIndexBlock(buf []byte) (*IndexBlock, error) {
-	//crcPos := len(buf) - 4
-	//expected := binary.LittleEndian.Uint32(buf[crcPos:])
-	//crc := crc32.ChecksumIEEE(buf[:crcPos])
-	//if expected != crc {
-	//return nil, errors.New("crc mismatch")
-	//}
 	numEntries := binary.LittleEndian.Uint32(buf[0:4])
 	if numEntries == 0 {
 		return &IndexBlock{Entries: []IndexEntry{}}, nil

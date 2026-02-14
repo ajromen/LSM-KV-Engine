@@ -214,16 +214,23 @@ func (m *MultiFileStorage) ReadSegment(segType config.SegmentType, offset uint64
 		return nil, err
 	}
 	data := make([]byte, size)
+	nTotal := 0
 	_, err = file.Seek(int64(offset), io.SeekStart)
 	if err != nil {
 		return nil, err
 	}
-	n, err := file.Read(data)
-	if err != nil {
-		return nil, err
+	for nTotal < int(size) {
+		n, err := file.Read(data[nTotal:])
+		if err != nil {
+			return nil, err
+		}
+		if n == 0 {
+			break
+		}
+		nTotal += n
 	}
-	if n != int(size) {
-		return nil, fmt.Errorf("expected to read %d bytes, got %d", size, n)
+	if nTotal != int(size) {
+		return nil, fmt.Errorf("expected to read %d bytes, got %d", size, nTotal)
 	}
 	return data, nil
 }

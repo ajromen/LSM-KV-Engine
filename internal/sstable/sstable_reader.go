@@ -127,11 +127,10 @@ func (r *SSTableReader) loadIndexBlock(blockNumber int) (*IndexBlock, error) {
 	default:
 		return nil, errors.New("unsupported storage type")
 	}
-	data := make([]byte, indexBlockSize)
+	data := make([]byte, indexBlockSize-1)
 	if _, err := file.ReadAt(data, int64(offset)); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("ReadAt failed at offset %d: %w", offset, err)
 	}
-	fmt.Println(data)
 	block, err := DecodeIndexBlock(data)
 	if err != nil {
 		return nil, err
@@ -146,7 +145,6 @@ func (r *SSTableReader) Get(key []byte) (*Record, error) {
 		}
 	}
 	indexBlockNum := r.summarySegment.FindIndexBlockNumber(key)
-	fmt.Println(indexBlockNum)
 	if indexBlockNum < 0 {
 		return nil, nil
 	}
@@ -154,15 +152,11 @@ func (r *SSTableReader) Get(key []byte) (*Record, error) {
 	if err != nil {
 		return nil, err
 	}
-	fmt.Println("Trazim kljuc doso sam ovd")
-	fmt.Println(indexBlock)
 	entryIdx := indexBlock.FindBlock(key)
-	fmt.Println("Entry Index", entryIdx)
 	if entryIdx < 0 {
 		return nil, nil
 	}
 	dataBlockIdx := indexBlock.Entries[entryIdx].BlockIndex
-	fmt.Println("Data Block Index", dataBlockIdx)
 	blockKey := block.BlockKey{
 		FilePath: r.filePath,
 		Offset:   dataBlockIdx,
@@ -171,17 +165,13 @@ func (r *SSTableReader) Get(key []byte) (*Record, error) {
 	if err != nil {
 		return nil, err
 	}
-	fmt.Println("BLOCK", blockData)
 	iterator, err := NewDataBlockIterator(blockData)
 	if err != nil {
 		return nil, err
 	}
 	iterator.Rewind()
-	fmt.Println("Iterator", iterator.Current().Key)
 	defer iterator.Close()
-	fmt.Println("Prosao sam close")
 	if err := iterator.Seek(key); err != nil {
-		fmt.Println("Seek", err)
 		return nil, err
 	}
 	if bytes.Equal(iterator.Current().Key, key) {

@@ -18,26 +18,26 @@ const (
 )
 
 type SegmentHandler struct {
-	Offset uint64
-	Size   uint32
+	Offset uint64 // holds the real offset in file for each of segments of sstable (in case of multifileformat = 0)
+	Size   uint32 // size of each segment
 }
 
 type Footer struct {
-	FilterHandler   SegmentHandler
-	IndexHandler    SegmentHandler
-	SummaryHandler  SegmentHandler
-	MetaDataHandler SegmentHandler
-	NumDataBlocks   uint32
-	MinTimeStamp    utils.Uint128
-	MaxTimeStamp    utils.Uint128
-	MinKeyLength    uint32
-	MaxKeyLength    uint32
-	TotalRecords    uint64
-	CompressionType byte
-	Version         byte
-	Format          byte
-	MagicNumber     uint32
-	CRC             uint32
+	FilterHandler   SegmentHandler // handler for filter segment
+	IndexHandler    SegmentHandler // handler for index segment
+	SummaryHandler  SegmentHandler // handler for summary segment
+	MetaDataHandler SegmentHandler // handler for metadatahandler
+	NumDataBlocks   uint32         // number of data blocks in sstable
+	MinTimeStamp    utils.Uint128  // min timestamp in sstable
+	MaxTimeStamp    utils.Uint128  // max timestamp in sstable
+	MinKeyLength    uint32         // min keylength in sstable
+	MaxKeyLength    uint32         // max keylength in sstable
+	TotalRecords    uint64         // number of records in sstable
+	CompressionType byte           // type of compression = 0 always
+	Version         byte           // version = 1 always
+	Format          byte           // format (0 - singlefile / 1 - multifile)
+	MagicNumber     uint32         // SSTB in hex
+	CRC             uint32         // crc over the whole footer segment
 }
 
 func NewFooter(config config.SSTableConfig) *Footer {
@@ -52,6 +52,8 @@ func NewFooter(config config.SSTableConfig) *Footer {
 		MagicNumber:     MagicNumber,
 	}
 }
+
+// ENCODES SLICE OF BYTES TO FOOTER
 
 func (f *Footer) Encode() []byte {
 	buf := make([]byte, FooterSize)
@@ -111,6 +113,8 @@ func (f *Footer) Encode() []byte {
 
 	return buf
 }
+
+// DECODES FOOTER TO SLICE OF BYTES
 
 func (f *Footer) Decode(buf []byte) error {
 	if len(buf) != FooterSize {

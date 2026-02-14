@@ -23,7 +23,7 @@ const (
 	DefaultMemtableMaxEntries = 1000
 
 	//SSTable
-	DefaultSSTableBlockSize           = 160
+	DefaultSSTableBlockSize           = 150
 	DefaultSSTableRestartInterval     = 3
 	DefaultSSTableCompression         = CompressionNone
 	DefaultSSTableMinBlockUtilization = 0.8
