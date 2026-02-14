@@ -48,9 +48,10 @@ func (bm *BlockManager) Read(key BlockKey) ([]byte, error) {
 		// WAL reads whole blocks, eof shouldnt happen
 		return nil, err
 	}
-
-	bm.cache.Put(key, val)
-	return val, nil
+	cpy := make([]byte, len(val))
+	copy(cpy, val)
+	bm.cache.Put(key, cpy)
+	return cpy, nil
 }
 
 func (bm *BlockManager) Write(key BlockKey, value []byte) error {
@@ -69,7 +70,9 @@ func (bm *BlockManager) Write(key BlockKey, value []byte) error {
 		return err
 	}
 
-	bm.cache.Put(key, value)
+	cpy := make([]byte, len(value))
+	copy(cpy, value)
+	bm.cache.Put(key, cpy)
 	return nil
 }
 
