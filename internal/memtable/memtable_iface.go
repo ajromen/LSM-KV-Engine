@@ -14,6 +14,7 @@ type Memtable interface {
 	Reset()
 	FlushEntries() []MemtableEntry
 	ReadEntriesNoFlushing() []MemtableEntry
+	Size() int
 }
 
 type HashMapMemtable struct {
@@ -36,6 +37,7 @@ type SkipListMemtable struct {
 
 type Memtables struct {
 	activeIndex  int
+	oldestIndex  int
 	maxTables    int
 	tables       []Memtable
 	flushHandler func([]MemtableEntry)

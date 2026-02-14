@@ -243,3 +243,51 @@ func TestBTreeRotation(t *testing.T) {
 		t.Fatalf("expected key1 to have value1, got %v", entry.Value)
 	}
 }
+
+func TestFlushesOnlyOldestAfterSixEntries(t *testing.T) {
+	t.Log("---- ONLY OLDEST MEMTABLE IS FLUSHED AFTER 6 ENTRIES ----")
+
+	flushed := [][]MemtableEntry{}
+
+	mt := NewMemtables("skiplist", 2, 3, func(entries []MemtableEntry) {
+		cp := make([]MemtableEntry, len(entries))
+		copy(cp, entries)
+		flushed = append(flushed, cp)
+	})
+
+	mt.Put("key1", []byte("value1"))
+	mt.Put("key2", []byte("value2"))
+	mt.Put("key3", []byte("value3")) // puni prvu memtable -> flush
+
+	mt.Put("key4", []byte("value4"))
+	mt.Put("key5", []byte("value5"))
+	mt.Put("key6", []byte("value6")) // puni drugu memtable, ali NE FLUSHUJE
+
+	if len(flushed) != 1 {
+		t.Fatalf("expected exactly 1 flush after 6 puts, got %d", len(flushed))
+	}
+
+	if len(flushed[0]) != 3 {
+		t.Fatalf("expected flushed entries to be 3 (oldest memtable), got %d", len(flushed[0]))
+	}
+
+	keys := map[string]bool{}
+	for _, e := range flushed[0] {
+		keys[e.Key] = true
+	}
+
+	if !keys["key1"] || !keys["key2"] || !keys["key3"] {
+		t.Fatalf("expected flushed keys to be key1,key2,key3, got %+v", keys)
+	}
+
+	// dodatna provjera: novi ključevi su još u memtable-u
+	if _, ok := mt.Get("key4"); !ok {
+		t.Fatalf("expected key4 to still be in memtable")
+	}
+	if _, ok := mt.Get("key5"); !ok {
+		t.Fatalf("expected key5 to still be in memtable")
+	}
+	if _, ok := mt.Get("key6"); !ok {
+		t.Fatalf("expected key6 to still be in memtable")
+	}
+}

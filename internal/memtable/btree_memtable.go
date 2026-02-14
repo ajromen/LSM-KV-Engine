@@ -201,3 +201,7 @@ func (memtable *BTreeMemtable) ReadEntriesNoFlushing() []MemtableEntry {
 	entries := memtable.memtableData.entriesInOrder()
 	return entries
 }
+
+func (memtable *BTreeMemtable) Size() int {
+	return len(memtable.memtableData.entriesInOrder())
+}

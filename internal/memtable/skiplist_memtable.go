@@ -151,3 +151,7 @@ func (memtable *SkipListMemtable) ReadEntriesNoFlushing() []MemtableEntry {
 	}
 	return entries
 }
+
+func (memtable *SkipListMemtable) Size() int {
+	return memtable.memtableData.size
+}
