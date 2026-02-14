@@ -130,27 +130,20 @@ func (sw *SSTableWriter) flushDataBlock() error {
 }
 
 func (w *SSTableWriter) Finalize() error {
-	// flush preostali data block
 	if w.dataBlockBuilder.RecordCount() > 0 {
 		if err := w.flushDataBlock(); err != nil {
 			return err
 		}
 	}
-
-	// build Merkle tree
 	if err := w.merkleTree.Build(); err != nil {
 		return err
 	}
-
-	// footer osnovni podaci
 	w.footer.NumDataBlocks = w.currentBlockIndex
 	w.footer.TotalRecords = w.recordCount
 	w.footer.MinTimeStamp = w.minTimestamp
 	w.footer.MaxTimeStamp = w.maxTimestamp
 	w.footer.MinKeyLength = w.minKeyLength
 	w.footer.MaxKeyLength = w.maxKeyLength
-
-	// zapis filter segmenta
 	if w.filterSegment != nil {
 		filterData, err := w.filterSegment.Encode()
 		if err != nil {
@@ -165,11 +158,8 @@ func (w *SSTableWriter) Finalize() error {
 			Size:   filterSize,
 		}
 	}
-
-	// zapis index blokova
 	var indexOffsets []uint64
 	totalIndexSize := uint64(0)
-
 	if len(w.indexSegment.Blocks) > 0 {
 		indexOffsets = make([]uint64, len(w.indexSegment.Blocks))
 		for i, indexBlock := range w.indexSegment.Blocks {
@@ -186,13 +176,10 @@ func (w *SSTableWriter) Finalize() error {
 		}
 		w.footer.IndexHandler.Size = uint32(totalIndexSize)
 	} else {
-		// nema blokova → index segment ostaje prazan
 		w.footer.IndexHandler.Offset = 0
 		w.footer.IndexHandler.Size = 0
 		indexOffsets = []uint64{}
 	}
-
-	// summary segment
 	if len(indexOffsets) > 0 {
 		w.summarySegment = BuildSummaryFromIndex(indexOffsets, w.indexSegment.Blocks, 1)
 		summaryData := w.summarySegment.Encode()
@@ -205,15 +192,12 @@ func (w *SSTableWriter) Finalize() error {
 			Size:   summarySize,
 		}
 	} else {
-		// prazna summary
 		w.summarySegment = NewSummarySegment(1)
 		w.footer.SummaryHandler = SegmentHandler{
 			Offset: 0,
 			Size:   0,
 		}
 	}
-
-	// zapis Merkle tree kao metadata
 	metadataData := w.merkleTree.Encode()
 	metadataOffset, metadataSize, err := w.storage.WriteSegment(config.SegmentMetadata, metadataData)
 	if err != nil {
@@ -223,13 +207,9 @@ func (w *SSTableWriter) Finalize() error {
 		Offset: metadataOffset,
 		Size:   metadataSize,
 	}
-
-	// footer zapis
 	if err := w.footer.WriteToStorage(w.storage); err != nil {
 		return err
 	}
-
-	// sync + close
 	if err := w.storage.Sync(); err != nil {
 		return err
 	}
