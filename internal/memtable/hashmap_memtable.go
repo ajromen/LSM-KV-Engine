@@ -71,6 +71,10 @@ func (memtable *HashMapMemtable) ReadEntriesNoFlushing() []MemtableEntry {
 	return entries
 }
 
+func (memtable *HashMapMemtable) Size() int {
+	return len(memtable.memtableData)
+}
+
 func quickSort(arr []string, low int, high int) {
 	if low < high {
 		p := partition(arr, low, high)

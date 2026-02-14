@@ -1,6 +1,13 @@
 package memtable
 
-func NewMemtables(memType string, instances int, maxSize int, flushHandler func([]MemtableEntry)) *Memtables {
+import "github.com/ajromen/LSM-KV-Engine/internal/config"
+
+func NewMemtables(cfg config.Config, flushHandler func([]MemtableEntry)) *Memtables {
+	instances := cfg.Memtable.Instances
+	maxSize := cfg.Memtable.MemtableMaxSize
+	t := cfg.Memtable.BTreeConfig.MinimumDegree
+	maxLevel := cfg.Memtable.SkipListConfig.MaxLevel
+	memType := cfg.Memtable.MemtableType
 	if instances < 1 {
 		instances = 1
 	}
@@ -11,9 +18,9 @@ func NewMemtables(memType string, instances int, maxSize int, flushHandler func(
 		case "hashmap":
 			m = NewHashMap(maxSize, flushHandler)
 		case "skiplist":
-			m = NewSkipListMem(maxSize, flushHandler)
+			m = NewSkipListMem(maxSize, maxLevel, flushHandler)
 		case "btree":
-			m = NewBTreeMem(maxSize, flushHandler)
+			m = NewBTreeMem(maxSize, t, flushHandler)
 		default:
 			continue
 		}
@@ -23,6 +30,7 @@ func NewMemtables(memType string, instances int, maxSize int, flushHandler func(
 	}
 	return &Memtables{
 		activeIndex:  0,
+		oldestIndex:  0,
 		maxTables:    instances,
 		tables:       tables,
 		flushHandler: flushHandler,
@@ -33,19 +41,24 @@ func (m *Memtables) Put(key string, value []byte) {
 	active := m.tables[m.activeIndex]
 	active.Put(key, value)
 	if active.Flush() {
+		next := (m.activeIndex + 1) % m.maxTables
+		if m.tables[next].Size() == 0 {
+			m.activeIndex = next
+			return
+		}
 		m.flushOldestAndRotate()
 	}
 }
 
 func (m *Memtables) flushOldestAndRotate() {
-	oldestIndex := (m.activeIndex + 1) % m.maxTables
-	oldest := m.tables[oldestIndex]
+	oldest := m.tables[m.oldestIndex]
 	entries := oldest.FlushEntries()
 	if m.flushHandler != nil {
 		m.flushHandler(entries)
 	}
 	oldest.Reset()
-	m.activeIndex = oldestIndex
+	m.oldestIndex = (m.oldestIndex + 1) % len(m.tables)
+	m.activeIndex = (m.activeIndex + 1) % len(m.tables)
 }
 
 func (m *Memtables) Get(key string) (MemtableEntry, bool) {
@@ -72,8 +85,9 @@ func (m *Memtables) Delete(key string) {
 
 func (m *Memtables) ReadEntriesNoFlushing() []MemtableEntry {
 	all := make([]MemtableEntry, 0)
-	for i := 0; i <= m.activeIndex; i++ {
-		entries := m.tables[i].ReadEntriesNoFlushing()
+	for i := 0; i < m.maxTables; i++ {
+		idx := (m.activeIndex - i + m.maxTables) % m.maxTables
+		entries := m.tables[idx].ReadEntriesNoFlushing()
 		all = append(all, entries...)
 	}
 	return all
