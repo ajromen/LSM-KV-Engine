@@ -14,7 +14,7 @@ func TestReadWrite(t *testing.T) {
 
 	key := BlockKey{
 		filePath: filePath,
-		offset:   0,
+		Offset:   0,
 	}
 
 	data := []byte("0123456789abcdef")
@@ -41,7 +41,7 @@ func TestCache(t *testing.T) {
 
 	key := BlockKey{
 		filePath: filePath,
-		offset:   0,
+		Offset:   0,
 	}
 
 	data := []byte("abcd")
@@ -83,7 +83,7 @@ func TestWriteAt(t *testing.T) {
 
 	key := BlockKey{
 		filePath: filePath,
-		offset:   2,
+		Offset:   2,
 	}
 
 	data := []byte("abcd")
@@ -110,7 +110,7 @@ func TestInvalidBlockSize(t *testing.T) {
 
 	key := BlockKey{
 		filePath: filePath,
-		offset:   0,
+		Offset:   0,
 	}
 
 	err := bm.Write(key, []byte("0123456"))
