@@ -14,8 +14,8 @@ type BlockManager struct {
 }
 
 type BlockKey struct {
-	filePath string
-	offset   uint32
+	FilePath string
+	Offset   uint32 // ako je blok 1kb dozvoljava segment size od 4 terabajta (16 bitova daje max 64mb)
 }
 
 func NewBlockManager(blockSize, maxLRUSize int) *BlockManager {
@@ -35,14 +35,14 @@ func (bm *BlockManager) Read(key BlockKey) ([]byte, error) {
 		return val, nil
 	}
 
-	f, err := os.Open(key.filePath)
+	f, err := os.Open(key.FilePath)
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
 
 	val := make([]byte, bm.blockSize)
-	_, err = f.ReadAt(val, int64(bm.blockSize)*int64(key.offset))
+	_, err = f.ReadAt(val, int64(bm.blockSize)*int64(key.Offset))
 	if err != nil && err != io.EOF {
 		// io.EOF might be partial at the end
 		// WAL reads whole blocks, eof shouldnt happen
@@ -59,13 +59,13 @@ func (bm *BlockManager) Write(key BlockKey, value []byte) error {
 		return fmt.Errorf("invalid block size")
 	}
 
-	f, err := os.OpenFile(key.filePath, os.O_CREATE|os.O_RDWR, 0o644)
+	f, err := os.OpenFile(key.FilePath, os.O_CREATE|os.O_RDWR, 0o644)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
 
-	offset := int64(bm.blockSize) * int64(key.offset)
+	offset := int64(bm.blockSize) * int64(key.Offset)
 	if _, err = f.WriteAt(value, offset); err != nil {
 		return err
 	}
@@ -85,12 +85,13 @@ func (bm *BlockManager) SyncFile(path string) error {
 	return f.Sync()
 }
 
+// WriteAt Sluzi za dopisivanje bloka na kraj fajla (ako mu se prosledi pogresan Offset u BlockKey-u nece biti zapisano na kraju)
 func (bm *BlockManager) WriteAt(f *os.File, key BlockKey, value []byte) error {
 	if len(value) != bm.blockSize {
 		return fmt.Errorf("invalid block size")
 	}
 
-	offset := int64(bm.blockSize) * int64(key.offset)
+	offset := int64(bm.blockSize) * int64(key.Offset)
 	if _, err := f.WriteAt(value, offset); err != nil {
 		return err
 	}
@@ -100,7 +101,7 @@ func (bm *BlockManager) WriteAt(f *os.File, key BlockKey, value []byte) error {
 }
 
 func NewBlockKey(filePath string, offset uint32) BlockKey {
-	return BlockKey{filePath: filePath, offset: offset}
+	return BlockKey{FilePath: filePath, Offset: offset}
 }
 
 // EnsureSize for fixed segment size (in blocks)
