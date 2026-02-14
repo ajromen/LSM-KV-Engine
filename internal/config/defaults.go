@@ -21,6 +21,9 @@ const (
 	//memtable
 	MemtableType              = "hashmap"
 	DefaultMemtableMaxEntries = 1000
+	DefaultMemtableInstances  = 5
+	DefaultSkipListMaxLevel   = 10
+	DefaultBTreeMinimumDegree = 8
 
 	//SSTable
 	DefaultSSTableBlockSize           = 160
@@ -28,9 +31,6 @@ const (
 	DefaultSSTableCompression         = CompressionNone
 	DefaultSSTableMinBlockUtilization = 0.8
 	DefaultIndexBlockSize             = 20
-
-	//SkipList
-	DefaultSkipListMaxLevel = 16
 
 	//CMS
 	DefaultCMSAccuracy   = 0.01
@@ -49,6 +49,13 @@ func NewDefaultConfig() *Config {
 		Memtable: MemtableConfig{
 			MemtableType:    MemtableType,
 			MemtableMaxSize: DefaultMemtableMaxEntries,
+			Instances:       DefaultMemtableInstances,
+			SkipListConfig: SkipListConfig{
+				MaxLevel: DefaultSkipListMaxLevel,
+			},
+			BTreeConfig: BTreeConfig{
+				MinimumDegree: DefaultBTreeMinimumDegree,
+			},
 		},
 		SSTable: SSTableConfig{
 			Format: FormatSingleFile,
