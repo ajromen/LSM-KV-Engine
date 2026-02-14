@@ -15,6 +15,7 @@ type BlockManager struct {
 
 type BlockKey struct {
 	FilePath string
+	offset   uint32 // ako je blok 1kb dozvoljava segment size od 4 terabajta (16 bitova daje max 64mb)
 	filePath string
 }
 
@@ -76,7 +77,6 @@ func (bm *BlockManager) Write(key BlockKey, value []byte) error {
 	return nil
 }
 
-// WriteAt Sluzi za dopisivanje bloka na kraj fajla (ako mu se prosledi pogresan Offset u BlockKey-u nece biti zapisano na kraju)
 func (bm *BlockManager) SyncFile(path string) error {
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
 	if err != nil {
@@ -86,6 +86,7 @@ func (bm *BlockManager) SyncFile(path string) error {
 	return f.Sync()
 }
 
+// WriteAt Sluzi za dopisivanje bloka na kraj fajla (ako mu se prosledi pogresan Offset u BlockKey-u nece biti zapisano na kraju)
 func (bm *BlockManager) WriteAt(f *os.File, key BlockKey, value []byte) error {
 	if len(value) != bm.blockSize {
 		return fmt.Errorf("invalid block size")
