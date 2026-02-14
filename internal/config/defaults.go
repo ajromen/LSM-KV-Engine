@@ -1,36 +1,36 @@
 package config
 
-// Za sva podešavanja koja nedostaju u konfiguracionom fajlu sistem treba da dodeli
-//default vrednosti koje se navode u kodu
-
 // Engine defaults
 const (
-	//WAL
-	DefaultWalSegmentSize = 1 * 1024 * 1024
+	// WAL
+	DefaultWalSegmentSize = 1 * 1024 * 1024 // bytes
 
-	//memtable
+	// Memtable
 	MemtableType              = "hashmap"
 	DefaultMemtableMaxEntries = 1000
 
-	//SSTable
+	// SSTable
 	DefaultSSTableBlockSize = 16
 
-	//SkipList
+	// SkipList
 	DefaultSkipListMaxLevel = 16
 
-	//CMS
+	// CMS
 	DefaultCMSAccuracy   = 0.01
 	DefaultCMSConfidence = 0.99
 
-	//Block Manager
-	DefaultBlockSize           = 4 * 1024
+	// Block Manager
+	DefaultBlockSize           = 4 * 1024 // bytes
 	DefaultBlockCacheMaxBlocks = 2048
 )
 
 func NewDefaultConfig() *Config {
 	return &Config{
 		WAL: WALConfig{
-			SegmentSize: DefaultWalSegmentSize,
+			SegmentSize:  DefaultWalSegmentSize,
+			BlockSize:    DefaultBlockSize, // MUST match BlockManager.BlockSize
+			SyncInterval: 0,                // ms; 0 => only on Flush/Commit
+			MaxSegments:  0,                // 0 => unlimited
 		},
 		Memtable: MemtableConfig{
 			MemtableType:    MemtableType,
@@ -60,23 +60,3 @@ func NewDefaultConfig() *Config {
 		},
 	}
 }
-
-//func applyDefaults(cfg *Config) {
-//	if cfg.WAL.WALSegmentSize == 0 {
-//		cfg.WAL.WALSegmentSize = 1024 * 1024
-//	}
-//	// Ovde kaze "Maksimalnu velicinu specificira korisnik tako sto navodi broj elemenata ILI zauzece memorije u KB" - na
-//	// nama je da vidimo hocemo li birati jedno od ta dva ili proveravati koji je popunjen i dati koristiti
-//	if cfg.Memtable.MemtableMaxSize == 0 && cfg.Memtable.MemtableSizeKB == 0 {
-//		cfg.Memtable.MemtableMaxSize = 1000
-//	}
-//	if cfg.Memtable.MemtableType == "" {
-//		cfg.Memtable.MemtableType = "hashmap"
-//	}
-//	if cfg.SSTable.SSTableDataBlockSize == 0 {
-//		cfg.SSTable.SSTableDataBlockSize = 16 // Ovo je u KB (Tako je na LevelDB pa kontam da je ok)
-//	}
-//	if cfg.SkipList.MaxLevel == 0 {
-//		cfg.SkipList.MaxLevel = 16
-//	}
-//}
