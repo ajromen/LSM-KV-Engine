@@ -8,6 +8,11 @@ const (
 	CompressionZSTD   byte = 2
 )
 
+const (
+	FormatSingleFile byte = 0
+	FormatMultiFile  byte = 1
+)
+
 // Engine defaults
 const (
 	//WAL
@@ -16,15 +21,16 @@ const (
 	//memtable
 	MemtableType              = "hashmap"
 	DefaultMemtableMaxEntries = 1000
+	DefaultMemtableInstances  = 5
+	DefaultSkipListMaxLevel   = 10
+	DefaultBTreeMinimumDegree = 8
 
 	//SSTable
-	DefaultSSTableBlockSize           = 16
-	DefaultSSTableRestartInterval     = 4
+	DefaultSSTableBlockSize           = 160
+	DefaultSSTableRestartInterval     = 3
 	DefaultSSTableCompression         = CompressionNone
 	DefaultSSTableMinBlockUtilization = 0.8
-
-	//SkipList
-	DefaultSkipListMaxLevel = 16
+	DefaultIndexBlockSize             = 20
 
 	//CMS
 	DefaultCMSAccuracy   = 0.01
@@ -43,13 +49,24 @@ func NewDefaultConfig() *Config {
 		Memtable: MemtableConfig{
 			MemtableType:    MemtableType,
 			MemtableMaxSize: DefaultMemtableMaxEntries,
+			Instances:       DefaultMemtableInstances,
+			SkipListConfig: SkipListConfig{
+				MaxLevel: DefaultSkipListMaxLevel,
+			},
+			BTreeConfig: BTreeConfig{
+				MinimumDegree: DefaultBTreeMinimumDegree,
+			},
 		},
 		SSTable: SSTableConfig{
+			Format: FormatSingleFile,
 			DataSegment: DataSegmentConfig{
 				BlockSize:           DefaultSSTableBlockSize,
 				RestartInterval:     DefaultSSTableRestartInterval,
 				Compression:         DefaultSSTableCompression,
 				MinBlockUtilization: DefaultSSTableMinBlockUtilization,
+			},
+			IndexSegment: IndexSegmentConfig{
+				IndexBlockSize: DefaultIndexBlockSize,
 			},
 		},
 		SkipList: SkipListConfig{

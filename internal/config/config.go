@@ -18,14 +18,17 @@ type WALConfig struct {
 }
 
 type MemtableConfig struct {
-	MemtableMaxSize int    `json:"memtable_max_size"`
-	MemtableType    string `json:"memtable_type"`
-	MemtableSizeKB  int    `json:"memtable_size_kb"`
-	Instances       int    `json:"instances"`
+	MemtableMaxSize int            `json:"memtable_max_size"`
+	MemtableType    string         `json:"memtable_type"`
+	Instances       int            `json:"instances"`
+	SkipListConfig  SkipListConfig `json:"skiplist_config"`
+	BTreeConfig     BTreeConfig    `json:"btree_config"`
 }
 
 type SSTableConfig struct {
-	DataSegment DataSegmentConfig `json:"data_segment"`
+	Format       byte               `json:"format"`
+	DataSegment  DataSegmentConfig  `json:"data_segment"`
+	IndexSegment IndexSegmentConfig `json:"index_segment"`
 }
 
 type DataSegmentConfig struct {
@@ -33,6 +36,11 @@ type DataSegmentConfig struct {
 	RestartInterval     int     `json:"restart_interval"`
 	Compression         byte    `json:"compression"`
 	MinBlockUtilization float64 `json:"min_block_utilization"`
+}
+
+type IndexSegmentConfig struct {
+	IndexBlockSize int `json:"index_block_size"`
+	MaxCache       int `json:"max_cache_size"`
 }
 
 type LSMTreeConfig struct {
@@ -74,8 +82,8 @@ type BloomFilterConfig struct {
 
 type CountMinSketchConfig struct {
 	Enabled    bool     `json:"enabled"`
-	Accuracy   float32  `json:"accuracy"`
-	Confidence float32  `json:"confidence"`
+	Accuracy   float64  `json:"accuracy"`
+	Confidence float64  `json:"confidence"`
 	Seeds      [][]byte `json:"seeds"`
 }
 
@@ -94,4 +102,8 @@ type TTLConfig struct {
 
 type SkipListConfig struct {
 	MaxLevel int `json:"max_level"`
+}
+
+type BTreeConfig struct {
+	MinimumDegree int `json:"minimum_degree"`
 }
