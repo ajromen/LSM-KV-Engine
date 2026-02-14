@@ -18,10 +18,11 @@ type WALConfig struct {
 }
 
 type MemtableConfig struct {
-	MemtableMaxSize int    `json:"memtable_max_size"`
-	MemtableType    string `json:"memtable_type"`
-	MemtableSizeKB  int    `json:"memtable_size_kb"`
-	Instances       int    `json:"instances"`
+	MemtableMaxSize int            `json:"memtable_max_size"`
+	MemtableType    string         `json:"memtable_type"`
+	Instances       int            `json:"instances"`
+	SkipListConfig  SkipListConfig `json:"skiplist_config"`
+	BTreeConfig     BTreeConfig    `json:"btree_config"`
 }
 
 type SSTableConfig struct {
@@ -101,4 +102,8 @@ type TTLConfig struct {
 
 type SkipListConfig struct {
 	MaxLevel int `json:"max_level"`
+}
+
+type BTreeConfig struct {
+	MinimumDegree int `json:"minimum_degree"`
 }
