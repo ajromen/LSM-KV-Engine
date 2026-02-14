@@ -3,12 +3,10 @@ package core
 import (
 	"github.com/ajromen/LSM-KV-Engine/internal/cli"
 	"github.com/ajromen/LSM-KV-Engine/internal/config"
-	"github.com/ajromen/LSM-KV-Engine/internal/memtable"
 )
 
 type Engine struct {
-	config   *config.Config
-	memtable memtable.Memtable
+	config *config.Config
 	//TODO dodati wal i ostale strukutre
 }
 
@@ -17,9 +15,8 @@ func NewEngine(flags *cli.FLags) (*Engine, error) {
 	if err != nil {
 		return nil, err
 	}
-	mem := memtable.NewMemtable(cfg.Memtable)
 
-	return &Engine{config: cfg, memtable: mem}, nil
+	return &Engine{config: cfg}, nil
 }
 
 func (engine *Engine) Close() {
