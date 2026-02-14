@@ -1,4 +1,4 @@
-package probabilistic
+package probabilistics
 
 import (
 	"bytes"
@@ -14,8 +14,6 @@ import (
 
 	"github.com/ajromen/LSM-KV-Engine/internal/config"
 )
-
-
 
 type BloomFilter struct {
 	// Očekivani broj elemenata za koji je filter dimenzionisan
@@ -177,7 +175,7 @@ func (b *BloomFilter) Bits() []byte {
 	return out
 }
 
-// Seeds vraća seed-ove hash funkcija 
+// Seeds vraća seed-ove hash funkcija
 func (b *BloomFilter) Seeds() [][]byte {
 	if b == nil {
 		return nil
@@ -267,17 +265,18 @@ func generateSeeds(count int, seedLen int) [][]byte {
 // Binarna serijalizacija (da se BloomFilter može čuvati kao običan zapis u engine-u)
 //
 // Format (BigEndian):
-//   4 bajta - magic "BF01"
-//   u64     - expectedElements (n)
-//   f64     - falsePositiveRate (p)
-//   u64     - m (broj bitova)
-//   u64     - k (broj hash funkcija)
-//   u64     - broj seed-ova (k)
-//     ponavlja se:
-//       u64  - dužina seed-a
-//       []byte seed
-//   u64     - dužina bitset-a u bajtovima
-//   []byte  - bitset
+//
+//	4 bajta - magic "BF01"
+//	u64     - expectedElements (n)
+//	f64     - falsePositiveRate (p)
+//	u64     - m (broj bitova)
+//	u64     - k (broj hash funkcija)
+//	u64     - broj seed-ova (k)
+//	  ponavlja se:
+//	    u64  - dužina seed-a
+//	    []byte seed
+//	u64     - dužina bitset-a u bajtovima
+//	[]byte  - bitset
 const bloomFilterMagic = "BF01"
 
 func (b *BloomFilter) WriteTo(writer io.Writer) (int64, error) {
@@ -458,7 +457,7 @@ func (b *BloomFilter) FromBytes(data []byte) error {
 	return err
 }
 
-// helperi 
+// helperi
 type bloomFilterJSON struct {
 	N     uint     `json:"n"`
 	P     float64  `json:"p"`

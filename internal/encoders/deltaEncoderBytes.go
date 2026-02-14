@@ -9,7 +9,7 @@ type DeltaEncoderBytes struct {
 	prevKey         []byte
 	restartInterval int
 	entryIndex      int
-	restartArray    []uint32
+	RestartArray    []uint32
 }
 
 func NewDeltaEncoderBytes(restartInterval int) *DeltaEncoderBytes {
@@ -21,13 +21,13 @@ func NewDeltaEncoderBytes(restartInterval int) *DeltaEncoderBytes {
 func (de *DeltaEncoderBytes) Reset() {
 	de.prevKey = nil
 	de.entryIndex = 0
-	de.restartArray = de.restartArray[:0]
+	de.RestartArray = de.RestartArray[:0]
 }
 
 func (de *DeltaEncoderBytes) Encode(key []byte, blockOffset uint32, buf []byte) []byte {
 	shared := 0
-	if de.entryIndex == de.restartInterval {
-		de.restartArray = append(de.restartArray, blockOffset)
+	if de.entryIndex == 0 || de.entryIndex == de.restartInterval {
+		de.RestartArray = append(de.RestartArray, blockOffset)
 		de.prevKey = nil
 		de.entryIndex = 0
 	} else {
@@ -81,10 +81,10 @@ func sharedPrefixLen(a, b []byte) int {
 }
 
 func (de *DeltaEncoderBytes) WriteRestartArray(buf []byte) []byte {
-	for _, off := range de.restartArray {
+	for _, off := range de.RestartArray {
 		buf = binary.LittleEndian.AppendUint32(buf, off)
 	}
-	buf = binary.LittleEndian.AppendUint32(buf, uint32(len(de.restartArray)))
+	buf = binary.LittleEndian.AppendUint32(buf, uint32(len(de.RestartArray)))
 	return buf
 }
 

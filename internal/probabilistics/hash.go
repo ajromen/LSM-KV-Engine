@@ -1,4 +1,4 @@
-package probabilistic
+package probabilistics
 
 import (
 	"crypto/md5"
@@ -39,8 +39,8 @@ func (h HashWithSeed) Hash(data []byte) uint64 {
 
 func CreateHashFunctions(seeds [][]byte) []HashWithSeed {
 	h := make([]HashWithSeed, len(seeds))
-	for i, v := range seeds{
-			h[i] = HashWithSeed{Seed: v}
+	for i, v := range seeds {
+		h[i] = HashWithSeed{Seed: v}
 	}
 	return h
 }
