@@ -91,9 +91,9 @@ func (sl *SkipList) Search(key string) (MemtableEntry, bool) {
 	return MemtableEntry{}, false
 }
 
-func NewSkipListMem(maxSize int, flushHandler func([]MemtableEntry)) *SkipListMemtable {
+func NewSkipListMem(maxSize int, maxLevel int, flushHandler func([]MemtableEntry)) *SkipListMemtable {
 	return &SkipListMemtable{
-		memtableData: NewSkipList(16),
+		memtableData: NewSkipList(maxLevel),
 		maxSize:      maxSize,
 		flushHandler: flushHandler,
 	}

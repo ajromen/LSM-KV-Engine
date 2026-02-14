@@ -1,6 +1,13 @@
 package memtable
 
-func NewMemtables(memType string, instances int, maxSize int, flushHandler func([]MemtableEntry)) *Memtables {
+import "github.com/ajromen/LSM-KV-Engine/internal/config"
+
+func NewMemtables(cfg config.Config, flushHandler func([]MemtableEntry)) *Memtables {
+	instances := cfg.Memtable.Instances
+	maxSize := cfg.Memtable.MemtableMaxSize
+	t := cfg.Memtable.BTreeConfig.MinimumDegree
+	maxLevel := cfg.Memtable.SkipListConfig.MaxLevel
+	memType := cfg.Memtable.MemtableType
 	if instances < 1 {
 		instances = 1
 	}
@@ -11,9 +18,9 @@ func NewMemtables(memType string, instances int, maxSize int, flushHandler func(
 		case "hashmap":
 			m = NewHashMap(maxSize, flushHandler)
 		case "skiplist":
-			m = NewSkipListMem(maxSize, flushHandler)
+			m = NewSkipListMem(maxSize, maxLevel, flushHandler)
 		case "btree":
-			m = NewBTreeMem(maxSize, flushHandler)
+			m = NewBTreeMem(maxSize, t, flushHandler)
 		default:
 			continue
 		}

@@ -151,9 +151,9 @@ func (bt *BTree) entriesInOrder() []MemtableEntry {
 	return result
 }
 
-func NewBTreeMem(maxSize int, flushHandler func([]MemtableEntry)) *BTreeMemtable {
+func NewBTreeMem(maxSize int, t int, flushHandler func([]MemtableEntry)) *BTreeMemtable {
 	return &BTreeMemtable{
-		memtableData: NewBTree(8),
+		memtableData: NewBTree(t),
 		maxSize:      maxSize,
 		flushHandler: flushHandler,
 	}
