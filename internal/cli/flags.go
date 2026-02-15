@@ -7,10 +7,10 @@ import (
 
 // FLags should be pointers to allow nil value when flag is not explicitly provided
 type FLags struct {
-	ConfigPath          *string
-	Debug               *bool
-	MemtableMaxSize     *int
-	MemtableMaxSizeKb   *int
+	ConfigPath      *string
+	Debug           *bool
+	MemtableMaxSize *int
+	//MemtableMaxSizeKb   *int
 	MemtableType        *string
 	BlockCacheMaxBlocks *int
 }
@@ -19,7 +19,7 @@ func ParseFlags() *FLags {
 	var configPathOpt OptionalString
 	var debugOpt OptionalBool
 	var mtMaxSizeOpt OptionalInt
-	var mtMaxSizeKbOpt OptionalInt
+	//var mtMaxSizeKbOpt OptionalInt
 	var mtTypeOpt OptionalString
 	var BlockCacheMaxBlocksOpt OptionalInt
 
@@ -28,18 +28,18 @@ func ParseFlags() *FLags {
 	flagBool(&debugOpt, "debug", "Debug mode")
 	flagBool(&debugOpt, "d", "Debug mode")
 	flagInt(&mtMaxSizeOpt, "memtable-max-size", "Max memtable size in bytes")
-	flagInt(&mtMaxSizeKbOpt, "memtable-max-size-kb", "Max memtable size in kilobytes")
+	//flagInt(&mtMaxSizeKbOpt, "memtable-max-size-kb", "Max memtable size in kilobytes")
 	flagString(&mtTypeOpt, "memtable-type", "hashmap, skiplist or btree")
 	flagInt(&BlockCacheMaxBlocksOpt, "block-cache-max-blocks", "Max number of blocks in the block cache")
 
 	flag.Parse()
 
 	return &FLags{
-		ConfigPath:        configPathOpt.Get(),
-		Debug:             debugOpt.Get(),
-		MemtableMaxSize:   mtMaxSizeOpt.Get(),
-		MemtableMaxSizeKb: mtMaxSizeKbOpt.Get(),
-		MemtableType:      mtTypeOpt.Get(),
+		ConfigPath:      configPathOpt.Get(),
+		Debug:           debugOpt.Get(),
+		MemtableMaxSize: mtMaxSizeOpt.Get(),
+		//MemtableMaxSizeKb: mtMaxSizeKbOpt.Get(),
+		MemtableType: mtTypeOpt.Get(),
 	}
 }
 

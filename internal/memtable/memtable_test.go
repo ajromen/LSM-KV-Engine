@@ -2,11 +2,14 @@ package memtable
 
 import (
 	"testing"
+
+	"github.com/ajromen/LSM-KV-Engine/internal/config"
 )
 
 func TestHashmap(t *testing.T) {
 	t.Log("---- HASHMAP MEMTABLE TEST ----")
-	mt := NewMemtables("hashmap", 1, 10, func(entries []MemtableEntry) {})
+	memtableConfig := config.MemtableConfig{MemtableType: "hashmap", Instances: 1, MemtableMaxSize: 10}
+	mt := NewMemtables(memtableConfig, func(entries []MemtableEntry) {})
 	mt.Put("key1", []byte("value1"))
 	mt.Put("key2", []byte("value2"))
 	mt.Put("key3", []byte("value3"))
@@ -40,7 +43,8 @@ func TestHashmap(t *testing.T) {
 func TestHashmapFlush(t *testing.T) {
 	t.Log("---- HASHMAP MEMTABLE FLUSH TEST ----")
 	flushed := [][]MemtableEntry{}
-	mt := NewMemtables("hashmap", 1, 2, func(entries []MemtableEntry) {
+	memtableConfig := config.MemtableConfig{MemtableType: "hashmap", Instances: 1, MemtableMaxSize: 2}
+	mt := NewMemtables(memtableConfig, func(entries []MemtableEntry) {
 		flushed = append(flushed, entries)
 	})
 	mt.Put("key1", []byte("value1"))
@@ -64,7 +68,9 @@ func TestHashmapFlush(t *testing.T) {
 
 func TestHashmapRotation(t *testing.T) {
 	t.Log("---- HASHMAP MEMTABLE ROTATION TEST ----")
-	mt := NewMemtables("hashmap", 2, 2, func(entries []MemtableEntry) {})
+	memtableConfig := config.MemtableConfig{MemtableType: "hashmap", Instances: 2, MemtableMaxSize: 2}
+
+	mt := NewMemtables(memtableConfig, func(entries []MemtableEntry) {})
 
 	mt.Put("key1", []byte("value1"))
 	mt.Put("key2", []byte("value2"))
@@ -89,7 +95,16 @@ func TestHashmapRotation(t *testing.T) {
 
 func TestSkipList(t *testing.T) {
 	t.Log("---- SKIPLIST MEMTABLE TEST ----")
-	mt := NewMemtables("skiplist", 1, 100, nil)
+	memtableConfig := config.MemtableConfig{
+		MemtableType:    "skiplist",
+		Instances:       1,
+		MemtableMaxSize: 100,
+		SkipListConfig: config.SkipListConfig{
+			MaxLevel: 6,
+		},
+	}
+
+	mt := NewMemtables(memtableConfig, func(entries []MemtableEntry) {})
 	mt.Put("key1", []byte("value1"))
 	mt.Put("key2", []byte("value2"))
 	mt.Put("key3", []byte("value3"))
@@ -123,7 +138,15 @@ func TestSkipList(t *testing.T) {
 func TestSkipListFlush(t *testing.T) {
 	t.Log("---- SKIPLIST MEMTABLE FLUSH TEST ----")
 	flushed := [][]MemtableEntry{}
-	mt := NewMemtables("skiplist", 1, 2, func(entries []MemtableEntry) {
+	memtableConfig := config.MemtableConfig{
+		MemtableType:    "skiplist",
+		Instances:       1,
+		MemtableMaxSize: 2,
+		SkipListConfig: config.SkipListConfig{
+			MaxLevel: 6,
+		},
+	}
+	mt := NewMemtables(memtableConfig, func(entries []MemtableEntry) {
 		flushed = append(flushed, entries)
 	})
 	mt.Put("key1", []byte("value1"))
@@ -147,7 +170,15 @@ func TestSkipListFlush(t *testing.T) {
 
 func TestSkipListRotation(t *testing.T) {
 	t.Log("---- HASHMAP MEMTABLE ROTATION TEST ----")
-	mt := NewMemtables("skiplist", 2, 2, func(entries []MemtableEntry) {})
+	memtableConfig := config.MemtableConfig{
+		MemtableType:    "skiplist",
+		Instances:       2,
+		MemtableMaxSize: 2,
+		SkipListConfig: config.SkipListConfig{
+			MaxLevel: 6,
+		},
+	}
+	mt := NewMemtables(memtableConfig, func(entries []MemtableEntry) {})
 	mt.Put("key1", []byte("value1"))
 	mt.Put("key2", []byte("value2"))
 	mt.Put("key3", []byte("value3"))
@@ -171,7 +202,9 @@ func TestSkipListRotation(t *testing.T) {
 
 func TestBTree(t *testing.T) {
 	t.Log("---- BTREE MEMTABLE TEST ----")
-	mt := NewMemtables("btree", 1, 5, func(entries []MemtableEntry) {})
+	memtableConfig := config.MemtableConfig{MemtableType: "btree", Instances: 1, MemtableMaxSize: 5}
+
+	mt := NewMemtables(memtableConfig, func(entries []MemtableEntry) {})
 	mt.Put("key2", []byte("value2"))
 	mt.Put("key3", []byte("value3"))
 	mt.Put("key4", []byte("value4"))
@@ -198,7 +231,9 @@ func TestBTree(t *testing.T) {
 func TestBTreeFlush(t *testing.T) {
 	t.Log("---- BTREE MEMTABLE FLUSH TEST ----")
 	flushed := [][]MemtableEntry{}
-	mt := NewMemtables("btree", 1, 2, func(entries []MemtableEntry) {
+	memtableConfig := config.MemtableConfig{MemtableType: "btree", Instances: 1, MemtableMaxSize: 2}
+
+	mt := NewMemtables(memtableConfig, func(entries []MemtableEntry) {
 		flushed = append(flushed, entries)
 	})
 	mt.Put("key1", []byte("value1"))
@@ -222,7 +257,9 @@ func TestBTreeFlush(t *testing.T) {
 
 func TestBTreeRotation(t *testing.T) {
 	t.Log("---- HASHMAP MEMTABLE ROTATION TEST ----")
-	mt := NewMemtables("skiplist", 2, 2, func(entries []MemtableEntry) {})
+
+	memtableConfig := config.MemtableConfig{MemtableType: "btree", Instances: 2, MemtableMaxSize: 2}
+	mt := NewMemtables(memtableConfig, func(entries []MemtableEntry) {})
 	mt.Put("key1", []byte("value1"))
 	mt.Put("key2", []byte("value2"))
 	mt.Put("key3", []byte("value3"))
@@ -248,8 +285,16 @@ func TestFlushesOnlyOldestAfterSixEntries(t *testing.T) {
 	t.Log("---- ONLY OLDEST MEMTABLE IS FLUSHED AFTER 6 ENTRIES ----")
 
 	flushed := [][]MemtableEntry{}
+	memtableConfig := config.MemtableConfig{
+		MemtableType:    "skiplist",
+		Instances:       2,
+		MemtableMaxSize: 3,
+		SkipListConfig: config.SkipListConfig{
+			MaxLevel: 6,
+		},
+	}
 
-	mt := NewMemtables("skiplist", 2, 3, func(entries []MemtableEntry) {
+	mt := NewMemtables(memtableConfig, func(entries []MemtableEntry) {
 		cp := make([]MemtableEntry, len(entries))
 		copy(cp, entries)
 		flushed = append(flushed, cp)
