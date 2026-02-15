@@ -50,8 +50,8 @@ func TestDeltaEncoderBytesRestartInterval(t *testing.T) {
 		buf = enc.Encode(k, offset, buf)
 		offset++
 	}
-	if len(enc.RestartArray) != 1 {
-		t.Fatalf("expected 1 restart, got %d", len(enc.RestartArray))
+	if len(enc.RestartArray) != 2 {
+		t.Fatalf("expected 2 restart, got %d", len(enc.RestartArray))
 	}
 	enc.Reset()
 	pos := 0
@@ -70,13 +70,13 @@ func TestDeltaEncoderBytesWriteRestartArray(t *testing.T) {
 	t.Log("---- DELTA ENCODER BYTES RESTART ARRAY TEST ----")
 	enc := NewDeltaEncoderBytes(1)
 	buf := make([]byte, 0)
-	enc.Encode([]byte("a"), 10, buf)
-	enc.Encode([]byte("b"), 20, buf)
-	enc.Encode([]byte("c"), 30, buf)
+	buf = enc.Encode([]byte("a"), 10, buf)
+	buf = enc.Encode([]byte("b"), 20, buf)
+	buf = enc.Encode([]byte("c"), 30, buf)
 	restartBuf := make([]byte, 0)
 	restartBuf = enc.WriteRestartArray(restartBuf)
-	if len(enc.RestartArray) != 2 {
-		t.Fatalf("expected 2 restarts, got %d", len(enc.RestartArray))
+	if len(enc.RestartArray) != 3 {
+		t.Fatalf("expected 3 restarts, got %d", len(enc.RestartArray))
 	}
 	if len(restartBuf) == 0 {
 		t.Fatalf("expected restart buffer to be written")

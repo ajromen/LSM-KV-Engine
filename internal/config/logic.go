@@ -43,9 +43,9 @@ func (c *Config) applyFlags(flags *cli.FLags) error {
 	if flags.MemtableMaxSize != nil {
 		c.Memtable.MemtableMaxSize = *flags.MemtableMaxSize
 	}
-	if flags.MemtableMaxSizeKb != nil {
-		c.Memtable.MemtableSizeKB = *flags.MemtableMaxSizeKb
-	}
+	//if flags.MemtableMaxSizeKb != nil {
+	//	c.Memtable.MemtableSizeKB = *flags.MemtableMaxSizeKb
+	//}
 	if flags.MemtableType != nil {
 		c.Memtable.MemtableType = *flags.MemtableType
 	}
@@ -56,8 +56,12 @@ func (c *Config) applyFlags(flags *cli.FLags) error {
 }
 
 func (c *Config) validateFields() error {
-	if c.Memtable.MemtableMaxSize <= 0 &&
-		c.Memtable.MemtableSizeKB <= 0 {
+	//if c.Memtable.MemtableMaxSize <= 0 &&
+	//	c.Memtable.MemtableSizeKB <= 0 {
+	//	return fmt.Errorf("memtable size must be positive")
+	//}
+
+	if c.Memtable.MemtableMaxSize <= 0 {
 		return fmt.Errorf("memtable size must be positive")
 	}
 

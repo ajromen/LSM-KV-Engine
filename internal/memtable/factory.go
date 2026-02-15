@@ -2,12 +2,12 @@ package memtable
 
 import "github.com/ajromen/LSM-KV-Engine/internal/config"
 
-func NewMemtables(cfg config.Config, flushHandler func([]MemtableEntry)) *Memtables {
-	instances := cfg.Memtable.Instances
-	maxSize := cfg.Memtable.MemtableMaxSize
-	t := cfg.Memtable.BTreeConfig.MinimumDegree
-	maxLevel := cfg.Memtable.SkipListConfig.MaxLevel
-	memType := cfg.Memtable.MemtableType
+func NewMemtables(cfg config.MemtableConfig, flushHandler func([]MemtableEntry)) *Memtables {
+	instances := cfg.Instances
+	maxSize := cfg.MemtableMaxSize
+	t := cfg.BTreeConfig.MinimumDegree
+	maxLevel := cfg.SkipListConfig.MaxLevel
+	memType := cfg.MemtableType
 	if instances < 1 {
 		instances = 1
 	}
