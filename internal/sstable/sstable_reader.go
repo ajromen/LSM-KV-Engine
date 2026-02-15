@@ -1,3 +1,9 @@
+/*
+TODO:
+sstable needs to use sstable config
+blockManager should read index blocks too
+*/
+
 package sstable
 
 import (
@@ -10,18 +16,21 @@ import (
 	"github.com/ajromen/LSM-KV-Engine/internal/config"
 )
 
+// SSTableReader allows reading an SSTable file, accesing singular records and validating data integrity
 type SSTableReader struct {
-	storage        SegmentStorage
-	blockManager   *block.BlockManager
-	filePath       string
-	footer         *Footer
-	summarySegment *SummarySegment
-	filterSegment  *FilterSegment
-	merkleTree     *MerkleTree
-	config         *config.Config
+	storage        SegmentStorage      // low-level reading of segments
+	blockManager   *block.BlockManager // reading and decoding data blocks
+	filePath       string              // file path of given sstable file (base path if multi file format)
+	footer         *Footer             // footer of given sstable
+	summarySegment *SummarySegment     // summary segment (read into RAM)
+	filterSegment  *FilterSegment      // filter segment (read into RAM)
+	merkleTree     *MerkleTree         // merkle tree - metadata segment (read into RAM)
+	config         *config.Config      // config for given sstable
 }
 
+// NewSSTableReader opens an SSTable file and loads all necessary segments into RAM
 func NewSSTableReader(filePath string, blockManager *block.BlockManager, cfg *config.Config) (*SSTableReader, error) {
+	// storage opens file too
 	storage, err := OpenStorage(filePath, cfg)
 	if err != nil {
 		return nil, err
@@ -37,6 +46,8 @@ func NewSSTableReader(filePath string, blockManager *block.BlockManager, cfg *co
 	case *MultiFileStorage:
 		offset = 0
 	}
+
+	// read and validate footer
 	footerData, err := storage.ReadSegment(config.SegmentFooter, offset, FooterSize)
 	if err != nil {
 		return nil, err
@@ -46,6 +57,8 @@ func NewSSTableReader(filePath string, blockManager *block.BlockManager, cfg *co
 	if err := footer.Validate(); err != nil {
 		return nil, err
 	}
+
+	// initialize reader
 	reader := &SSTableReader{
 		storage:      storage,
 		blockManager: blockManager,
@@ -53,18 +66,25 @@ func NewSSTableReader(filePath string, blockManager *block.BlockManager, cfg *co
 		footer:       footer,
 		config:       cfg,
 	}
+
+	// load summary into RAM
 	if err := reader.loadSummary(); err != nil {
 		return nil, err
 	}
+
+	// load filter into RAM
 	if err := reader.loadFilter(); err != nil {
 		reader.filterSegment = nil
 	}
+
+	// load merkle tree into RAM
 	if err := reader.loadMerkleTree(); err != nil {
 		return nil, err
 	}
 	return reader, nil
 }
 
+// loadSummary reads and decodes summary segment, which maps key ranges into index blocks
 func (r *SSTableReader) loadSummary() error {
 	data, err := r.storage.ReadSegment(config.SegmentSummary, r.footer.SummaryHandler.Offset, r.footer.SummaryHandler.Size)
 	if err != nil {
@@ -78,6 +98,7 @@ func (r *SSTableReader) loadSummary() error {
 	return nil
 }
 
+// loadFilter reads and decodes the filter segment -> filter allows quickly checking whether a key exists or nott
 func (r *SSTableReader) loadFilter() error {
 	if r.footer.FilterHandler.Size == 0 {
 		return errors.New("no filter segment")
@@ -94,6 +115,7 @@ func (r *SSTableReader) loadFilter() error {
 	return nil
 }
 
+// loadMerkleTree reads and decodes the Merkle tree for data integrity verification
 func (r *SSTableReader) loadMerkleTree() error {
 	data, err := r.storage.ReadSegment(config.SegmentMetadata, r.footer.MetaDataHandler.Offset, r.footer.MetaDataHandler.Size)
 	if err != nil {
@@ -108,6 +130,7 @@ func (r *SSTableReader) loadMerkleTree() error {
 	return nil
 }
 
+// loadIndexBlock reads a specific index block from index segment -> NEEDS TO BE FIXED!
 func (r *SSTableReader) loadIndexBlock(blockNumber int) (*IndexBlock, error) {
 	if r.footer == nil {
 		return nil, errors.New("no footer")
@@ -138,24 +161,39 @@ func (r *SSTableReader) loadIndexBlock(blockNumber int) (*IndexBlock, error) {
 	return block, nil
 }
 
+// Get looks up a record by key in the SSTable in given order:
+// 1. Use filter segment to check if key might exist
+// 2. Use summary segment to find the correct index block that should contain key
+// 3. Load correct index block and locate the data block that should contain key
+// 4. Read the data block
+// 5. Iterate through the read data block to find the exact record
 func (r *SSTableReader) Get(key []byte) (*Record, error) {
+	// step 1
 	if r.filterSegment != nil && r.filterSegment.Filter() != nil {
 		if !r.filterSegment.Filter().MightContain(key) {
 			return nil, nil
 		}
 	}
+
+	// step 2
 	indexBlockNum := r.summarySegment.FindIndexBlockNumber(key)
 	if indexBlockNum < 0 {
 		return nil, nil
 	}
+
+	// step 3.1
 	indexBlock, err := r.loadIndexBlock(int(r.footer.IndexHandler.Offset) + indexBlockNum*r.config.SSTable.IndexSegment.IndexBlockSize - indexBlockNum)
 	if err != nil {
 		return nil, err
 	}
+
+	// step 3.2
 	entryIdx := indexBlock.FindBlock(key)
 	if entryIdx < 0 {
 		return nil, nil
 	}
+
+	// step 4
 	dataBlockIdx := indexBlock.Entries[entryIdx].BlockIndex
 	blockKey := block.BlockKey{
 		FilePath: r.filePath,
@@ -165,6 +203,8 @@ func (r *SSTableReader) Get(key []byte) (*Record, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	// step 5
 	iterator, err := NewDataBlockIterator(blockData)
 	if err != nil {
 		return nil, err
@@ -174,6 +214,8 @@ func (r *SSTableReader) Get(key []byte) (*Record, error) {
 	if err := iterator.Seek(key); err != nil {
 		return nil, err
 	}
+
+	// return record
 	if bytes.Equal(iterator.Current().Key, key) {
 		return &Record{
 			Timestamp: iterator.Timestamp(),
