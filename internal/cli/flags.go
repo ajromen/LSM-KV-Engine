@@ -11,8 +11,10 @@ type FLags struct {
 	Debug           *bool
 	MemtableMaxSize *int
 	//MemtableMaxSizeKb   *int
-	MemtableType        *string
-	BlockCacheMaxBlocks *int
+	MemtableType           *string
+	BlockCacheMaxBlocks    *int
+	LSMCompactionAlgorithm *string
+	LSMMaxLayers           *int
 }
 
 func ParseFlags() *FLags {
@@ -22,6 +24,8 @@ func ParseFlags() *FLags {
 	//var mtMaxSizeKbOpt OptionalInt
 	var mtTypeOpt OptionalString
 	var BlockCacheMaxBlocksOpt OptionalInt
+	var LSMCompactionAlgorithmOpt OptionalString
+	var LSMMaxLayersOpt OptionalInt
 
 	flagString(&configPathOpt, "config", "Path to config file")
 	flagString(&configPathOpt, "c", "Path to config file")
@@ -31,6 +35,8 @@ func ParseFlags() *FLags {
 	//flagInt(&mtMaxSizeKbOpt, "memtable-max-size-kb", "Max memtable size in kilobytes")
 	flagString(&mtTypeOpt, "memtable-type", "hashmap, skiplist or btree")
 	flagInt(&BlockCacheMaxBlocksOpt, "block-cache-max-blocks", "Max number of blocks in the block cache")
+	flagString(&LSMCompactionAlgorithmOpt, "lsm-compaction", "LSM compaction algorithm: size-tiered, leveled")
+	flagInt(&LSMMaxLayersOpt, "lsm-levels", "Max number of LSM levels")
 
 	flag.Parse()
 
@@ -39,7 +45,9 @@ func ParseFlags() *FLags {
 		Debug:           debugOpt.Get(),
 		MemtableMaxSize: mtMaxSizeOpt.Get(),
 		//MemtableMaxSizeKb: mtMaxSizeKbOpt.Get(),
-		MemtableType: mtTypeOpt.Get(),
+		MemtableType:           mtTypeOpt.Get(),
+		LSMCompactionAlgorithm: LSMCompactionAlgorithmOpt.Get(),
+		LSMMaxLayers:           LSMMaxLayersOpt.Get(),
 	}
 }
 

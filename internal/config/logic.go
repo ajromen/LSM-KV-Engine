@@ -52,6 +52,12 @@ func (c *Config) applyFlags(flags *cli.FLags) error {
 	if flags.BlockCacheMaxBlocks != nil {
 		c.BlockManager.BlockCacheMaxBlocks = *flags.BlockCacheMaxBlocks
 	}
+	if flags.LSMCompactionAlgorithm != nil {
+		c.LSMTree.CompactionAlgorithm = *flags.LSMCompactionAlgorithm
+	}
+	if flags.LSMMaxLayers != nil {
+		c.LSMTree.MaxLevels = *flags.LSMMaxLayers
+	}
 	return nil
 }
 
@@ -77,6 +83,15 @@ func (c *Config) validateFields() error {
 
 	if c.BlockManager.BlockCacheMaxBlocks < 1 {
 		return fmt.Errorf("invalid block cacheMaxBlocks must be positive")
+	}
+
+	if c.LSMTree.MaxLevels <= 0 {
+		return fmt.Errorf("invalid LSM level number")
+	}
+
+	if c.LSMTree.CompactionAlgorithm != "size-tiered" &&
+		c.LSMTree.CompactionAlgorithm != "leveled" {
+		return fmt.Errorf("invalid LSM compaction algorithm")
 	}
 
 	// TODO continue validation

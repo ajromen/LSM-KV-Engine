@@ -44,8 +44,8 @@ type IndexSegmentConfig struct {
 }
 
 type LSMTreeConfig struct {
-	// Ovde ce jos trebati sa Compaction raditi
-	LSMTreeMaxLevels int `json:"lsmtree_max_levels"`
+	MaxLevels           int    `json:"lsmtree_max_levels"`
+	CompactionAlgorithm string `json:"compaction_algorithm"`
 }
 
 type BlockManagerConfig struct {
