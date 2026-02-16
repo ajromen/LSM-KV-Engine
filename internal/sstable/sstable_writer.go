@@ -10,26 +10,27 @@ import (
 	"github.com/ajromen/LSM-KV-Engine/internal/utils"
 )
 
+// SSTableWriter allows writing records into sstable
 type SSTableWriter struct {
-	storage           SegmentStorage
-	blockManager      *block.BlockManager
-	config            config.SSTableConfig
-	filePath          string
-	dataBlockBuilder  *DataBlockBuilder
-	indexSegment      *IndexSegment
-	summarySegment    *SummarySegment
-	filterSegment     *FilterSegment
-	merkleTree        *MerkleTree
-	footer            *Footer
-	currentBlockIndex uint32
-	recordCount       uint64
-	minTimestamp      utils.Uint128
-	maxTimestamp      utils.Uint128
-	minKeyLength      uint32
-	maxKeyLength      uint32
-	minKey            []byte
-	maxKey            []byte
-	firstRecord       bool
+	storage           SegmentStorage       // low-level writing of segments -> writing should be completely fixed to work with block manager
+	blockManager      *block.BlockManager  // writing and encoding data blocks
+	config            config.SSTableConfig // system SSTable configuration
+	filePath          string               // file path where sstable is written (base path if multi file format)
+	dataBlockBuilder  *DataBlockBuilder    // data block builder for building data block from records being written into sstable
+	indexSegment      *IndexSegment        // index segment of sstable : references data blocks
+	summarySegment    *SummarySegment      // summary segment of sstable : references index blocks
+	filterSegment     *FilterSegment       // filter segment of sstable
+	merkleTree        *MerkleTree          // merkle tree of sstable
+	footer            *Footer              // footer of sstable
+	currentBlockIndex uint32               // tracks current data block index
+	recordCount       uint64               // tracks number of records
+	minTimestamp      utils.Uint128        // min timestamp (newest record)
+	maxTimestamp      utils.Uint128        // max timestamp (oldest record)
+	minKeyLength      uint32               // smallest key by length
+	maxKeyLength      uint32               // largest key by length
+	minKey            []byte               // smallest key in sorting order
+	maxKey            []byte               // largest ket in sorting order
+	firstRecord       bool                 // whether it is first record
 }
 
 func NewSSTableWriter(filePath string, blockManager *block.BlockManager, cfg *config.Config, expectedElements int) (*SSTableWriter, error) {
@@ -64,8 +65,14 @@ func NewSSTableWriter(filePath string, blockManager *block.BlockManager, cfg *co
 	}, nil
 }
 
+// AddRecord INSERTS A NEW RECORD INTO DataBlockBuilder OF GIVEN SSTableWriter IN GIVEN ORDER:
+// 1. Update min/max key timestamp metadata
+// 2. Update min/max keylength metadata
+// 3. Add key to bloom filter
+// 4. Add record to current data block -> block full? -> flush it
 func (sw *SSTableWriter) AddRecord(record Record) error {
 	sw.recordCount++
+	// step 1
 	if sw.firstRecord {
 		sw.minTimestamp = record.Timestamp
 		sw.maxTimestamp = record.Timestamp
@@ -86,6 +93,8 @@ func (sw *SSTableWriter) AddRecord(record Record) error {
 			sw.maxKey = append([]byte(nil), record.Key...)
 		}
 	}
+
+	// step 2
 	keyLen := uint32(len(record.Key))
 	if keyLen < sw.minKeyLength {
 		sw.minKeyLength = keyLen
@@ -93,9 +102,13 @@ func (sw *SSTableWriter) AddRecord(record Record) error {
 	if keyLen > sw.maxKeyLength {
 		sw.maxKeyLength = keyLen
 	}
+
+	// step 3
 	if sw.filterSegment != nil && sw.filterSegment.Filter() != nil {
 		sw.filterSegment.Filter().Add(record.Key)
 	}
+
+	// step 4
 	if !sw.dataBlockBuilder.AddRecord(record) {
 		if err := sw.flushDataBlock(); err != nil {
 			return err
@@ -107,42 +120,68 @@ func (sw *SSTableWriter) AddRecord(record Record) error {
 	return nil
 }
 
+// flushDataBlock FLUSHES DATA BLOCK TO DISK IN GIVEN ORDER:
+// 1. Finish the data block
+// 2. Write data block to file using segment storage (it uses block manager)
+// 3. Hash data block and add it to merkle tree
+// 4. Create index block and add it to index segment
+// 5. Reset data block builder so next block can be written
 func (sw *SSTableWriter) flushDataBlock() error {
 	if sw.dataBlockBuilder.RecordCount() == 0 {
 		return nil
 	}
+
+	// step 1
 	blockData, err := sw.dataBlockBuilder.Finish(sw.config.DataSegment.BlockSize)
 	if err != nil {
 		return err
 	}
+
+	// step 2
 	_, _, err = sw.storage.WriteSegment(config.SegmentData, blockData)
 	if err != nil {
 		return err
 	}
+
+	// step 3
 	blockHash := HashDataBlock(blockData)
 	sw.merkleTree.AddLeaf(blockHash)
+
+	// step 4
 	indexBlock := NewIndexBlock()
 	indexBlock.AddFromDataBlock(sw.dataBlockBuilder, sw.currentBlockIndex)
 	sw.indexSegment.AddBlock(indexBlock)
+
+	// step 5
 	sw.dataBlockBuilder.Reset()
 	sw.currentBlockIndex++
 	return nil
 }
 
+// Finalize FINALIZES THE SSTABLE IN GIVEN ORDER:
+// 1. Flush remaining block if not empty (one block is not flushed because it never got full)
+// 2. Build a merkle tree
+// 3. Fill footer metadata
+// next steps all update footer segment handler metadata -->>
+// 4. Write filter segment on disk
+// 5. Write index blocks on disk
+// 6. Write summary segment on disk
+// 7. Write metadata (merkle tree) segment on disk
+// 8. Write footer and sync storage
 func (w *SSTableWriter) Finalize() error {
-	// flush preostali data block
+	// step 1
 	if w.dataBlockBuilder.RecordCount() > 0 {
 		if err := w.flushDataBlock(); err != nil {
 			return err
 		}
 	}
 
-	// build Merkle tree
+	// step 2
 	if err := w.merkleTree.Build(); err != nil {
 		return err
 	}
 
-	// footer osnovni podaci
+	// step 3
 	w.footer.NumDataBlocks = w.currentBlockIndex
 	w.footer.TotalRecords = w.recordCount
 	w.footer.MinTimeStamp = w.minTimestamp
@@ -150,7 +189,7 @@ func (w *SSTableWriter) Finalize() error {
 	w.footer.MinKeyLength = w.minKeyLength
 	w.footer.MaxKeyLength = w.maxKeyLength
 
-	// zapis filter segmenta
+	// step 4
 	if w.filterSegment != nil {
 		filterData, err := w.filterSegment.Encode()
 		if err != nil {
@@ -166,10 +205,9 @@ func (w *SSTableWriter) Finalize() error {
 		}
 	}
 
-	// zapis index blokova
+	// step 5
 	var indexOffsets []uint64
 	totalIndexSize := uint64(0)
-
 	if len(w.indexSegment.Blocks) > 0 {
 		indexOffsets = make([]uint64, len(w.indexSegment.Blocks))
 		for i, indexBlock := range w.indexSegment.Blocks {
@@ -186,13 +224,12 @@ func (w *SSTableWriter) Finalize() error {
 		}
 		w.footer.IndexHandler.Size = uint32(totalIndexSize)
 	} else {
-		// nema blokova → index segment ostaje prazan
 		w.footer.IndexHandler.Offset = 0
 		w.footer.IndexHandler.Size = 0
 		indexOffsets = []uint64{}
 	}
 
-	// summary segment
+	// step 6
 	if len(indexOffsets) > 0 {
 		w.summarySegment = BuildSummaryFromIndex(indexOffsets, w.indexSegment.Blocks, 1)
 		summaryData := w.summarySegment.Encode()
@@ -205,7 +242,6 @@ func (w *SSTableWriter) Finalize() error {
 			Size:   summarySize,
 		}
 	} else {
-		// prazna summary
 		w.summarySegment = NewSummarySegment(1)
 		w.footer.SummaryHandler = SegmentHandler{
 			Offset: 0,
@@ -213,7 +249,7 @@ func (w *SSTableWriter) Finalize() error {
 		}
 	}
 
-	// zapis Merkle tree kao metadata
+	// step 7
 	metadataData := w.merkleTree.Encode()
 	metadataOffset, metadataSize, err := w.storage.WriteSegment(config.SegmentMetadata, metadataData)
 	if err != nil {
@@ -224,12 +260,10 @@ func (w *SSTableWriter) Finalize() error {
 		Size:   metadataSize,
 	}
 
-	// footer zapis
+	// step 8
 	if err := w.footer.WriteToStorage(w.storage); err != nil {
 		return err
 	}
-
-	// sync + close
 	if err := w.storage.Sync(); err != nil {
 		return err
 	}

@@ -9,6 +9,8 @@ import (
 	"github.com/ajromen/LSM-KV-Engine/internal/config"
 )
 
+// SegmentStorage abstracts physical storage of SSTable segments.
+// It hides whether segments are stored in a single file or multiple files.
 type SegmentStorage interface {
 	WriteSegment(segType config.SegmentType, data []byte) (offset uint64, size uint32, err error)
 	ReadSegment(segType config.SegmentType, offset uint64, size uint32) ([]byte, error)
@@ -16,10 +18,11 @@ type SegmentStorage interface {
 	Sync() error
 }
 
+// SingleFileStorage STORES ALL SSTABLE SEGMENTS IN A SINGLE PHYSICAL FILE
 type SingleFileStorage struct {
-	file         *os.File
-	offset       uint64
-	blockManager *block.BlockManager
+	file         *os.File            // single file all segments are written into
+	offset       uint64              // current write offset in the file
+	blockManager *block.BlockManager // block manager for writing blocks
 }
 
 func NewSingleFileStorage(filePath string, blockManager *block.BlockManager) (*SingleFileStorage, error) {
@@ -38,6 +41,7 @@ func OpenSingleFileStorage(filePath string) (*SingleFileStorage, error) {
 	return &SingleFileStorage{file: file, offset: 0}, nil
 }
 
+// WriteSegment APPENDS SEGMENT TO A FILE AND RETURNS ITS OFFSET + SIZE
 func (s *SingleFileStorage) WriteSegment(segType config.SegmentType, data []byte) (uint64, uint32, error) {
 	offset := s.offset
 	if segType == config.SegmentData && s.blockManager != nil {
@@ -67,6 +71,7 @@ func (s *SingleFileStorage) WriteSegment(segType config.SegmentType, data []byte
 	return offset, uint32(n), nil
 }
 
+// ReadSegment READS SEGMENT FROM A FILE (OFFSET AND SIZE ARE FORWARDED FROM FOOTER)
 func (s *SingleFileStorage) ReadSegment(segType config.SegmentType, offset uint64, size uint32) ([]byte, error) {
 	data := make([]byte, size)
 	nTotal := 0
@@ -108,11 +113,12 @@ func (s *SingleFileStorage) File() *os.File {
 	return s.file
 }
 
+// MultiFileStorage STORES EACH SSTABLE SEGMENT IN A SEPARATE FILE
 type MultiFileStorage struct {
-	basePath     string
-	files        map[config.SegmentType]*os.File
-	offsets      map[config.SegmentType]uint64
-	blockManager *block.BlockManager
+	basePath     string                          // base path on which prefixes like .footer are added
+	files        map[config.SegmentType]*os.File // open file handles per segment type
+	offsets      map[config.SegmentType]uint64   // current write offsets per segment
+	blockManager *block.BlockManager             // block manager for writing blocks
 }
 
 func NewMultiFileStorage(basePath string, blockManager *block.BlockManager) (*MultiFileStorage, error) {
@@ -132,6 +138,7 @@ func OpenMultiFileStorage(basePath string) (*MultiFileStorage, error) {
 	}, nil
 }
 
+// getOrCreateFile RETURNS AN OPEN FILE HANDLE FOR THE GIVEN SEGMENT TYPE
 func (m *MultiFileStorage) getOrCreateFile(segType config.SegmentType) (*os.File, error) {
 	if file, exists := m.files[segType]; exists {
 		return file, nil
@@ -146,6 +153,7 @@ func (m *MultiFileStorage) getOrCreateFile(segType config.SegmentType) (*os.File
 	return file, nil
 }
 
+// getOrOpenFile RETURNS AN OPEN FILE HANDLE FOR THE GIVEN SEGMENT TYPE IN A READ ONLY MODE -> USED FOR OPENING EXISTING SSTABLES
 func (m *MultiFileStorage) getOrOpenFile(segType config.SegmentType) (*os.File, error) {
 	if file, exists := m.files[segType]; exists {
 		return file, nil
@@ -178,6 +186,7 @@ func (m *MultiFileStorage) getFilePath(segType config.SegmentType) string {
 	}
 }
 
+// WriteSegment APPENDS SEGMENT TO A FILE CORRESPONDING TO A SEGMENT TYPE AND RETURNS ITS OFFSET + SIZE WITHIN THE GIVEN FILE
 func (m *MultiFileStorage) WriteSegment(segType config.SegmentType, data []byte) (uint64, uint32, error) {
 	file, err := m.getOrCreateFile(segType)
 	if err != nil {
@@ -208,6 +217,7 @@ func (m *MultiFileStorage) WriteSegment(segType config.SegmentType, data []byte)
 	return offset, uint32(n), nil
 }
 
+// ReadSegment READS SEGMENT FROM A FILE CORRESPONDING TO SEGMENT TYPE (OFFSET AND SIZE ARE FORWARDED FROM FOOTER)
 func (m *MultiFileStorage) ReadSegment(segType config.SegmentType, offset uint64, size uint32) ([]byte, error) {
 	file, err := m.getOrOpenFile(segType)
 	if err != nil {
@@ -255,6 +265,7 @@ func (m *MultiFileStorage) Sync() error {
 	return lastErr
 }
 
+// CreateStorage CREATES SINGLE FILE / MULTI FILE STORAGE BASED ON SSTABLE FORMAT CONFIGURATION
 func CreateStorage(basePath string, config *config.Config, blockManager *block.BlockManager) (SegmentStorage, error) {
 	if config.SSTable.Format == 0 {
 		return NewSingleFileStorage(basePath, blockManager)
@@ -262,6 +273,7 @@ func CreateStorage(basePath string, config *config.Config, blockManager *block.B
 	return NewMultiFileStorage(basePath, blockManager)
 }
 
+// OpenStorage OPENS SINGLE FILE / MULTI FILE STORAGE BASED ON SSTABLE FORMAT CONFIGURATION
 func OpenStorage(basePath string, config *config.Config) (SegmentStorage, error) {
 	if config.SSTable.Format == 0 {
 		return OpenSingleFileStorage(basePath)
