@@ -26,7 +26,7 @@ func (de *DeltaEncoderInt) Reset() {
 
 func (de *DeltaEncoderInt) Encode(key int, blockOffset uint32, buf []byte) []byte {
 	var delta int
-	if de.entryIndex == de.restartInterval {
+	if de.entryIndex == 0 || de.entryIndex == de.restartInterval {
 		de.restartArray = append(de.restartArray, blockOffset)
 		delta = key
 		de.prevKey = 0
@@ -47,7 +47,7 @@ func (de *DeltaEncoderInt) Decode(buf []byte, pos *int) (int, error) {
 	}
 	*pos += n
 	var key int
-	if de.entryIndex == de.restartInterval {
+	if de.entryIndex == 0 || de.entryIndex == de.restartInterval {
 		key = int(delta)
 		de.entryIndex = 0
 	} else {
