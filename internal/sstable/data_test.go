@@ -17,7 +17,7 @@ func makeRecord(key, value string, high, low uint64, tomb bool) Record {
 }
 
 func buildTestBlock(t *testing.T) []byte {
-	builder := NewDataBlockBuilder(2, 512)
+	builder := NewDataBlockBuilder(1, 2, 512)
 
 	records := []Record{
 		makeRecord("key1", "val1", 1, 1, false),
@@ -48,7 +48,7 @@ func buildTestBlock(t *testing.T) []byte {
 }
 
 func TestFinishEmptyBlock(t *testing.T) {
-	builder := NewDataBlockBuilder(2, 128)
+	builder := NewDataBlockBuilder(1, 2, 128)
 	_, err := builder.Finish(128)
 	if err == nil {
 		t.Fatal("Expected error for empty block")
@@ -56,7 +56,7 @@ func TestFinishEmptyBlock(t *testing.T) {
 }
 
 func TestReset(t *testing.T) {
-	builder := NewDataBlockBuilder(2, 128)
+	builder := NewDataBlockBuilder(1, 2, 128)
 	builder.AddRecord(makeRecord("a", "b", 1, 1, false))
 	builder.Reset()
 
@@ -101,7 +101,7 @@ func TestCRCFailure(t *testing.T) {
 }
 
 func TestIterator(t *testing.T) {
-	builder := NewDataBlockBuilder(2, 128)
+	builder := NewDataBlockBuilder(1, 2, 128)
 	records := []Record{
 		Record{Timestamp: utils.Uint128{High: 0, Low: 0}, Tombstone: false, Key: []byte("key1"), Value: []byte("value")},
 		Record{Timestamp: utils.Uint128{High: 0, Low: 0}, Tombstone: false, Key: []byte("key2"), Value: []byte("value")},
@@ -155,7 +155,7 @@ func TestIterator(t *testing.T) {
 }
 
 func TestIteratorSeek(t *testing.T) {
-	builder := NewDataBlockBuilder(2, 128)
+	builder := NewDataBlockBuilder(1, 2, 128)
 	records := []Record{
 		{Timestamp: utils.Uint128{High: 0, Low: 0}, Tombstone: false, Key: []byte("key1"), Value: []byte("value")},
 		{Timestamp: utils.Uint128{High: 0, Low: 0}, Tombstone: false, Key: []byte("key2"), Value: []byte("value")},
@@ -204,7 +204,7 @@ func TestIteratorSeek(t *testing.T) {
 }
 
 func TestMergeIterator(t *testing.T) {
-	builder1 := NewDataBlockBuilder(2, 128)
+	builder1 := NewDataBlockBuilder(1, 2, 128)
 	records1 := []Record{
 		{Timestamp: utils.Uint128{High: 0, Low: 0}, Tombstone: false, Key: []byte("key1"), Value: []byte("val1")},
 		{Timestamp: utils.Uint128{High: 0, Low: 0}, Tombstone: false, Key: []byte("key3"), Value: []byte("val3")},
@@ -215,7 +215,7 @@ func TestMergeIterator(t *testing.T) {
 			t.Fatal("AddRecord failed for builder1")
 		}
 	}
-	builder2 := NewDataBlockBuilder(2, 128)
+	builder2 := NewDataBlockBuilder(1, 2, 128)
 	records2 := []Record{
 		{Timestamp: utils.Uint128{High: 0, Low: 0}, Tombstone: false, Key: []byte("key2"), Value: []byte("val2")},
 		{Timestamp: utils.Uint128{High: 0, Low: 0}, Tombstone: false, Key: []byte("key4"), Value: []byte("val4")},

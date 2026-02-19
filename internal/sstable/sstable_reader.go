@@ -205,7 +205,7 @@ func (r *SSTableReader) Get(key []byte) (*Record, error) {
 	}
 
 	// step 5
-	iterator, err := NewDataBlockIterator(blockData)
+	iterator, err := NewDataBlockIterator(blockData, int(r.footer.RestartInterval), r.footer.EncodingType)
 	if err != nil {
 		return nil, err
 	}

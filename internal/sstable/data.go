@@ -56,16 +56,16 @@ CRC32 is calculated over the entire block except the last 4 bytes (CRC itself) w
 
 // DATA BLOCK BUILDER BUILDS SSTABLE DATA BLOCK -> ENCODES KEYS USING DELTA ENCODING AND APPENDS RECORDS UNTIL THE BLOCK IS FULL
 type DataBlockBuilder struct {
-	encoder         *encoders.DeltaEncoderBytes // encoder used on given data
-	data            []byte                      // raw data for block
-	restartInterval int                         // number of keys between delta restart points
-	recordCount     int                         // number of records added to block
-	firstKey        []byte                      // first key in the block (for index)
+	encoder         encoders.Encoder // encoder used on given data
+	data            []byte           // raw data for block
+	restartInterval int              // number of keys between delta restart points
+	recordCount     int              // number of records added to block
+	firstKey        []byte           // first key in the block (for index)
 }
 
-func NewDataBlockBuilder(restartInterval, blockSize int) *DataBlockBuilder {
+func NewDataBlockBuilder(t byte, restartInterval, blockSize int) *DataBlockBuilder {
 	return &DataBlockBuilder{
-		encoder:         encoders.NewDeltaEncoderBytes(restartInterval),
+		encoder:         encoders.NewEncoder(t, restartInterval),
 		data:            make([]byte, 0, blockSize),
 		restartInterval: restartInterval,
 	}
@@ -80,7 +80,7 @@ func AppendUvarint128ToSlice2(buf []byte, v utils.Uint128) []byte {
 // APPENDS A SINGLE RECORD TO THE CURRENT BLOCK -> RETURNS FALSE IF THE RECORD DOES NOT FIT IN THE REMAINING BLOCK CAPACITY
 
 func (builder *DataBlockBuilder) AddRecord(record Record) bool {
-	// if its the first record store its key as first key for block index
+	// if it is the first record store its key as first key for block index
 	if builder.recordCount == 0 {
 		builder.firstKey = append([]byte(nil), record.Key...)
 	}
@@ -110,7 +110,7 @@ func (builder *DataBlockBuilder) Finish(blockSize int) ([]byte, error) {
 		return nil, errors.New("empty block")
 	}
 	data := builder.data
-	restarts := builder.encoder.RestartArray
+	restarts := builder.encoder.RestartArray()
 	restartCount := uint32(len(restarts))
 	block := make([]byte, blockSize)
 	pos := 0
@@ -157,16 +157,16 @@ func (builder *DataBlockBuilder) RecordCount() int {
 
 // DATA BLOCK READER READS AND DECODES RECORDS FROM A SINGLE DATA BLOCK
 type DataBlockReader struct {
-	data         []byte                      // actual data in block
-	decoder      *encoders.DeltaEncoderBytes // delta encoder
-	restartArray []uint32                    // restart points for binary search
-	pos          int                         // current read position
-	dataSize     int                         // size of the actual data
+	data         []byte           // actual data in block
+	decoder      encoders.Encoder // delta encoder
+	restartArray []uint32         // restart points for binary search
+	pos          int              // current read position
+	dataSize     int              // size of the actual data
 }
 
 // VERIFIES CRC AND INITIALIZES A BLOCK READER FOR GIVEN BLOCK
 
-func NewDataBlockReader(block []byte) (*DataBlockReader, error) {
+func NewDataBlockReader(block []byte, restartInterval int, encodingType byte) (*DataBlockReader, error) {
 	if len(block) < 12 {
 		return nil, errors.New("block too small")
 	}
@@ -196,7 +196,7 @@ func NewDataBlockReader(block []byte) (*DataBlockReader, error) {
 	data := block[:dataSize]
 	return &DataBlockReader{
 		data:         data,
-		decoder:      encoders.NewDeltaEncoderBytes(2),
+		decoder:      encoders.NewEncoder(encodingType, restartInterval),
 		restartArray: restartArray,
 		pos:          0,
 		dataSize:     int(dataSize),
@@ -286,7 +286,7 @@ func (r *DataBlockReader) HasNext() bool {
 }
 
 // READS AND DECODES THE NEXT RECORD FROM THE BLOCK BUT ALSO RETURNS shared prefix len / shared sufix len / suffix
-
+/*
 func (r *DataBlockReader) ReadRecordWithMeta() (*Record, uint64, uint64, []byte, error) {
 	if r.pos >= len(r.data) {
 		return nil, 0, 0, nil, errors.New("out of data")
@@ -326,7 +326,7 @@ func (r *DataBlockReader) ReadRecordWithMeta() (*Record, uint64, uint64, []byte,
 		Value:     value,
 	}, shared, suffixLen, suffix, nil
 }
-
+*/
 // DATA BLOCK ITERATOR PROVIDES SEQUENTIAL AND SEEK BASED ITERATION OVER RECORDS INSIDE A SINGLE SSTABLE DATA BLOCK
 type DataBlockIterator struct {
 	reader  *DataBlockReader // underlying block reader
@@ -352,8 +352,8 @@ func (i *DataBlockIterator) Close() error {
 
 // CREATES A NEW ITERATOR OVER A RAW DATA BLOCK
 
-func NewDataBlockIterator(block []byte) (*DataBlockIterator, error) {
-	reader, err := NewDataBlockReader(block)
+func NewDataBlockIterator(block []byte, restartInterval int, encodingType byte) (*DataBlockIterator, error) {
+	reader, err := NewDataBlockReader(block, restartInterval, encodingType)
 	if err != nil {
 		return nil, err
 	}
@@ -413,7 +413,10 @@ func (i *DataBlockIterator) Seek(target []byte) error {
 	for left <= right {
 		mid := left + (right-left)/2
 		r := i.reader
-		r.SeekToRestart(mid)
+		err := r.SeekToRestart(mid)
+		if err != nil {
+			return err
+		}
 		record, err := i.reader.ReadRecord()
 		if err != nil {
 			i.valid = false
@@ -427,7 +430,10 @@ func (i *DataBlockIterator) Seek(target []byte) error {
 			right = mid - 1
 		}
 	}
-	i.reader.SeekToRestart(best)
+	err := i.reader.SeekToRestart(best)
+	if err != nil {
+		return err
+	}
 	for i.reader.HasNext() {
 		record, err := i.reader.ReadRecord()
 		if err != nil {
@@ -564,8 +570,14 @@ func (iterator *MergeIterator) Advance() error {
 }
 
 func (iterator *MergeIterator) Close() error {
-	iterator.iterator1.Close()
-	iterator.iterator2.Close()
+	err := iterator.iterator1.Close()
+	if err != nil {
+		return err
+	}
+	err = iterator.iterator2.Close()
+	if err != nil {
+		return err
+	}
 	return nil
 }
 

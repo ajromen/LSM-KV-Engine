@@ -1,23 +1,20 @@
 package encoders
 
-import "errors"
-
 const (
 	NoCompression        byte = 0
 	PrefixCompression    byte = 1
 	DictDeltaCompression byte = 2
 )
 
-func NewEncoder(t byte, restartInterval int) (Encoder, error) {
+func NewEncoder(t byte, restartInterval int) Encoder {
 	switch t {
 	case NoCompression:
-		return nil, nil
+		return nil
 	case PrefixCompression:
-		return NewDeltaEncoderBytes(restartInterval), nil
+		return NewDeltaEncoderBytes(restartInterval)
 	case DictDeltaCompression:
-		return NewDictDeltaEncoder(restartInterval), nil
+		return NewDictDeltaEncoder(restartInterval)
 	default:
-		return nil, errors.New("unknown encoder type")
-
+		return NewDeltaEncoderBytes(restartInterval)
 	}
 }

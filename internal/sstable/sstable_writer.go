@@ -51,7 +51,7 @@ func NewSSTableWriter(filePath string, blockManager *block.BlockManager, cfg *co
 		blockManager:      blockManager,
 		config:            cfg.SSTable,
 		filePath:          filePath,
-		dataBlockBuilder:  NewDataBlockBuilder(cfg.SSTable.DataSegment.RestartInterval, blockManager.BlockSize()),
+		dataBlockBuilder:  NewDataBlockBuilder(1, cfg.SSTable.DataSegment.RestartInterval, blockManager.BlockSize()),
 		indexSegment:      NewIndexSegment(),
 		summarySegment:    NewSummarySegment(1),
 		filterSegment:     filterSegment,

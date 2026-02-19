@@ -33,11 +33,13 @@ type Footer struct {
 	MinKeyLength    uint32         // min keylength in sstable
 	MaxKeyLength    uint32         // max keylength in sstable
 	TotalRecords    uint64         // number of records in sstable
-	CompressionType byte           // type of compression = 0 always
-	Version         byte           // version = 1 always
-	Format          byte           // format (0 - singlefile / 1 - multifile)
-	MagicNumber     uint32         // SSTB in hex
-	CRC             uint32         // crc over the whole footer segment
+	RestartInterval uint32
+	EncodingType    byte
+	CompressionType byte   // type of compression = 0 always
+	Version         byte   // version = 1 always
+	Format          byte   // format (0 - singlefile / 1 - multifile)
+	MagicNumber     uint32 // SSTB in hex
+	CRC             uint32 // crc over the whole footer segment
 }
 
 func NewFooter(config config.SSTableConfig) *Footer {
@@ -50,6 +52,8 @@ func NewFooter(config config.SSTableConfig) *Footer {
 		Version:         1,
 		Format:          formatByte,
 		MagicNumber:     MagicNumber,
+		RestartInterval: uint32(config.DataSegment.RestartInterval),
+		EncodingType:    1,
 	}
 }
 
@@ -98,6 +102,11 @@ func (f *Footer) Encode() []byte {
 	binary.LittleEndian.PutUint64(buf[pos:], f.TotalRecords)
 	pos += 8
 
+	binary.LittleEndian.PutUint32(buf[pos:], f.RestartInterval)
+	pos += 4
+
+	buf[pos] = f.EncodingType
+	pos++
 	buf[pos] = f.CompressionType
 	pos++
 	buf[pos] = f.Version
@@ -162,6 +171,11 @@ func (f *Footer) Decode(buf []byte) error {
 	f.TotalRecords = binary.LittleEndian.Uint64(buf[pos:])
 	pos += 8
 
+	f.RestartInterval = binary.LittleEndian.Uint32(buf[pos:])
+	pos += 4
+
+	f.EncodingType = buf[pos]
+	pos++
 	f.CompressionType = buf[pos]
 	pos++
 	f.Version = buf[pos]

@@ -51,3 +51,7 @@ func (e *DictDeltaEncoder) WriteRestartArray(buf []byte) []byte {
 func (e *DictDeltaEncoder) DictionarySize() int {
 	return e.dictEncoder.Size()
 }
+
+func (e *DictDeltaEncoder) RestartArray() []uint32 {
+	return e.deltaEncoder.restartArray
+}
