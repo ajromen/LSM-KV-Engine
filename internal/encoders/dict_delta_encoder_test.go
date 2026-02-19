@@ -1,6 +1,7 @@
 package encoders
 
 import (
+	"bytes"
 	"testing"
 )
 
@@ -13,7 +14,7 @@ func TestDictDeltaEncoderBasic(t *testing.T) {
 	keys := []string{"key1", "key2", "key3", "key4"}
 
 	for i, k := range keys {
-		buf = enc.Encode(k, uint32(i), buf)
+		buf = enc.Encode([]byte(k), uint32(i), buf)
 	}
 
 	enc.Reset()
@@ -24,7 +25,7 @@ func TestDictDeltaEncoderBasic(t *testing.T) {
 		if err != nil {
 			t.Fatalf("decode failed at index %d: %v", i, err)
 		}
-		if key != expected {
+		if bytes.Compare(key, []byte(expected)) != 0 {
 			t.Fatalf("expected key %s, got %s", expected, key)
 		}
 	}
@@ -39,7 +40,7 @@ func TestDictDeltaEncoderRestartInterval(t *testing.T) {
 	keys := []string{"a", "b", "c", "d"}
 
 	for i, k := range keys {
-		buf = enc.Encode(k, uint32(i), buf)
+		buf = enc.Encode([]byte(k), uint32(i), buf)
 	}
 
 	if len(enc.deltaEncoder.restartArray) != 2 {
@@ -54,7 +55,7 @@ func TestDictDeltaEncoderRestartInterval(t *testing.T) {
 		if err != nil {
 			t.Fatalf("decode failed at index %d: %v", i, err)
 		}
-		if key != expected {
+		if bytes.Compare(key, []byte(expected)) != 0 {
 			t.Fatalf("expected key %s, got %s", expected, key)
 		}
 	}
@@ -69,7 +70,7 @@ func TestDictDeltaEncoderDuplicateKeys(t *testing.T) {
 	keys := []string{"x", "y", "x", "y", "x"}
 
 	for i, k := range keys {
-		buf = enc.Encode(k, uint32(i), buf)
+		buf = enc.Encode([]byte(k), uint32(i), buf)
 	}
 
 	if enc.DictionarySize() != 2 {
@@ -84,7 +85,7 @@ func TestDictDeltaEncoderDuplicateKeys(t *testing.T) {
 		if err != nil {
 			t.Fatalf("decode failed at index %d: %v", i, err)
 		}
-		if key != expected {
+		if bytes.Compare(key, []byte(expected)) != 0 {
 			t.Fatalf("expected key %s, got %s", expected, key)
 		}
 	}
@@ -99,7 +100,7 @@ func TestDictDeltaEncoderSerializeDictionary(t *testing.T) {
 	keys := []string{"apple", "banana", "cherry"}
 
 	for i, k := range keys {
-		buf = enc.Encode(k, uint32(i), buf)
+		buf = enc.Encode([]byte(k), uint32(i), buf)
 	}
 
 	dictBytes := enc.SerializeDictionary()

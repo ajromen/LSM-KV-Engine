@@ -17,16 +17,16 @@ func (e *DictDeltaEncoder) Reset() {
 }
 
 // Encode string key -> dictionary ID -> delta encode
-func (e *DictDeltaEncoder) Encode(key string, blockOffset uint32, buf []byte) []byte {
+func (e *DictDeltaEncoder) Encode(key []byte, blockOffset uint32, buf []byte) []byte {
 	id, _ := e.dictEncoder.AddToDict(key)
 	return e.deltaEncoder.Encode(id, blockOffset, buf)
 }
 
 // Decode delta -> dictionary ID -> string key
-func (e *DictDeltaEncoder) Decode(buf []byte, pos *int) (string, error) {
+func (e *DictDeltaEncoder) Decode(buf []byte, pos *int) ([]byte, error) {
 	id, err := e.deltaEncoder.Decode(buf, pos)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	return e.dictEncoder.GetKey(id)
 }
