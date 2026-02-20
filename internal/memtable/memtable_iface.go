@@ -32,7 +32,7 @@ type BTreeMemtable struct {
 }
 
 type SkipListMemtable struct {
-	memtableData *SkipList
+	memtableData *data_structures.SkipList[MemtableEntry]
 	maxSize      int
 	flushHandler func([]MemtableEntry)
 }
