@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	FooterSize  = 111
+	FooterSize  = 116
 	MagicNumber = 0x53535442
 )
 

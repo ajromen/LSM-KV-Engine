@@ -19,9 +19,10 @@ func TestFooterEncodeDecode(t *testing.T) {
 	footer.TotalRecords = 1234
 	footer.MinTimeStamp = utils.Uint128{Low: 1, High: 2}
 	footer.MaxTimeStamp = utils.Uint128{Low: 3, High: 4}
+	footer.EncodingType = 1
+	footer.RestartInterval = 2
 
 	encoded := footer.Encode()
-
 	decoded := &Footer{}
 	err := decoded.Decode(encoded)
 	if err != nil {

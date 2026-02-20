@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"hash/crc32"
+	"math"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/encoders"
 	"github.com/ajromen/LSM-KV-Engine/internal/utils"
@@ -285,48 +286,6 @@ func (r *DataBlockReader) HasNext() bool {
 	return r.pos < r.dataSize
 }
 
-// READS AND DECODES THE NEXT RECORD FROM THE BLOCK BUT ALSO RETURNS shared prefix len / shared sufix len / suffix
-/*
-func (r *DataBlockReader) ReadRecordWithMeta() (*Record, uint64, uint64, []byte, error) {
-	if r.pos >= len(r.data) {
-		return nil, 0, 0, nil, errors.New("out of data")
-	}
-	low, n1 := binary.Uvarint(r.data[r.pos:])
-	if n1 <= 0 {
-		return nil, 0, 0, nil, errors.New("out of data")
-	}
-	r.pos += n1
-	high, n2 := binary.Uvarint(r.data[r.pos:])
-	if n2 <= 0 {
-		return nil, 0, 0, nil, errors.New("out of data")
-	}
-	r.pos += n2
-	timestamp := utils.Uint128{
-		High: high,
-		Low:  low,
-	}
-	tombstone := r.data[r.pos] == 1
-	r.pos++
-	shared, suffixLen, suffix, key, err := r.decoder.DecodeWithMeta(r.data, &r.pos)
-	if err != nil {
-		return nil, 0, 0, nil, err
-	}
-	valueLen, n := binary.Uvarint(r.data[r.pos:])
-	if n <= 0 {
-		return nil, 0, 0, nil, errors.New("invalid value size")
-	}
-	r.pos += n
-	value := make([]byte, valueLen)
-	copy(value, r.data[r.pos:r.pos+int(valueLen)])
-	r.pos += int(valueLen)
-	return &Record{
-		Timestamp: timestamp,
-		Tombstone: tombstone,
-		Key:       key,
-		Value:     value,
-	}, shared, suffixLen, suffix, nil
-}
-*/
 // DATA BLOCK ITERATOR PROVIDES SEQUENTIAL AND SEEK BASED ITERATION OVER RECORDS INSIDE A SINGLE SSTABLE DATA BLOCK
 type DataBlockIterator struct {
 	reader  *DataBlockReader // underlying block reader
@@ -606,4 +565,195 @@ func (iterator *MergeIterator) Timestamp() utils.Uint128 {
 
 func (iterator *MergeIterator) Tombstone() bool {
 	return iterator.Current.Tombstone()
+}
+
+type WinnerTreeNode struct {
+	Iterator *DataBlockIterator // iterator for each sstable
+}
+type WinnerTree struct {
+	nodes      []WinnerTreeNode           // all nodes of tree represented as array
+	k          int                        // number of leaves - number of sstable iterators provided
+	leafIndex  map[*DataBlockIterator]int // quickly find the winner among leaves
+	pathToRoot [][]int                    // path of node indexes to root for each leaf
+}
+
+func NewWinnerTree(iters []*DataBlockIterator) *WinnerTree {
+	if len(iters) == 0 {
+		return nil
+	}
+	k := int(math.Pow(2, math.Ceil(math.Log2(float64(len(iters))))))
+	if len(iters) == 1 {
+		k = 1
+	}
+	nodes := make([]WinnerTreeNode, 2*k-1)
+	for i := 0; i < k; i++ {
+		if i < len(iters) {
+			nodes[i] = WinnerTreeNode{Iterator: iters[i]}
+		} else {
+			nodes[i] = WinnerTreeNode{Iterator: nil}
+		}
+	}
+	leafIndex := make(map[*DataBlockIterator]int, len(iters))
+	for i, it := range iters {
+		leafIndex[it] = i
+	}
+	wt := &WinnerTree{
+		nodes:      nodes,
+		k:          k,
+		leafIndex:  leafIndex,
+		pathToRoot: make([][]int, k),
+	}
+	wt.build()
+	wt.computePaths()
+	return wt
+}
+
+func compare(a, b *DataBlockIterator) *DataBlockIterator {
+	if a == nil || !a.Valid() {
+		return b
+	}
+	if b == nil || !b.Valid() {
+		return a
+	}
+	if bytes.Compare(a.Current().Key, b.Current().Key) < 0 {
+		return a
+	}
+	if bytes.Compare(a.Current().Key, b.Current().Key) > 0 {
+		return b
+	}
+	if utils.Uint128GE(a.Current().Timestamp, b.Current().Timestamp) {
+		return a
+	}
+	return b
+}
+
+func (wt *WinnerTree) parentOf(c int) int {
+	return wt.k + c/2
+}
+
+func (wt *WinnerTree) build() {
+	for n := wt.k; n < 2*wt.k-1; n++ {
+		left := 2 * (n - wt.k)
+		right := left + 1
+		wt.nodes[n] = WinnerTreeNode{Iterator: compare(wt.nodes[left].Iterator, wt.nodes[right].Iterator)}
+	}
+}
+
+func (wt *WinnerTree) computePaths() {
+	root := 2*wt.k - 2
+	for leaf := 0; leaf < wt.k; leaf++ {
+		path := []int{}
+		cur := leaf
+		for cur != root {
+			p := wt.parentOf(cur)
+			path = append(path, p)
+			cur = p
+		}
+		wt.pathToRoot[leaf] = path
+	}
+}
+
+func (wt *WinnerTree) Winner() *DataBlockIterator {
+	root := 2*wt.k - 2
+	return wt.nodes[root].Iterator
+}
+
+func (wt *WinnerTree) Update(it WinnerTreeNode) {
+	leafIdx, ok := wt.leafIndex[it.Iterator]
+	if !ok {
+		return
+	}
+	it.Iterator.Next()
+	wt.nodes[leafIdx] = it
+	cur := leafIdx
+	for _, internalIdx := range wt.pathToRoot[leafIdx] {
+		left := 2 * (internalIdx - wt.k)
+		right := left + 1
+		wt.nodes[internalIdx].Iterator = compare(wt.nodes[left].Iterator, wt.nodes[right].Iterator)
+		cur = internalIdx
+		_ = cur
+	}
+}
+
+type MultiMergeIterator struct {
+	tree  *WinnerTree
+	valid bool
+}
+
+func NewMultiMergeIterator(iterators []*DataBlockIterator) *MultiMergeIterator {
+	if len(iterators) == 0 {
+		return &MultiMergeIterator{valid: false}
+	}
+	active := make([]*DataBlockIterator, 0, len(iterators))
+	for _, it := range iterators {
+		if it != nil && it.Valid() {
+			active = append(active, it)
+		}
+	}
+	if len(active) == 0 {
+		return &MultiMergeIterator{valid: false}
+	}
+	tree := NewWinnerTree(active)
+	winner := tree.Winner()
+	return &MultiMergeIterator{
+		tree:  tree,
+		valid: winner != nil && winner.Valid(),
+	}
+}
+
+func (m *MultiMergeIterator) Valid() bool {
+	return m.valid
+}
+
+func (m *MultiMergeIterator) Key() []byte {
+	if !m.valid {
+		return nil
+	}
+	return m.tree.Winner().Key()
+}
+
+func (m *MultiMergeIterator) Value() []byte {
+	if !m.valid {
+		return nil
+	}
+	return m.tree.Winner().Value()
+}
+
+func (m *MultiMergeIterator) Timestamp() utils.Uint128 {
+	if !m.valid {
+		return utils.Uint128{}
+	}
+	return m.tree.Winner().Timestamp()
+}
+
+func (m *MultiMergeIterator) Tombstone() bool {
+	if !m.valid {
+		return false
+	}
+	return m.tree.Winner().Tombstone()
+}
+
+func (m *MultiMergeIterator) Next() error {
+	if !m.valid {
+		return nil
+	}
+	currentKey := append([]byte(nil), m.Key()...)
+	for {
+		winner := m.tree.Winner()
+		if winner == nil || !winner.Valid() {
+			break
+		}
+		if !bytes.Equal(winner.Key(), currentKey) {
+			break
+		}
+		m.tree.Update(WinnerTreeNode{Iterator: winner})
+	}
+
+	winner := m.tree.Winner()
+	m.valid = winner != nil && winner.Valid()
+	return nil
+}
+
+func (m *MultiMergeIterator) Close() error {
+	return nil
 }
