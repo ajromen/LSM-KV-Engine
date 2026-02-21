@@ -285,7 +285,84 @@ func TestMultiMergeIteratorWithWinnerTree(t *testing.T) {
 		{Timestamp: utils.Uint128{High: 0, Low: 1}, Key: []byte("key7"), Value: []byte("val7-it3")},
 	})
 
-	mi := NewMultiMergeIterator([]*DataBlockIterator{it1, it2, it3})
+	mi := NewMultiMergeIterator([]*DataBlockIterator{it1, it2, it3}, 1)
+	if mi == nil {
+		t.Fatal("NewMultiMergeIterator returned nil")
+	}
+
+	expected := []struct {
+		key   string
+		value string
+	}{
+		{"key1", "val1-it1"},
+		{"key2", "val2-it2"},
+		{"key3", "val3-it3"},
+		{"key4", "val4-it1"},
+		{"key5", "val5-it2"},
+		{"key6", "val6-it3"},
+		{"key7", "val7-it3"},
+		{"keyX", "valX-newer"},
+	}
+
+	for i, exp := range expected {
+		if !mi.Valid() {
+			t.Fatalf("step %d: iterator exhausted early, expected key=%q", i, exp.key)
+		}
+		gotKey := string(mi.Key())
+		gotVal := string(mi.Value())
+		fmt.Printf("[%d] key=%s value=%s\n", i, gotKey, gotVal)
+		if gotKey != exp.key {
+			t.Errorf("step %d: key = %q, want %q", i, gotKey, exp.key)
+		}
+		if gotVal != exp.value {
+			t.Errorf("step %d: value = %q, want %q", i, gotVal, exp.value)
+		}
+		mi.Next()
+	}
+
+	if mi.Valid() {
+		t.Errorf("iterator should be exhausted but still valid, remaining key=%q", mi.Key())
+	}
+	fmt.Println("TestMultiMergeIterator passed!")
+}
+
+func TestMultiMergeIteratorWithHeap(t *testing.T) {
+	newIter := func(records []Record) *DataBlockIterator {
+		b := NewDataBlockBuilder(1, 2, 4096)
+		for _, r := range records {
+			if !b.AddRecord(r) {
+				t.Fatal("AddRecord failed")
+			}
+		}
+		block, err := b.Finish(4096)
+		if err != nil {
+			t.Fatal(err)
+		}
+		it, err := NewDataBlockIterator(block, 2, 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		it.Rewind()
+		return it
+	}
+
+	it1 := newIter([]Record{
+		{Timestamp: utils.Uint128{High: 0, Low: 1}, Key: []byte("key1"), Value: []byte("val1-it1")},
+		{Timestamp: utils.Uint128{High: 0, Low: 1}, Key: []byte("key4"), Value: []byte("val4-it1")},
+		{Timestamp: utils.Uint128{High: 0, Low: 2}, Key: []byte("keyX"), Value: []byte("valX-newer")},
+	})
+	it2 := newIter([]Record{
+		{Timestamp: utils.Uint128{High: 0, Low: 1}, Key: []byte("key2"), Value: []byte("val2-it2")},
+		{Timestamp: utils.Uint128{High: 0, Low: 1}, Key: []byte("key5"), Value: []byte("val5-it2")},
+		{Timestamp: utils.Uint128{High: 0, Low: 1}, Key: []byte("keyX"), Value: []byte("valX-older")},
+	})
+	it3 := newIter([]Record{
+		{Timestamp: utils.Uint128{High: 0, Low: 1}, Key: []byte("key3"), Value: []byte("val3-it3")},
+		{Timestamp: utils.Uint128{High: 0, Low: 1}, Key: []byte("key6"), Value: []byte("val6-it3")},
+		{Timestamp: utils.Uint128{High: 0, Low: 1}, Key: []byte("key7"), Value: []byte("val7-it3")},
+	})
+
+	mi := NewMultiMergeIterator([]*DataBlockIterator{it1, it2, it3}, 0)
 	if mi == nil {
 		t.Fatal("NewMultiMergeIterator returned nil")
 	}
