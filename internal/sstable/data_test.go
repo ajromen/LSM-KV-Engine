@@ -157,10 +157,10 @@ func TestIterator(t *testing.T) {
 func TestIteratorSeek(t *testing.T) {
 	builder := NewDataBlockBuilder(1, 2, 128)
 	records := []Record{
-		{Timestamp: utils.Uint128{High: 0, Low: 0}, Tombstone: false, Key: []byte("key1"), Value: []byte("value")},
-		{Timestamp: utils.Uint128{High: 0, Low: 0}, Tombstone: false, Key: []byte("key2"), Value: []byte("value")},
-		{Timestamp: utils.Uint128{High: 0, Low: 0}, Tombstone: false, Key: []byte("key3"), Value: []byte("value")},
-		{Timestamp: utils.Uint128{High: 0, Low: 0}, Tombstone: false, Key: []byte("key4"), Value: []byte("value")},
+		{Timestamp: utils.Uint128{High: 0, Low: 0}, Tombstone: false, Key: []byte("key1"), Value: []byte("value1")},
+		{Timestamp: utils.Uint128{High: 0, Low: 0}, Tombstone: false, Key: []byte("key2"), Value: []byte("value2")},
+		{Timestamp: utils.Uint128{High: 0, Low: 0}, Tombstone: false, Key: []byte("key3"), Value: []byte("value3")},
+		{Timestamp: utils.Uint128{High: 0, Low: 0}, Tombstone: false, Key: []byte("key4"), Value: []byte("value4")},
 	}
 	for _, record := range records {
 		added := builder.AddRecord(record)

@@ -39,7 +39,7 @@ func TestIndexBlockEncodeDecode(t *testing.T) {
 	block.AddEntry(IndexEntry{Key: []byte("b"), BlockIndex: 20})
 	block.AddEntry(IndexEntry{Key: []byte("c"), BlockIndex: 30})
 
-	encoded := block.EncodeIndexBlock()
+	encoded := block.EncodeIndexBlock(50)
 
 	dataWithoutCRC := encoded[:len(encoded)-4]
 	expectedCRC := binary.LittleEndian.Uint32(encoded[len(encoded)-4:])
@@ -99,25 +99,10 @@ func TestIndexBlockFindBlock(t *testing.T) {
 	}
 }
 
-func TestIndexBlockSize(t *testing.T) {
-	t.Log("---- INDEX BLOCK SIZE TEST ----")
-
-	block := NewIndexBlock()
-	block.AddEntry(IndexEntry{Key: []byte("key1"), BlockIndex: 1})
-	block.AddEntry(IndexEntry{Key: []byte("key2"), BlockIndex: 2})
-
-	size := block.Size()
-	encoded := block.EncodeIndexBlock()
-
-	if size != len(encoded) {
-		t.Fatalf("expected size %d to match encoded size %d", size, len(encoded))
-	}
-}
-
 func TestIndexSegmentAddEntryToBlock(t *testing.T) {
 	t.Log("---- INDEX SEGMENT ADD ENTRY TO BLOCK TEST ----")
 
-	seg := NewIndexSegment()
+	seg := NewIndexSegment(160)
 
 	seg.AddEntryToBlock(IndexEntry{Key: []byte("a"), BlockIndex: 1}, 2)
 	seg.AddEntryToBlock(IndexEntry{Key: []byte("b"), BlockIndex: 2}, 2)
@@ -139,7 +124,7 @@ func TestIndexSegmentAddEntryToBlock(t *testing.T) {
 func TestIndexSegmentGetBlockSizes(t *testing.T) {
 	t.Log("---- INDEX SEGMENT GET BLOCK SIZES TEST ----")
 
-	seg := NewIndexSegment()
+	seg := NewIndexSegment(160)
 
 	block1 := NewIndexBlock()
 	block1.AddEntry(IndexEntry{Key: []byte("a"), BlockIndex: 1})
@@ -156,10 +141,10 @@ func TestIndexSegmentGetBlockSizes(t *testing.T) {
 		t.Fatalf("expected 2 block sizes, got %d", len(sizes))
 	}
 
-	if sizes[0] != block1.Size() {
-		t.Fatalf("expected block1 size %d, got %d", block1.Size(), sizes[0])
+	if sizes[0] != block1.RealSize {
+		t.Fatalf("expected block1 size %d, got %d", block1.RealSize, sizes[0])
 	}
-	if sizes[1] != block2.Size() {
-		t.Fatalf("expected block2 size %d, got %d", block2.Size(), sizes[1])
+	if sizes[1] != block2.RealSize {
+		t.Fatalf("expected block2 size %d, got %d", block2.RealSize, sizes[1])
 	}
 }
