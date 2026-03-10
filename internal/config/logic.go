@@ -43,21 +43,31 @@ func (c *Config) applyFlags(flags *cli.FLags) error {
 	if flags.MemtableMaxSize != nil {
 		c.Memtable.MemtableMaxSize = *flags.MemtableMaxSize
 	}
-	if flags.MemtableMaxSizeKb != nil {
-		c.Memtable.MemtableSizeKB = *flags.MemtableMaxSizeKb
-	}
+	//if flags.MemtableMaxSizeKb != nil {
+	//	c.Memtable.MemtableSizeKB = *flags.MemtableMaxSizeKb
+	//}
 	if flags.MemtableType != nil {
 		c.Memtable.MemtableType = *flags.MemtableType
 	}
 	if flags.BlockCacheMaxBlocks != nil {
 		c.BlockManager.BlockCacheMaxBlocks = *flags.BlockCacheMaxBlocks
 	}
+	if flags.LSMCompactionAlgorithm != nil {
+		c.LSMTree.CompactionAlgorithm = *flags.LSMCompactionAlgorithm
+	}
+	if flags.LSMMaxLayers != nil {
+		c.LSMTree.MaxLevels = *flags.LSMMaxLayers
+	}
 	return nil
 }
 
 func (c *Config) validateFields() error {
-	if c.Memtable.MemtableMaxSize <= 0 &&
-		c.Memtable.MemtableSizeKB <= 0 {
+	//if c.Memtable.MemtableMaxSize <= 0 &&
+	//	c.Memtable.MemtableSizeKB <= 0 {
+	//	return fmt.Errorf("memtable size must be positive")
+	//}
+
+	if c.Memtable.MemtableMaxSize <= 0 {
 		return fmt.Errorf("memtable size must be positive")
 	}
 
@@ -73,6 +83,15 @@ func (c *Config) validateFields() error {
 
 	if c.BlockManager.BlockCacheMaxBlocks < 1 {
 		return fmt.Errorf("invalid block cacheMaxBlocks must be positive")
+	}
+
+	if c.LSMTree.MaxLevels <= 0 {
+		return fmt.Errorf("invalid LSM level number")
+	}
+
+	if c.LSMTree.CompactionAlgorithm != "size-tiered" &&
+		c.LSMTree.CompactionAlgorithm != "leveled" {
+		return fmt.Errorf("invalid LSM compaction algorithm")
 	}
 
 	// TODO continue validation
