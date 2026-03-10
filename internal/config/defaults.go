@@ -30,7 +30,7 @@ const (
 	DefaultSSTableRestartInterval     = 3
 	DefaultSSTableCompression         = CompressionNone
 	DefaultSSTableMinBlockUtilization = 0.8
-	DefaultIndexBlockSize             = 20
+	DefaultIndexBlockSize             = 160
 
 	//CMS
 	DefaultCMSAccuracy   = 0.01

@@ -9,19 +9,19 @@ import (
 )
 
 type DictionaryEncoder struct {
-	keys     []string
+	keys     [][]byte
 	MapOfIdx map[string]int
 }
 
 func NewDictionaryEncoder() *DictionaryEncoder {
 	return &DictionaryEncoder{
-		keys:     make([]string, 0),
+		keys:     make([][]byte, 0),
 		MapOfIdx: make(map[string]int),
 	}
 }
 
-func (encoder *DictionaryEncoder) GetKeys() []string {
-	out := make([]string, len(encoder.keys))
+func (encoder *DictionaryEncoder) GetKeys() [][]byte {
+	out := make([][]byte, len(encoder.keys))
 	copy(out, encoder.keys)
 	return out
 }
@@ -34,38 +34,41 @@ func (encoder *DictionaryEncoder) GetMapOfIdx() map[string]int {
 	return out
 }
 
-func (encoder *DictionaryEncoder) GetIdx(key string) (int, bool) {
-	idx, found := encoder.MapOfIdx[key]
+func (encoder *DictionaryEncoder) GetIdx(key []byte) (int, bool) {
+	idx, found := encoder.MapOfIdx[string(key)]
 	return idx, found
 }
 
-func (encoder *DictionaryEncoder) GetKey(idx int) (string, error) {
+func (encoder *DictionaryEncoder) GetKey(idx int) ([]byte, error) {
 	if idx < 0 || idx >= len(encoder.keys) {
-		return "", errors.New("invalid key index")
+		return nil, errors.New("invalid key index")
 	}
 	return encoder.keys[idx], nil
 }
 
-func (encoder *DictionaryEncoder) AddToDict(key string) (int, bool) {
-	idx, found := encoder.GetIdx(key)
-	if found {
+func (encoder *DictionaryEncoder) AddToDict(key []byte) (int, bool) {
+	strKey := string(key)
+	if idx, found := encoder.MapOfIdx[strKey]; found {
 		return idx, false
 	}
 	index := len(encoder.keys)
-	encoder.keys = append(encoder.keys, key)
-	encoder.MapOfIdx[key] = index
+	keyCopy := make([]byte, len(key))
+	copy(keyCopy, key)
+	encoder.keys = append(encoder.keys, keyCopy)
+	encoder.MapOfIdx[strKey] = index
 	return index, true
 }
 
-func (encoder *DictionaryEncoder) RemoveFromDict(key string) bool {
-	idx, found := encoder.GetIdx(key)
+func (encoder *DictionaryEncoder) RemoveFromDict(key []byte) bool {
+	strKey := string(key)
+	idx, found := encoder.MapOfIdx[strKey]
 	if !found {
 		return false
 	}
-	delete(encoder.MapOfIdx, key)
+	delete(encoder.MapOfIdx, strKey)
 	encoder.keys = append(encoder.keys[:idx], encoder.keys[idx+1:]...)
 	for i := idx; i < len(encoder.keys); i++ {
-		encoder.MapOfIdx[encoder.keys[i]] = i
+		encoder.MapOfIdx[string(encoder.keys[i])] = i
 	}
 	return true
 }
@@ -108,12 +111,12 @@ func Deserialize(data []byte) (*DictionaryEncoder, error) {
 		if offset+int(l) > len(data) {
 			return nil, fmt.Errorf("deserialize: invalid key length %d at offset %d", l, offset)
 		}
-		key := string(data[offset : offset+int(l)])
+		key := data[offset : offset+int(l)]
 		offset += int(l)
-		if _, exists := encoder.MapOfIdx[key]; exists {
+		if _, exists := encoder.MapOfIdx[string(key)]; exists {
 			return nil, fmt.Errorf("deserialize: duplicate key %q", key)
 		}
-		encoder.MapOfIdx[key] = len(encoder.keys)
+		encoder.MapOfIdx[string(key)] = len(encoder.keys)
 		encoder.keys = append(encoder.keys, key)
 	}
 	return encoder, nil
@@ -153,7 +156,7 @@ func (encoder *DictionaryEncoder) AppendLastToFile(dir, name string) error {
 	if err != nil {
 		return err
 	}
-	_, err = file.WriteString(last)
+	_, err = file.WriteString(string(last))
 	return err
 }
 

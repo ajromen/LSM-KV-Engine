@@ -1,5 +1,7 @@
 package memtable
 
+import "github.com/ajromen/LSM-KV-Engine/internal/data_structures"
+
 type MemtableEntry struct {
 	Key       string
 	Value     []byte
@@ -24,13 +26,13 @@ type HashMapMemtable struct {
 }
 
 type BTreeMemtable struct {
-	memtableData *BTree
+	memtableData *data_structures.BTree[MemtableEntry]
 	maxSize      int
 	flushHandler func([]MemtableEntry)
 }
 
 type SkipListMemtable struct {
-	memtableData *SkipList
+	memtableData *data_structures.SkipList[MemtableEntry]
 	maxSize      int
 	flushHandler func([]MemtableEntry)
 }

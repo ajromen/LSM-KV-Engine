@@ -17,7 +17,7 @@ func makeRecord(key, value string, high, low uint64, tomb bool) Record {
 }
 
 func buildTestBlock(t *testing.T) []byte {
-	builder := NewDataBlockBuilder(2, 512)
+	builder := NewDataBlockBuilder(1, 2, 512)
 
 	records := []Record{
 		makeRecord("key1", "val1", 1, 1, false),
@@ -38,7 +38,7 @@ func buildTestBlock(t *testing.T) []byte {
 		t.Fatal(err)
 	}
 	fmt.Println(block)
-	reader, err := NewDataBlockReader(block)
+	reader, err := NewDataBlockReader(block, 2, 1)
 	record1, err := reader.ReadRecord()
 	if err != nil {
 		t.Fatal(err)
@@ -48,7 +48,7 @@ func buildTestBlock(t *testing.T) []byte {
 }
 
 func TestFinishEmptyBlock(t *testing.T) {
-	builder := NewDataBlockBuilder(2, 128)
+	builder := NewDataBlockBuilder(1, 2, 128)
 	_, err := builder.Finish(128)
 	if err == nil {
 		t.Fatal("Expected error for empty block")
@@ -56,7 +56,7 @@ func TestFinishEmptyBlock(t *testing.T) {
 }
 
 func TestReset(t *testing.T) {
-	builder := NewDataBlockBuilder(2, 128)
+	builder := NewDataBlockBuilder(1, 2, 128)
 	builder.AddRecord(makeRecord("a", "b", 1, 1, false))
 	builder.Reset()
 
@@ -71,7 +71,7 @@ func TestReset(t *testing.T) {
 func TestReaderSequentialRead(t *testing.T) {
 	block := buildTestBlock(t)
 
-	reader, err := NewDataBlockReader(block)
+	reader, err := NewDataBlockReader(block, 2, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,14 +94,14 @@ func TestCRCFailure(t *testing.T) {
 	block := buildTestBlock(t)
 	block[10] ^= 0xFF // corrupt
 
-	_, err := NewDataBlockReader(block)
+	_, err := NewDataBlockReader(block, 2, 1)
 	if err == nil {
 		t.Fatal("Expected CRC mismatch error")
 	}
 }
 
 func TestIterator(t *testing.T) {
-	builder := NewDataBlockBuilder(2, 128)
+	builder := NewDataBlockBuilder(1, 2, 128)
 	records := []Record{
 		Record{Timestamp: utils.Uint128{High: 0, Low: 0}, Tombstone: false, Key: []byte("key1"), Value: []byte("value")},
 		Record{Timestamp: utils.Uint128{High: 0, Low: 0}, Tombstone: false, Key: []byte("key2"), Value: []byte("value")},
@@ -118,7 +118,7 @@ func TestIterator(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	reader, err := NewDataBlockReader(block)
+	reader, err := NewDataBlockReader(block, 2, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,7 +129,7 @@ func TestIterator(t *testing.T) {
 	record4, _ := reader.ReadRecord()
 	fmt.Println(string(record1.Key), string(record2.Key), string(record3.Key), string(record4.Key))
 	reader.Restart()
-	iterator, err := NewDataBlockIterator(block)
+	iterator, err := NewDataBlockIterator(block, 2, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -155,12 +155,12 @@ func TestIterator(t *testing.T) {
 }
 
 func TestIteratorSeek(t *testing.T) {
-	builder := NewDataBlockBuilder(2, 128)
+	builder := NewDataBlockBuilder(1, 2, 128)
 	records := []Record{
-		{Timestamp: utils.Uint128{High: 0, Low: 0}, Tombstone: false, Key: []byte("key1"), Value: []byte("value")},
-		{Timestamp: utils.Uint128{High: 0, Low: 0}, Tombstone: false, Key: []byte("key2"), Value: []byte("value")},
-		{Timestamp: utils.Uint128{High: 0, Low: 0}, Tombstone: false, Key: []byte("key3"), Value: []byte("value")},
-		{Timestamp: utils.Uint128{High: 0, Low: 0}, Tombstone: false, Key: []byte("key4"), Value: []byte("value")},
+		{Timestamp: utils.Uint128{High: 0, Low: 0}, Tombstone: false, Key: []byte("key1"), Value: []byte("value1")},
+		{Timestamp: utils.Uint128{High: 0, Low: 0}, Tombstone: false, Key: []byte("key2"), Value: []byte("value2")},
+		{Timestamp: utils.Uint128{High: 0, Low: 0}, Tombstone: false, Key: []byte("key3"), Value: []byte("value3")},
+		{Timestamp: utils.Uint128{High: 0, Low: 0}, Tombstone: false, Key: []byte("key4"), Value: []byte("value4")},
 	}
 	for _, record := range records {
 		added := builder.AddRecord(record)
@@ -172,7 +172,7 @@ func TestIteratorSeek(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	iterator, err := NewDataBlockIterator(block)
+	iterator, err := NewDataBlockIterator(block, 2, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -204,7 +204,7 @@ func TestIteratorSeek(t *testing.T) {
 }
 
 func TestMergeIterator(t *testing.T) {
-	builder1 := NewDataBlockBuilder(2, 128)
+	builder1 := NewDataBlockBuilder(1, 2, 128)
 	records1 := []Record{
 		{Timestamp: utils.Uint128{High: 0, Low: 0}, Tombstone: false, Key: []byte("key1"), Value: []byte("val1")},
 		{Timestamp: utils.Uint128{High: 0, Low: 0}, Tombstone: false, Key: []byte("key3"), Value: []byte("val3")},
@@ -215,7 +215,7 @@ func TestMergeIterator(t *testing.T) {
 			t.Fatal("AddRecord failed for builder1")
 		}
 	}
-	builder2 := NewDataBlockBuilder(2, 128)
+	builder2 := NewDataBlockBuilder(1, 2, 128)
 	records2 := []Record{
 		{Timestamp: utils.Uint128{High: 0, Low: 0}, Tombstone: false, Key: []byte("key2"), Value: []byte("val2")},
 		{Timestamp: utils.Uint128{High: 0, Low: 0}, Tombstone: false, Key: []byte("key4"), Value: []byte("val4")},
@@ -228,8 +228,8 @@ func TestMergeIterator(t *testing.T) {
 	}
 	block1, _ := builder1.Finish(128)
 	block2, _ := builder2.Finish(128)
-	iterator1, _ := NewDataBlockIterator(block1)
-	iterator2, _ := NewDataBlockIterator(block2)
+	iterator1, _ := NewDataBlockIterator(block1, 2, 1)
+	iterator2, _ := NewDataBlockIterator(block2, 2, 1)
 	iterator1.Rewind()
 	iterator2.Rewind()
 	mergeIterator := NewMergeIterator(iterator1, iterator2)
@@ -247,4 +247,158 @@ func TestMergeIterator(t *testing.T) {
 	if idx != len(expectedKeys) {
 		t.Fatalf("Expected to iterate %d keys but got %d", len(expectedKeys), idx)
 	}
+}
+
+func TestMultiMergeIteratorWithWinnerTree(t *testing.T) {
+	newIter := func(records []Record) *DataBlockIterator {
+		b := NewDataBlockBuilder(1, 2, 4096)
+		for _, r := range records {
+			if !b.AddRecord(r) {
+				t.Fatal("AddRecord failed")
+			}
+		}
+		block, err := b.Finish(4096)
+		if err != nil {
+			t.Fatal(err)
+		}
+		it, err := NewDataBlockIterator(block, 2, 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		it.Rewind()
+		return it
+	}
+
+	it1 := newIter([]Record{
+		{Timestamp: utils.Uint128{High: 0, Low: 1}, Key: []byte("key1"), Value: []byte("val1-it1")},
+		{Timestamp: utils.Uint128{High: 0, Low: 1}, Key: []byte("key4"), Value: []byte("val4-it1")},
+		{Timestamp: utils.Uint128{High: 0, Low: 2}, Key: []byte("keyX"), Value: []byte("valX-newer")},
+	})
+	it2 := newIter([]Record{
+		{Timestamp: utils.Uint128{High: 0, Low: 1}, Key: []byte("key2"), Value: []byte("val2-it2")},
+		{Timestamp: utils.Uint128{High: 0, Low: 1}, Key: []byte("key5"), Value: []byte("val5-it2")},
+		{Timestamp: utils.Uint128{High: 0, Low: 1}, Key: []byte("keyX"), Value: []byte("valX-older")},
+	})
+	it3 := newIter([]Record{
+		{Timestamp: utils.Uint128{High: 0, Low: 1}, Key: []byte("key3"), Value: []byte("val3-it3")},
+		{Timestamp: utils.Uint128{High: 0, Low: 1}, Key: []byte("key6"), Value: []byte("val6-it3")},
+		{Timestamp: utils.Uint128{High: 0, Low: 1}, Key: []byte("key7"), Value: []byte("val7-it3")},
+	})
+
+	mi := NewMultiMergeIterator([]*DataBlockIterator{it1, it2, it3}, 1)
+	if mi == nil {
+		t.Fatal("NewMultiMergeIterator returned nil")
+	}
+
+	expected := []struct {
+		key   string
+		value string
+	}{
+		{"key1", "val1-it1"},
+		{"key2", "val2-it2"},
+		{"key3", "val3-it3"},
+		{"key4", "val4-it1"},
+		{"key5", "val5-it2"},
+		{"key6", "val6-it3"},
+		{"key7", "val7-it3"},
+		{"keyX", "valX-newer"},
+	}
+
+	for i, exp := range expected {
+		if !mi.Valid() {
+			t.Fatalf("step %d: iterator exhausted early, expected key=%q", i, exp.key)
+		}
+		gotKey := string(mi.Key())
+		gotVal := string(mi.Value())
+		fmt.Printf("[%d] key=%s value=%s\n", i, gotKey, gotVal)
+		if gotKey != exp.key {
+			t.Errorf("step %d: key = %q, want %q", i, gotKey, exp.key)
+		}
+		if gotVal != exp.value {
+			t.Errorf("step %d: value = %q, want %q", i, gotVal, exp.value)
+		}
+		mi.Next()
+	}
+
+	if mi.Valid() {
+		t.Errorf("iterator should be exhausted but still valid, remaining key=%q", mi.Key())
+	}
+	fmt.Println("TestMultiMergeIterator passed!")
+}
+
+func TestMultiMergeIteratorWithHeap(t *testing.T) {
+	newIter := func(records []Record) *DataBlockIterator {
+		b := NewDataBlockBuilder(1, 2, 4096)
+		for _, r := range records {
+			if !b.AddRecord(r) {
+				t.Fatal("AddRecord failed")
+			}
+		}
+		block, err := b.Finish(4096)
+		if err != nil {
+			t.Fatal(err)
+		}
+		it, err := NewDataBlockIterator(block, 2, 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		it.Rewind()
+		return it
+	}
+
+	it1 := newIter([]Record{
+		{Timestamp: utils.Uint128{High: 0, Low: 1}, Key: []byte("key1"), Value: []byte("val1-it1")},
+		{Timestamp: utils.Uint128{High: 0, Low: 1}, Key: []byte("key4"), Value: []byte("val4-it1")},
+		{Timestamp: utils.Uint128{High: 0, Low: 2}, Key: []byte("keyX"), Value: []byte("valX-newer")},
+	})
+	it2 := newIter([]Record{
+		{Timestamp: utils.Uint128{High: 0, Low: 1}, Key: []byte("key2"), Value: []byte("val2-it2")},
+		{Timestamp: utils.Uint128{High: 0, Low: 1}, Key: []byte("key5"), Value: []byte("val5-it2")},
+		{Timestamp: utils.Uint128{High: 0, Low: 1}, Key: []byte("keyX"), Value: []byte("valX-older")},
+	})
+	it3 := newIter([]Record{
+		{Timestamp: utils.Uint128{High: 0, Low: 1}, Key: []byte("key3"), Value: []byte("val3-it3")},
+		{Timestamp: utils.Uint128{High: 0, Low: 1}, Key: []byte("key6"), Value: []byte("val6-it3")},
+		{Timestamp: utils.Uint128{High: 0, Low: 1}, Key: []byte("key7"), Value: []byte("val7-it3")},
+	})
+
+	mi := NewMultiMergeIterator([]*DataBlockIterator{it1, it2, it3}, 0)
+	if mi == nil {
+		t.Fatal("NewMultiMergeIterator returned nil")
+	}
+
+	expected := []struct {
+		key   string
+		value string
+	}{
+		{"key1", "val1-it1"},
+		{"key2", "val2-it2"},
+		{"key3", "val3-it3"},
+		{"key4", "val4-it1"},
+		{"key5", "val5-it2"},
+		{"key6", "val6-it3"},
+		{"key7", "val7-it3"},
+		{"keyX", "valX-newer"},
+	}
+
+	for i, exp := range expected {
+		if !mi.Valid() {
+			t.Fatalf("step %d: iterator exhausted early, expected key=%q", i, exp.key)
+		}
+		gotKey := string(mi.Key())
+		gotVal := string(mi.Value())
+		fmt.Printf("[%d] key=%s value=%s\n", i, gotKey, gotVal)
+		if gotKey != exp.key {
+			t.Errorf("step %d: key = %q, want %q", i, gotKey, exp.key)
+		}
+		if gotVal != exp.value {
+			t.Errorf("step %d: value = %q, want %q", i, gotVal, exp.value)
+		}
+		mi.Next()
+	}
+
+	if mi.Valid() {
+		t.Errorf("iterator should be exhausted but still valid, remaining key=%q", mi.Key())
+	}
+	fmt.Println("TestMultiMergeIterator passed!")
 }

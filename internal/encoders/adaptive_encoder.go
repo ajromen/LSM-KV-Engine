@@ -54,12 +54,6 @@ func hashValue(value []byte) uint64 {
 	return h.Sum64()
 }
 
-func hashToString(h uint64) string {
-	buf := make([]byte, 8)
-	binary.LittleEndian.PutUint64(buf[:], h)
-	return string(buf[:])
-}
-
 func (ad *AdaptiveDict) EncodeValue(value []byte) (valueType byte, payload []byte) {
 	ad.entryCount++
 	h := hashValue(value)

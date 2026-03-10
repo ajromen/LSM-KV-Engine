@@ -51,8 +51,8 @@ func NewSSTableWriter(filePath string, blockManager *block.BlockManager, cfg *co
 		blockManager:      blockManager,
 		config:            cfg.SSTable,
 		filePath:          filePath,
-		dataBlockBuilder:  NewDataBlockBuilder(cfg.SSTable.DataSegment.RestartInterval, blockManager.BlockSize()),
-		indexSegment:      NewIndexSegment(),
+		dataBlockBuilder:  NewDataBlockBuilder(1, cfg.SSTable.DataSegment.RestartInterval, blockManager.BlockSize()),
+		indexSegment:      NewIndexSegment(uint64(blockManager.BlockSize())),
 		summarySegment:    NewSummarySegment(1),
 		filterSegment:     filterSegment,
 		merkleTree:        NewMerkleTree(),
@@ -211,7 +211,7 @@ func (w *SSTableWriter) Finalize() error {
 	if len(w.indexSegment.Blocks) > 0 {
 		indexOffsets = make([]uint64, len(w.indexSegment.Blocks))
 		for i, indexBlock := range w.indexSegment.Blocks {
-			blockData := indexBlock.EncodeIndexBlock()
+			blockData := indexBlock.EncodeIndexBlock(config.DefaultIndexBlockSize)
 			offset, size, err := w.storage.WriteSegment(config.SegmentIndex, blockData)
 			if err != nil {
 				return err
