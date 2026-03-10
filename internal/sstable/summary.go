@@ -19,6 +19,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"hash/crc32"
 	"os"
 )
@@ -207,6 +208,7 @@ func (s *SummarySegment) FindBlockRange(startKey, endKey []byte) (int, int) {
 	}
 
 	upper := endBlock + int(s.SamplingDegree) - 1
+	fmt.Println("Total index blocks: ", s.TotalIndexBlocks)
 	if upper >= int(s.TotalIndexBlocks) {
 		upper = int(s.TotalIndexBlocks) - 1
 	}

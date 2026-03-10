@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	FooterSize  = 111
+	FooterSize  = 117
 	MagicNumber = 0x53535442
 )
 
@@ -23,21 +23,24 @@ type SegmentHandler struct {
 }
 
 type Footer struct {
-	FilterHandler   SegmentHandler // handler for filter segment
-	IndexHandler    SegmentHandler // handler for index segment
-	SummaryHandler  SegmentHandler // handler for summary segment
-	MetaDataHandler SegmentHandler // handler for metadatahandler
-	NumDataBlocks   uint32         // number of data blocks in sstable
-	MinTimeStamp    utils.Uint128  // min timestamp in sstable
-	MaxTimeStamp    utils.Uint128  // max timestamp in sstable
-	MinKeyLength    uint32         // min keylength in sstable
-	MaxKeyLength    uint32         // max keylength in sstable
-	TotalRecords    uint64         // number of records in sstable
-	CompressionType byte           // type of compression = 0 always
-	Version         byte           // version = 1 always
-	Format          byte           // format (0 - singlefile / 1 - multifile)
-	MagicNumber     uint32         // SSTB in hex
-	CRC             uint32         // crc over the whole footer segment
+	FilterHandler          SegmentHandler // handler for filter segment
+	IndexHandler           SegmentHandler // handler for index segment
+	SummaryHandler         SegmentHandler // handler for summary segment
+	MetaDataHandler        SegmentHandler // handler for metadatahandler
+	NumDataBlocks          uint32         // number of data blocks in sstable
+	MinTimeStamp           utils.Uint128  // min timestamp in sstable
+	MaxTimeStamp           utils.Uint128  // max timestamp in sstable
+	MinKeyLength           uint32         // min keylength in sstable
+	MaxKeyLength           uint32         // max keylength in sstable
+	TotalRecords           uint64         // number of records in sstable
+	RestartInterval        uint32
+	EncodingType           byte
+	CompressionType        byte   // type of compression = 0 always
+	MergeIteratorStructure byte   // 0 - heap / 1 - winner-tree
+	Version                byte   // version = 1 always
+	Format                 byte   // format (0 - singlefile / 1 - multifile)
+	MagicNumber            uint32 // SSTB in hex
+	CRC                    uint32 // crc over the whole footer segment
 }
 
 func NewFooter(config config.SSTableConfig) *Footer {
@@ -46,10 +49,13 @@ func NewFooter(config config.SSTableConfig) *Footer {
 		formatByte = byte(1)
 	}
 	return &Footer{
-		CompressionType: config.DataSegment.Compression,
-		Version:         1,
-		Format:          formatByte,
-		MagicNumber:     MagicNumber,
+		CompressionType:        config.DataSegment.Compression,
+		Version:                1,
+		Format:                 formatByte,
+		MagicNumber:            MagicNumber,
+		RestartInterval:        uint32(config.DataSegment.RestartInterval),
+		EncodingType:           1,
+		MergeIteratorStructure: 1,
 	}
 }
 
@@ -98,7 +104,14 @@ func (f *Footer) Encode() []byte {
 	binary.LittleEndian.PutUint64(buf[pos:], f.TotalRecords)
 	pos += 8
 
+	binary.LittleEndian.PutUint32(buf[pos:], f.RestartInterval)
+	pos += 4
+
+	buf[pos] = f.EncodingType
+	pos++
 	buf[pos] = f.CompressionType
+	pos++
+	buf[pos] = f.MergeIteratorStructure
 	pos++
 	buf[pos] = f.Version
 	pos++
@@ -162,7 +175,14 @@ func (f *Footer) Decode(buf []byte) error {
 	f.TotalRecords = binary.LittleEndian.Uint64(buf[pos:])
 	pos += 8
 
+	f.RestartInterval = binary.LittleEndian.Uint32(buf[pos:])
+	pos += 4
+
+	f.EncodingType = buf[pos]
+	pos++
 	f.CompressionType = buf[pos]
+	pos++
+	f.MergeIteratorStructure = buf[pos]
 	pos++
 	f.Version = buf[pos]
 	pos++

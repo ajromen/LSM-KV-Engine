@@ -115,7 +115,8 @@ func DecodeIndexEntry(buf []byte) (*IndexEntry, int, error) {
 
 // IndexBlock IS A GROP OF INDEX ENTRY RECORDS
 type IndexBlock struct {
-	Entries []IndexEntry
+	Entries  []IndexEntry
+	RealSize uint32 // where numberOfEntries + index entries end
 }
 
 // NewIndexBlock CREATES AN EMPTY INDEX BLOCK WITH PREALLOCATED CAPACITY -> IMPORTANT: 256 != INDEX-BLOCK-SIZE
@@ -131,9 +132,8 @@ func (block *IndexBlock) AddEntry(entry IndexEntry) {
 }
 
 // EncodeIndexBlock SERIALIZES THE INDEX BLOCK
-func (block *IndexBlock) EncodeIndexBlock() []byte {
-	totalSize := block.Size()
-	buf := make([]byte, totalSize)
+func (block *IndexBlock) EncodeIndexBlock(maxBlockSize uint64) []byte {
+	buf := make([]byte, maxBlockSize)
 	pos := 0
 
 	// write number of entries
@@ -147,8 +147,9 @@ func (block *IndexBlock) EncodeIndexBlock() []byte {
 	}
 
 	// write crc
-	crc := crc32.ChecksumIEEE(buf[:pos])
-	binary.LittleEndian.PutUint32(buf[pos:], crc)
+	crcPos := maxBlockSize - 4
+	crc := crc32.ChecksumIEEE(buf[:crcPos])
+	binary.LittleEndian.PutUint32(buf[crcPos:], crc)
 	pos += 4
 	return buf
 }
@@ -207,26 +208,6 @@ func (block *IndexBlock) FindBlock(key []byte) int {
 	return result
 }
 
-// Size RETURNS THE SIZE OF REAL DATA IN INDEX BLOCK (NO PADDING)
-func (block *IndexBlock) Size() int {
-	size := 4
-	for i := range block.Entries {
-		size += block.Entries[i].EncodedSize()
-	}
-	size += 4
-	return size
-}
-
-// WriteToFile WRITES INDEX BLOCK TO FILE -> not used
-func (block *IndexBlock) WriteToFile(file *os.File) (int, error) {
-	data := block.EncodeIndexBlock()
-	n, err := file.Write(data)
-	if err != nil {
-		return 0, err
-	}
-	return n, nil
-}
-
 // ReadFromFile READS INDEX BLOCK FROM FILE -> not used
 func ReadFromFile(file *os.File, offset uint64, size int) (*IndexBlock, error) {
 	if _, err := file.Seek(int64(offset), 0); err != nil {
@@ -255,14 +236,16 @@ func (block *IndexBlock) AddFromDataBlock(dataBlock *DataBlockBuilder, blockIdx 
 
 // IndexSegment REPRESENTS MULTIPLE INDEX BLOCK STORED SEQUENTIALLY
 type IndexSegment struct {
-	Blocks       []*IndexBlock
-	BlockOffsets []uint32
+	Blocks         []*IndexBlock
+	BlockOffsets   []uint32
+	IndexBlockSize uint64
 }
 
-func NewIndexSegment() *IndexSegment {
+func NewIndexSegment(indexBlockSize uint64) *IndexSegment {
 	return &IndexSegment{
-		Blocks:       make([]*IndexBlock, 0),
-		BlockOffsets: make([]uint32, 0),
+		Blocks:         make([]*IndexBlock, 0),
+		BlockOffsets:   make([]uint32, 0),
+		IndexBlockSize: indexBlockSize,
 	}
 }
 
@@ -277,7 +260,7 @@ func (seg *IndexSegment) WriteToFile(file *os.File) ([]uint32, error) {
 	var currentOffset int32 = 0
 	for i, block := range seg.Blocks {
 		offsets[i] = uint32(currentOffset)
-		data := block.EncodeIndexBlock()
+		data := block.EncodeIndexBlock(seg.IndexBlockSize)
 		n, err := file.Write(data)
 		if err != nil {
 			return nil, err
@@ -312,10 +295,10 @@ func (seg *IndexSegment) AddEntryToBlock(entry IndexEntry, blockSize int) {
 }
 
 // GetBlockSizes RETURNS ENCODED SIZE OF EACH INDEX BLOCK IN INDEX SEGMENT
-func (seg *IndexSegment) GetBlockSizes() []int {
-	sizes := make([]int, len(seg.Blocks))
+func (seg *IndexSegment) GetBlockSizes() []uint32 {
+	sizes := make([]uint32, len(seg.Blocks))
 	for i, block := range seg.Blocks {
-		sizes[i] = block.Size()
+		sizes[i] = block.RealSize
 	}
 	return sizes
 }

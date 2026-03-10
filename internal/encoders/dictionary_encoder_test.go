@@ -1,6 +1,7 @@
 package encoders
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"testing"
@@ -9,20 +10,20 @@ import (
 func TestCompressorBasic(t *testing.T) {
 	t.Log("---- COMPRESSOR BASIC TEST ----")
 	encoder := NewDictionaryEncoder()
-	idx, AddToDicted := encoder.AddToDict("key1")
+	idx, AddToDicted := encoder.AddToDict([]byte("key1"))
 	if !AddToDicted || idx != 0 {
 		t.Fatalf("expected key1 at index 0")
 	}
-	idx2, AddToDicted := encoder.AddToDict("key2")
+	idx2, AddToDicted := encoder.AddToDict([]byte("key2"))
 	if !AddToDicted || idx2 != 1 {
 		t.Fatalf("expected key2 at index 1")
 	}
-	idx3, AddToDicted := encoder.AddToDict("key1")
+	idx3, AddToDicted := encoder.AddToDict([]byte("key1"))
 	if AddToDicted || idx3 != 0 {
 		t.Fatalf("expected duplicate key1 to return existing index")
 	}
 	key, error := encoder.GetKey(0)
-	if error != nil || key != "key1" {
+	if error != nil || bytes.Compare(key, []byte("key1")) != 0 {
 		t.Fatalf("expected key1 at index 0")
 	}
 	_, error = encoder.GetKey(10)
@@ -34,21 +35,21 @@ func TestCompressorBasic(t *testing.T) {
 func TestCompressorRemoveFromDict(t *testing.T) {
 	t.Log("---- COMPRESSOR RemoveFromDict TEST ----")
 	encoder := NewDictionaryEncoder()
-	encoder.AddToDict("key1")
-	encoder.AddToDict("key2")
-	encoder.AddToDict("key3")
-	ok := encoder.RemoveFromDict("key2")
+	encoder.AddToDict([]byte("key1"))
+	encoder.AddToDict([]byte("key2"))
+	encoder.AddToDict([]byte("key3"))
+	ok := encoder.RemoveFromDict([]byte("key2"))
 	if !ok {
 		t.Fatalf("expected key2 to be RemoveFromDictd")
 	}
 	if encoder.Size() != 2 {
 		t.Fatalf("expected size 2 after RemoveFromDict, got %d", encoder.Size())
 	}
-	_, ok = encoder.GetIdx("key2")
+	_, ok = encoder.GetIdx([]byte("key2"))
 	if ok {
 		t.Fatalf("expected key2 to be missing")
 	}
-	idx, _ := encoder.GetIdx("key3")
+	idx, _ := encoder.GetIdx([]byte("key3"))
 	if idx != 1 {
 		t.Fatalf("expected key3 to move to index 1")
 	}
@@ -57,9 +58,9 @@ func TestCompressorRemoveFromDict(t *testing.T) {
 func TestCompressorRemoveFromDictAll(t *testing.T) {
 	t.Log("---- COMPRESSOR RemoveFromDict ALL TEST ----")
 	encoder := NewDictionaryEncoder()
-	encoder.AddToDict("a")
-	encoder.AddToDict("b")
-	encoder.AddToDict("c")
+	encoder.AddToDict([]byte("a"))
+	encoder.AddToDict([]byte("b"))
+	encoder.AddToDict([]byte("c"))
 	encoder.RemoveAll()
 	if encoder.Size() != 0 {
 		t.Fatalf("expected empty dict")
@@ -72,9 +73,9 @@ func TestCompressorRemoveFromDictAll(t *testing.T) {
 func TestCompressorSerializeDeserialize(t *testing.T) {
 	t.Log("---- COMPRESSOR SERIALIZE TEST ----")
 	encoder := NewDictionaryEncoder()
-	encoder.AddToDict("key1")
-	encoder.AddToDict("key2")
-	encoder.AddToDict("key3")
+	encoder.AddToDict([]byte("key1"))
+	encoder.AddToDict([]byte("key2"))
+	encoder.AddToDict([]byte("key3"))
 	data := encoder.Serialize()
 	encoder2, err := Deserialize(data)
 	if err != nil {
@@ -84,7 +85,7 @@ func TestCompressorSerializeDeserialize(t *testing.T) {
 		t.Fatalf("expected size 3 after deserialize")
 	}
 	key, error := encoder2.GetKey(1)
-	if error != nil || key != "key2" {
+	if error != nil || bytes.Compare(key, []byte("key2")) != 0 {
 		t.Fatalf("expected key2 at index 1")
 	}
 }
@@ -103,8 +104,8 @@ func TestCompressorSaveLoad(t *testing.T) {
 	dir := t.TempDir()
 	name := "dict.bin"
 	encoder := NewDictionaryEncoder()
-	encoder.AddToDict("key1")
-	encoder.AddToDict("key2")
+	encoder.AddToDict([]byte("key1"))
+	encoder.AddToDict([]byte("key2"))
 	err := SaveToFile(dir, name, encoder.Serialize())
 	if err != nil {
 		t.Fatalf("save failed: %v", err)
@@ -117,7 +118,7 @@ func TestCompressorSaveLoad(t *testing.T) {
 		t.Fatalf("expected loaded size 2")
 	}
 	key, error := loaded.GetKey(0)
-	if error != nil || key != "key1" {
+	if error != nil || bytes.Compare(key, []byte("key1")) != 0 {
 		t.Fatalf("expected key1 at index 0")
 	}
 }
@@ -128,12 +129,12 @@ func TestCompressorAppendLast(t *testing.T) {
 	name := "append.bin"
 	path := filepath.Join(dir, name)
 	encoder := NewDictionaryEncoder()
-	encoder.AddToDict("key1")
+	encoder.AddToDict([]byte("key1"))
 	err := encoder.AppendLastToFile(dir, name)
 	if err != nil {
 		t.Fatalf("append failed: %v", err)
 	}
-	encoder.AddToDict("key2")
+	encoder.AddToDict([]byte("key2"))
 	err = encoder.AppendLastToFile(dir, name)
 	if err != nil {
 		t.Fatalf("append failed: %v", err)
@@ -150,7 +151,7 @@ func TestCompressorAppendLast(t *testing.T) {
 		t.Fatalf("expected 2 entries after append")
 	}
 	key, _ := loaded.GetKey(1)
-	if key != "key2" {
+	if bytes.Compare(key, []byte("key2")) != 0 {
 		t.Fatalf("expected key2 at index 1")
 	}
 }

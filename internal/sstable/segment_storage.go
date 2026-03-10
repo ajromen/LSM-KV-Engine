@@ -44,7 +44,7 @@ func OpenSingleFileStorage(filePath string) (*SingleFileStorage, error) {
 // WriteSegment APPENDS SEGMENT TO A FILE AND RETURNS ITS OFFSET + SIZE
 func (s *SingleFileStorage) WriteSegment(segType config.SegmentType, data []byte) (uint64, uint32, error) {
 	offset := s.offset
-	if segType == config.SegmentData && s.blockManager != nil {
+	if (segType == config.SegmentData || segType == config.SegmentIndex) && s.blockManager != nil {
 		if len(data) < s.blockManager.BlockSize() {
 			padding := make([]byte, s.blockManager.BlockSize()-len(data))
 			data = append(data, padding...)
@@ -193,7 +193,7 @@ func (m *MultiFileStorage) WriteSegment(segType config.SegmentType, data []byte)
 		return 0, 0, err
 	}
 	offset := m.offsets[segType]
-	if segType == config.SegmentData && m.blockManager != nil {
+	if (segType == config.SegmentData || segType == config.SegmentIndex) && m.blockManager != nil {
 		if len(data) < m.blockManager.BlockSize() {
 			padding := make([]byte, m.blockManager.BlockSize()-len(data))
 			data = append(data, padding...)
