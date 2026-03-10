@@ -39,6 +39,10 @@ const (
 	//Block Manager
 	DefaultBlockSize           = 4 * 1024
 	DefaultBlockCacheMaxBlocks = 2048
+
+	//LSM
+	DefaultLSMMaxLayers           = 4
+	DefaultLSMCompactionAlgorithm = "size-tiered"
 )
 
 func NewDefaultConfig() *Config {
@@ -69,6 +73,10 @@ func NewDefaultConfig() *Config {
 				IndexBlockSize: DefaultIndexBlockSize,
 			},
 		},
+		LSMTree: LSMTreeConfig{
+			MaxLevels:           DefaultLSMMaxLayers,
+			CompactionAlgorithm: DefaultLSMCompactionAlgorithm,
+		},
 		SkipList: SkipListConfig{
 			MaxLevel: DefaultSkipListMaxLevel,
 		},
@@ -90,23 +98,3 @@ func NewDefaultConfig() *Config {
 		},
 	}
 }
-
-//func applyDefaults(cfg *Config) {
-//	if cfg.WAL.WALSegmentSize == 0 {
-//		cfg.WAL.WALSegmentSize = 1024 * 1024
-//	}
-//	// Ovde kaze "Maksimalnu velicinu specificira korisnik tako sto navodi broj elemenata ILI zauzece memorije u KB" - na
-//	// nama je da vidimo hocemo li birati jedno od ta dva ili proveravati koji je popunjen i dati koristiti
-//	if cfg.Memtable.MemtableMaxSize == 0 && cfg.Memtable.MemtableSizeKB == 0 {
-//		cfg.Memtable.MemtableMaxSize = 1000
-//	}
-//	if cfg.Memtable.MemtableType == "" {
-//		cfg.Memtable.MemtableType = "hashmap"
-//	}
-//	if cfg.SSTable.SSTableDataBlockSize == 0 {
-//		cfg.SSTable.SSTableDataBlockSize = 16 // Ovo je u KB (Tako je na LevelDB pa kontam da je ok)
-//	}
-//	if cfg.SkipList.MaxLevel == 0 {
-//		cfg.SkipList.MaxLevel = 16
-//	}
-//}
