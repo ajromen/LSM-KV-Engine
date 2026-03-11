@@ -17,7 +17,7 @@ var allTypes = []MemtableType{TypeBTree, TypeSkipList, TypeHashMap}
 func newMemtable(t *testing.T, mt MemtableType, maxEntries int, maxBytes uint64, handler func([]MemtableEntry)) *MemtableFactory {
 	t.Helper()
 	factory := NewFactory(mt, maxEntries, maxBytes, config.NewDefaultConfig().Memtable)
-	return NewMemtableFactory(5, factory, handler)
+	return NewMemtableFactory(5, 1, factory, handler)
 }
 
 // ============================================================
@@ -360,7 +360,7 @@ func TestConcurrency(t *testing.T) {
 	flushCount := 0
 
 	factory := NewFactory("skiplist", 5, 1<<20, config.NewDefaultConfig().Memtable)
-	memFactory := NewMemtableFactory(5, factory, func(entries []MemtableEntry) {
+	memFactory := NewMemtableFactory(5, 0, factory, func(entries []MemtableEntry) {
 		mu.Lock()
 		flushCount++
 		current := flushCount
@@ -474,7 +474,7 @@ func TestMemtableLifecycle(t *testing.T) {
 
 	wg.Add(1)
 
-	mem := NewMemtableFactory(5, factory, func(entries []MemtableEntry) {
+	mem := NewMemtableFactory(5, 0, factory, func(entries []MemtableEntry) {
 		fmt.Println("=== FLUSH START ===")
 		for _, e := range entries {
 			fmt.Printf("flush: key=%s value=%s ts=%d tomb=%v\n",

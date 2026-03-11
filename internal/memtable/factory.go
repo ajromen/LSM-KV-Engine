@@ -3,26 +3,27 @@ package memtable
 import (
 	"sync"
 
-	"github.com/ajromen/LSM-KV-Engine/internal/data_structures"
 	"github.com/ajromen/LSM-KV-Engine/internal/include"
 )
 
 type MemtableFactory struct {
-	active       Memtable
-	immutable    []Memtable
-	maxTables    int
-	factory      func() Memtable
-	flushChannel chan Memtable
-	flushHandler func([]MemtableEntry)
-	mu           sync.Mutex
-	cond         *sync.Cond
+	active         Memtable
+	immutable      []Memtable
+	maxTables      int
+	mergeStructure byte
+	factory        func() Memtable
+	flushChannel   chan Memtable
+	flushHandler   func([]MemtableEntry)
+	mu             sync.Mutex
+	cond           *sync.Cond
 }
 
-func NewMemtableFactory(maxTables int, factory func() Memtable, flushHandler func([]MemtableEntry)) *MemtableFactory {
+func NewMemtableFactory(maxTables int, mergeStructure byte, factory func() Memtable, flushHandler func([]MemtableEntry)) *MemtableFactory {
 	f := &MemtableFactory{
-		maxTables:    maxTables,
-		factory:      factory,
-		flushChannel: make(chan Memtable, maxTables),
+		maxTables:      maxTables,
+		mergeStructure: mergeStructure,
+		factory:        factory,
+		flushChannel:   make(chan Memtable, maxTables),
 	}
 	f.cond = sync.NewCond(&f.mu)
 	f.active = f.factory()
@@ -115,7 +116,7 @@ func (f *MemtableFactory) RawIterator() include.Iterator[MemtableEntry] {
 		it := NewRawSingleMemtableIterator(f.immutable[i].Iterator())
 		rawIters = append(rawIters, it.(*RawSingleMemtableIterator))
 	}
-	return NewRawIterator(rawIters, data_structures.Heap)
+	return NewRawIterator(rawIters, f.mergeStructure)
 }
 
 func (f *MemtableFactory) Iterator() include.Iterator[MemtableEntry] {
@@ -130,6 +131,6 @@ func (f *MemtableFactory) Iterator() include.Iterator[MemtableEntry] {
 		rawIters = append(rawIters, NewRawSingleMemtableIterator(f.immutable[i].Iterator()))
 	}
 
-	rawMerge := NewRawIterator(rawIters, data_structures.Heap)
+	rawMerge := NewRawIterator(rawIters, f.mergeStructure)
 	return NewMergedMemtableIterator(rawMerge)
 }
