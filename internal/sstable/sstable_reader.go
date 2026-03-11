@@ -205,24 +205,23 @@ func (r *SSTableReader) Get(key []byte) (*Record, error) {
 	}
 
 	// step 5
-	iterator, err := NewDataBlockIterator(blockData, int(r.footer.RestartInterval), r.footer.EncodingType)
+	iterator, err := NewDataBlockIteratorRaw(blockData, int(r.footer.RestartInterval), r.footer.EncodingType)
 	if err != nil {
 		return nil, err
 	}
-	iterator.Rewind()
-	defer iterator.Close()
-	if err := iterator.Seek(key); err != nil {
-		return nil, err
-	}
+	iterator.Seek(Record{Key: key})
 
-	// return record
-	if bytes.Equal(iterator.Current().Key, key) {
-		return &Record{
-			Timestamp: iterator.Timestamp(),
-			Tombstone: iterator.Tombstone(),
-			Key:       iterator.Key(),
-			Value:     iterator.Value(),
-		}, nil
+	if !iterator.Valid() {
+		return nil, nil
 	}
-	return nil, nil
+	rec := iterator.Key()
+	if !bytes.Equal(rec.Key, key) {
+		return nil, nil
+	}
+	return &Record{
+		Timestamp: rec.Timestamp,
+		Tombstone: rec.Tombstone,
+		Key:       rec.Key,
+		Value:     rec.Value,
+	}, nil
 }
