@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	FooterSize  = 117
+	FooterSize  = 125
 	MagicNumber = 0x53535442
 )
 
@@ -28,11 +28,12 @@ type Footer struct {
 	SummaryHandler         SegmentHandler // handler for summary segment
 	MetaDataHandler        SegmentHandler // handler for metadatahandler
 	NumDataBlocks          uint32         // number of data blocks in sstable
-	MinTimeStamp           utils.Uint128  // min timestamp in sstable
-	MaxTimeStamp           utils.Uint128  // max timestamp in sstable
-	MinKeyLength           uint32         // min keylength in sstable
-	MaxKeyLength           uint32         // max keylength in sstable
-	TotalRecords           uint64         // number of records in sstable
+	BlockSize              uint64
+	MinTimeStamp           utils.Uint128 // min timestamp in sstable
+	MaxTimeStamp           utils.Uint128 // max timestamp in sstable
+	MinKeyLength           uint32        // min keylength in sstable
+	MaxKeyLength           uint32        // max keylength in sstable
+	TotalRecords           uint64        // number of records in sstable
 	RestartInterval        uint32
 	EncodingType           byte
 	CompressionType        byte   // type of compression = 0 always
@@ -56,6 +57,7 @@ func NewFooter(config config.SSTableConfig) *Footer {
 		RestartInterval:        uint32(config.DataSegment.RestartInterval),
 		EncodingType:           1,
 		MergeIteratorStructure: 1,
+		BlockSize:              uint64(config.DataSegment.BlockSize),
 	}
 }
 
@@ -85,6 +87,8 @@ func (f *Footer) Encode() []byte {
 	binary.LittleEndian.PutUint32(buf[pos:], f.MetaDataHandler.Size)
 	pos += 4
 
+	binary.LittleEndian.PutUint64(buf[pos:], f.BlockSize)
+	pos += 8
 	binary.LittleEndian.PutUint32(buf[pos:], f.NumDataBlocks)
 	pos += 4
 
@@ -156,6 +160,8 @@ func (f *Footer) Decode(buf []byte) error {
 	f.MetaDataHandler.Size = binary.LittleEndian.Uint32(buf[pos:])
 	pos += 4
 
+	f.BlockSize = binary.LittleEndian.Uint64(buf[pos:])
+	pos += 8
 	f.NumDataBlocks = binary.LittleEndian.Uint32(buf[pos:])
 	pos += 4
 

@@ -9,7 +9,6 @@ package sstable
 import (
 	"bytes"
 	"errors"
-	"fmt"
 	"os"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/block"
@@ -29,7 +28,7 @@ type SSTableReader struct {
 }
 
 // NewSSTableReader opens an SSTable file and loads all necessary segments into RAM
-func NewSSTableReader(filePath string, blockManager *block.BlockManager, cfg *config.Config) (*SSTableReader, error) {
+func NewSSTableReader(filePath string, cfg *config.Config) (*SSTableReader, error) {
 	// storage opens file too
 	storage, err := OpenStorage(filePath, cfg)
 	if err != nil {
@@ -57,7 +56,7 @@ func NewSSTableReader(filePath string, blockManager *block.BlockManager, cfg *co
 	if err := footer.Validate(); err != nil {
 		return nil, err
 	}
-
+	blockManager := block.NewBlockManager(int(footer.BlockSize), 100)
 	// initialize reader
 	reader := &SSTableReader{
 		storage:      storage,

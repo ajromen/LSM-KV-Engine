@@ -60,7 +60,7 @@ func TestSSTableWriterBasic(t *testing.T) {
 	if _, err := os.Stat(tempFile); os.IsNotExist(err) {
 		t.Fatalf("SSTable file was not created")
 	}
-	reader, err := NewSSTableReader(tempFile, blockManager, cfg)
+	reader, err := NewSSTableReader(tempFile, cfg)
 	if err != nil {
 		t.Fatalf("Failed to create sstable reader: %v", err)
 	}
@@ -149,7 +149,7 @@ func TestSSTableMultiFileFormat(t *testing.T) {
 			t.Errorf("Expected file %s to exist", file)
 		}
 	}
-	reader, err := NewSSTableReader(tempFile, blockManager, cfg)
+	reader, err := NewSSTableReader(tempFile, cfg)
 	if err != nil {
 		t.Fatalf("Failed to create sstable reader: %v", err)
 	}
@@ -229,7 +229,7 @@ func TestSSTableIteratorRaw(t *testing.T) {
 	if _, err := os.Stat(tempFile); os.IsNotExist(err) {
 		t.Fatalf("SSTable file was not created")
 	}
-	reader, err := NewSSTableReader(tempFile, blockManager, cfg)
+	reader, err := NewSSTableReader(tempFile, cfg)
 	iterator, err := NewSSTableIteratorRaw(reader)
 	if err != nil {
 		t.Fatalf("Failed to create iterator: %v", err)
@@ -269,7 +269,7 @@ func TestSSTableIterator(t *testing.T) {
 	if _, err := os.Stat(tempFile); os.IsNotExist(err) {
 		t.Fatalf("SSTable file was not created")
 	}
-	reader, err := NewSSTableReader(tempFile, blockManager, cfg)
+	reader, err := NewSSTableReader(tempFile, cfg)
 	iterator, err := NewSSTableIterator(reader)
 	if err != nil {
 		t.Fatalf("Failed to create iterator: %v", err)
@@ -328,11 +328,11 @@ func TestSSTableMergeIteratorRaw(t *testing.T) {
 		t.Fatalf("Failed to finalize writer2: %v", err)
 	}
 
-	reader1, err := NewSSTableReader(tempFile1, blockManager, cfg)
+	reader1, err := NewSSTableReader(tempFile1, cfg)
 	if err != nil {
 		t.Fatalf("Failed to create reader1: %v", err)
 	}
-	reader2, err := NewSSTableReader(tempFile2, blockManager, cfg)
+	reader2, err := NewSSTableReader(tempFile2, cfg)
 	if err != nil {
 		t.Fatalf("Failed to create reader2: %v", err)
 	}
@@ -390,11 +390,11 @@ func TestSSTableMergeIteratorRawWithDuplicates(t *testing.T) {
 		t.Fatalf("Failed to finalize writer2: %v", err)
 	}
 
-	reader1, err := NewSSTableReader(tempFile1, blockManager, cfg)
+	reader1, err := NewSSTableReader(tempFile1, cfg)
 	if err != nil {
 		t.Fatalf("Failed to create reader1: %v", err)
 	}
-	reader2, err := NewSSTableReader(tempFile2, blockManager, cfg)
+	reader2, err := NewSSTableReader(tempFile2, cfg)
 	if err != nil {
 		t.Fatalf("Failed to create reader2: %v", err)
 	}
@@ -461,11 +461,11 @@ func TestSSTableMergeIteratorWithTombstones(t *testing.T) {
 	if err := writer2.Finalize(); err != nil {
 		t.Fatalf("Failed to finalize writer2: %v", err)
 	}
-	reader1, err := NewSSTableReader(tempFile1, blockManager, cfg)
+	reader1, err := NewSSTableReader(tempFile1, cfg)
 	if err != nil {
 		t.Fatalf("Failed to create reader1: %v", err)
 	}
-	reader2, err := NewSSTableReader(tempFile2, blockManager, cfg)
+	reader2, err := NewSSTableReader(tempFile2, cfg)
 	if err != nil {
 		t.Fatalf("Failed to create reader2: %v", err)
 	}
@@ -488,5 +488,76 @@ func TestSSTableMergeIteratorWithTombstones(t *testing.T) {
 		rec := iterFiltered.Key()
 		fmt.Println("FILTERED:", string(rec.Key), string(rec.Value), "ts:", rec.Timestamp.Low)
 		iterFiltered.Next()
+	}
+}
+
+func TestSSTableGet(t *testing.T) {
+	tempFile := "test_sstable_get.sst"
+	defer os.Remove(tempFile)
+
+	cfg := config.NewDefaultConfig()
+	blockManager := block.NewBlockManager(cfg.SSTable.DataSegment.BlockSize, 100)
+
+	writer, err := NewSSTableWriter(tempFile, blockManager, cfg, 100)
+	if err != nil {
+		t.Fatalf("Failed to create writer: %v", err)
+	}
+
+	records := []Record{
+		createTestRecord("key001", "value001", 1, false),
+		createTestRecord("key002", "value002", 2, false),
+		createTestRecord("key003", "value003", 3, false),
+		createTestRecord("key004", "value004", 4, false),
+		createTestRecord("key005", "value005", 5, false),
+	}
+
+	for _, rec := range records {
+		if err := writer.AddRecord(rec); err != nil {
+			t.Fatalf("Failed to add record: %v", err)
+		}
+	}
+
+	if err := writer.Finalize(); err != nil {
+		t.Fatalf("Failed to finalize writer: %v", err)
+	}
+
+	reader, err := NewSSTableReader(tempFile, cfg)
+	if err != nil {
+		t.Fatalf("Failed to create reader: %v", err)
+	}
+
+	tests := []struct {
+		key   string
+		value string
+	}{
+		{"key001", "value001"},
+		{"key002", "value002"},
+		{"key003", "value003"},
+		{"key004", "value004"},
+		{"key005", "value005"},
+	}
+
+	for _, tt := range tests {
+		rec, err := reader.Get([]byte(tt.key))
+		if err != nil {
+			t.Fatalf("Get failed for key %s: %v", tt.key, err)
+		}
+
+		if rec == nil {
+			t.Fatalf("Key %s not found", tt.key)
+		}
+
+		if string(rec.Value) != tt.value {
+			t.Fatalf("Expected %s, got %s", tt.value, string(rec.Value))
+		}
+	}
+
+	// test key that does not exist
+	rec, err := reader.Get([]byte("key999"))
+	if err != nil {
+		t.Fatalf("Get failed: %v", err)
+	}
+	if rec != nil {
+		t.Fatalf("Expected nil for non-existing key")
 	}
 }
