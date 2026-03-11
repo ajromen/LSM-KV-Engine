@@ -1,0 +1,157 @@
+package memtable
+
+import (
+	"github.com/ajromen/LSM-KV-Engine/internal/data_structures"
+	"github.com/ajromen/LSM-KV-Engine/internal/include"
+)
+
+// ---- BTree Store Adapter ----
+
+type BTreeStore struct {
+	tree *data_structures.BTree[MemtableEntry]
+}
+
+func NewBTreeStore(t int, cmp data_structures.Comparator[MemtableEntry]) *BTreeStore {
+	return &BTreeStore{tree: data_structures.NewBTree[MemtableEntry](t, cmp)}
+}
+
+func (s *BTreeStore) Insert(entry MemtableEntry) {
+	s.tree.Insert(entry)
+}
+
+func (s *BTreeStore) Search(entry MemtableEntry) *MemtableEntry {
+	result, found := s.tree.LowerBound(entry)
+	if !found {
+		return nil
+	}
+	return &result
+}
+
+func (s *BTreeStore) EntriesInOrder() []MemtableEntry {
+	return s.tree.EntriesInOrder()
+}
+
+func (s *BTreeStore) Reset() {
+	s.tree.Reset()
+}
+
+func (s *BTreeStore) Size() int {
+	return s.tree.Size()
+}
+
+func (s *BTreeStore) Visualize(formatter func(MemtableEntry) string) string {
+	return s.tree.Visualize(formatter)
+}
+
+func (s *BTreeStore) RawIterator() include.Iterator[MemtableEntry] {
+	return NewRawSingleMemtableIterator(s.tree.Iterator())
+}
+
+func (s *BTreeStore) Iterator() include.Iterator[MemtableEntry] {
+	rawIt := s.RawIterator().(*RawSingleMemtableIterator)
+	return NewSingleMemtableIterator(rawIt)
+}
+
+// ---- Skiplist store adapter ----
+
+type SkipListStore struct {
+	list *data_structures.SkipList[MemtableEntry]
+}
+
+func NewSkipListStore(maxLevel int, cmp data_structures.Comparator[MemtableEntry]) *SkipListStore {
+	return &SkipListStore{list: data_structures.NewSkipList[MemtableEntry](maxLevel, cmp)}
+}
+
+func (s *SkipListStore) Insert(entry MemtableEntry) {
+	s.list.Insert(entry)
+}
+
+func (s *SkipListStore) EntriesInOrder() []MemtableEntry {
+	return s.list.EntriesInOrder()
+}
+
+func (s *SkipListStore) Reset() {
+	s.list.Reset()
+}
+
+func (s *SkipListStore) Size() int {
+	return s.list.Size()
+}
+
+func (s *SkipListStore) Visualize(f func(MemtableEntry) string) string {
+	return s.list.Visualize(f)
+}
+
+func (s *SkipListStore) Search(entry MemtableEntry) *MemtableEntry {
+	result, found := s.list.LowerBound(entry)
+	if !found {
+		return nil
+	}
+	return &result
+}
+
+func (s *SkipListStore) RawIterator() include.Iterator[MemtableEntry] {
+	return NewRawSingleMemtableIterator(s.list.Iterator())
+}
+
+func (s *SkipListStore) Iterator() include.Iterator[MemtableEntry] {
+	rawIt := s.RawIterator().(*RawSingleMemtableIterator)
+	return NewSingleMemtableIterator(rawIt)
+}
+
+// ---- Hashmap store adapter ----
+
+type HashMapStore struct {
+	hmap *data_structures.HackMap[MemtableEntry]
+}
+
+func NewHashMapStore() *HashMapStore {
+	return &HashMapStore{
+		hmap: data_structures.NewHackMap[MemtableEntry](),
+	}
+}
+
+func (s *HashMapStore) Insert(entry MemtableEntry) {
+	s.hmap.Insert(entry)
+}
+
+func (s *HashMapStore) Search(entry MemtableEntry) *MemtableEntry {
+	node, found := s.hmap.LowerBound(string(entry.Key))
+	if found {
+		return &node
+	}
+	return nil
+}
+
+func (s *HashMapStore) Remove(entry MemtableEntry) {
+	s.hmap.Remove(entry)
+}
+
+func (s *HashMapStore) EntriesInOrder() []MemtableEntry {
+	return s.hmap.EntriesInOrder()
+}
+
+func (s *HashMapStore) Reset() {
+	s.hmap = data_structures.NewHackMap[MemtableEntry]()
+}
+
+func (s *HashMapStore) Size() int {
+	total := 0
+	for _, stack := range s.hmap.Data() {
+		total += stack.Len()
+	}
+	return total
+}
+
+func (s *HashMapStore) Visualize(f func(MemtableEntry) string) string {
+	return s.hmap.Visualize(f)
+}
+
+func (s *HashMapStore) RawIterator() include.Iterator[MemtableEntry] {
+	return NewRawSingleMemtableIterator(s.hmap.Iterator())
+}
+
+func (s *HashMapStore) Iterator() include.Iterator[MemtableEntry] {
+	rawIt := s.RawIterator().(*RawSingleMemtableIterator)
+	return NewSingleMemtableIterator(rawIt)
+}

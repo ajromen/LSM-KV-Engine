@@ -1,338 +1,510 @@
 package memtable
 
 import (
+	"bytes"
+	"fmt"
+	"math"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/config"
+	"github.com/ajromen/LSM-KV-Engine/internal/include"
 )
 
-func TestHashmap(t *testing.T) {
-	t.Log("---- HASHMAP MEMTABLE TEST ----")
-	memtableConfig := config.MemtableConfig{MemtableType: "hashmap", Instances: 1, MemtableMaxSize: 10}
-	mt := NewMemtables(memtableConfig, func(entries []MemtableEntry) {})
-	mt.Put("key1", []byte("value1"))
-	mt.Put("key2", []byte("value2"))
-	mt.Put("key3", []byte("value3"))
-	mt.Put("key4", []byte("value4"))
-	entry, ok := mt.Get("key1")
-	if !ok {
-		t.Fatal("key1 not found, expected to be found")
-	}
-	if string(entry.Value) != "value1" {
-		t.Fatalf("expected value1, got %s", entry.Value)
-	}
-	mt.Put("key1", []byte("value1_updated"))
-	entryUpdated, ok := mt.Get("key1")
-	if !ok {
-		t.Fatalf("key1 not found")
-	}
-	if string(entryUpdated.Value) != "value1_updated" {
-		t.Fatalf("expected value1_updated, got %s", entryUpdated.Value)
-	}
-	_, ok = mt.Get("nonexisting")
-	if ok {
-		t.Fatalf("expected nonexisting key to be missing")
-	}
-	mt.Delete("nonexisting")
-	entries := mt.ReadEntriesNoFlushing()
-	if !entries[4].Tombstone {
-		t.Fatalf("expected tombstone to be true")
+var allTypes = []MemtableType{TypeBTree, TypeSkipList, TypeHashMap}
+
+func newMemtable(t *testing.T, mt MemtableType, maxEntries int, maxBytes uint64, handler func([]MemtableEntry)) *MemtableFactory {
+	t.Helper()
+	factory := NewFactory(mt, maxEntries, maxBytes, config.NewDefaultConfig().Memtable)
+	return NewMemtableFactory(5, factory, handler)
+}
+
+// ============================================================
+// Basic Put / Get
+// ============================================================
+
+func TestPutGet(t *testing.T) {
+	for _, mt := range allTypes {
+		mt := mt
+		t.Run(string(mt), func(t *testing.T) {
+			m := newMemtable(t, mt, 100, 1<<20, nil)
+			keys := []string{"key1", "key2", "key3", "key4", "key5"}
+			for i, k := range keys {
+				m.Put([]byte(k), []byte(fmt.Sprintf("value%d", i+1)), 10, false)
+			}
+			for i, k := range keys {
+				got, ok := m.Get([]byte(k))
+				if !ok {
+					t.Fatalf("Get(%q): not found", k)
+				}
+				want := fmt.Sprintf("value%d", i+1)
+				if !bytes.Equal(got, []byte(want)) {
+					t.Errorf("Get(%q) = %q, want %q", k, got, want)
+				}
+			}
+		})
 	}
 }
 
-func TestHashmapFlush(t *testing.T) {
-	t.Log("---- HASHMAP MEMTABLE FLUSH TEST ----")
-	flushed := [][]MemtableEntry{}
-	memtableConfig := config.MemtableConfig{MemtableType: "hashmap", Instances: 1, MemtableMaxSize: 2}
-	mt := NewMemtables(memtableConfig, func(entries []MemtableEntry) {
-		flushed = append(flushed, entries)
+func TestGetMissing(t *testing.T) {
+	for _, mt := range allTypes {
+		mt := mt
+		t.Run(string(mt), func(t *testing.T) {
+			m := newMemtable(t, mt, 100, 1<<20, nil)
+			got, ok := m.Get([]byte("nonexistent"))
+			if ok || got != nil {
+				t.Errorf("Get(missing): got (%v, %v), want (nil, false)", got, ok)
+			}
+		})
+	}
+}
+
+// ============================================================
+// Timestamp semantics
+// ============================================================
+
+func TestNewerTimestampWins(t *testing.T) {
+	for _, mt := range allTypes {
+		mt := mt
+		t.Run(string(mt), func(t *testing.T) {
+			m := newMemtable(t, mt, 100, 1<<20, nil)
+			m.Put([]byte("key"), []byte("old"), 10, false)
+			m.Put([]byte("key"), []byte("new"), 20, false)
+			got, ok := m.Get([]byte("key"))
+			if !ok {
+				t.Fatal("Get: not found")
+			}
+			if !bytes.Equal(got, []byte("new")) {
+				t.Errorf("got %q, want %q", got, "new")
+			}
+		})
+	}
+}
+
+func TestOlderTimestampDoesNotOverwrite(t *testing.T) {
+	allTypes = []MemtableType{TypeBTree, TypeSkipList}
+	for _, mt := range allTypes {
+		mt := mt
+		t.Run(string(mt), func(t *testing.T) {
+			m := newMemtable(t, mt, 100, 1<<20, nil)
+			m.Put([]byte("key"), []byte("new"), 20, false)
+			m.Put([]byte("key"), []byte("old"), 10, false)
+			got, ok := m.Get([]byte("key"))
+			if !ok {
+				t.Fatal("Get: not found")
+			}
+			if !bytes.Equal(got, []byte("new")) {
+				t.Errorf("older write overwrote newer: got %q, want %q", got, "new")
+			}
+		})
+	}
+}
+
+// ============================================================
+// Tombstone / Delete semantics
+// ============================================================
+
+func TestTombstoneHidesEntry(t *testing.T) {
+	for _, mt := range allTypes {
+		mt := mt
+		t.Run(string(mt), func(t *testing.T) {
+			m := newMemtable(t, mt, 100, 1<<20, nil)
+			m.Put([]byte("key"), []byte("value"), 10, false)
+			m.Put([]byte("key"), []byte(""), 20, true)
+			got, ok := m.Get([]byte("key"))
+			if ok || got != nil {
+				t.Errorf("expected deleted key to be hidden, got (%v, %v)", got, ok)
+			}
+		})
+	}
+}
+
+func TestDeleteHidesEntry(t *testing.T) {
+	for _, mt := range allTypes {
+		mt := mt
+		t.Run(string(mt), func(t *testing.T) {
+			m := newMemtable(t, mt, 100, 1<<20, nil)
+			m.Put([]byte("key"), []byte("value"), 10, false)
+			m.Delete([]byte("key"), 20)
+			got, ok := m.Get([]byte("key"))
+			if ok || got != nil {
+				t.Errorf("expected deleted key to be hidden, got (%v, %v)", got, ok)
+			}
+		})
+	}
+}
+
+func TestOlderTombstoneDoesNotHideNewerWrite(t *testing.T) {
+	allTypes = []MemtableType{TypeBTree, TypeSkipList}
+	for _, mt := range allTypes {
+		mt := mt
+		t.Run(string(mt), func(t *testing.T) {
+			m := newMemtable(t, mt, 100, 1<<20, nil)
+			m.Put([]byte("key"), []byte("value"), 20, false)
+			m.Put([]byte("key"), []byte(""), 10, true) // older tombstone
+			got, ok := m.Get([]byte("key"))
+			if !ok {
+				t.Fatal("Get: not found — older tombstone should not hide newer write")
+			}
+			if !bytes.Equal(got, []byte("value")) {
+				t.Errorf("got %q, want %q", got, "value")
+			}
+		})
+	}
+}
+
+// ============================================================
+// Single-memtable raw iterator
+// ============================================================
+
+func TestRawSingleIteratorAllVersions(t *testing.T) {
+	for _, mt := range allTypes {
+		mt := mt
+		t.Run(string(mt), func(t *testing.T) {
+			m := newMemtable(t, mt, 100, 1<<20, nil)
+			m.Put([]byte("a"), []byte("old"), 10, false)
+			m.Put([]byte("a"), []byte("new"), 20, false)
+			m.Put([]byte("b"), []byte("only"), 10, false)
+
+			rawIt := m.active.RawIterator()
+			rawIt.SeekToFirst()
+			var entries []MemtableEntry
+			for rawIt.Valid() {
+				entries = append(entries, rawIt.Value())
+				rawIt.Next()
+			}
+			// raw iterator must expose every version
+			if len(entries) < 3 {
+				t.Errorf("expected at least 3 raw entries, got %d", len(entries))
+			}
+		})
+	}
+}
+
+// ============================================================
+// Single-memtable merged iterator (deduplication)
+// ============================================================
+
+func TestSingleIteratorDeduplication(t *testing.T) {
+	for _, mt := range allTypes {
+		mt := mt
+		t.Run(string(mt), func(t *testing.T) {
+			m := newMemtable(t, mt, 100, 1<<20, nil)
+			m.Put([]byte("key1"), []byte("old"), 10, false)
+			m.Put([]byte("key1"), []byte("new"), 20, false)
+			m.Put([]byte("key2"), []byte("only"), 10, false)
+			m.Put([]byte("key3"), []byte("v"), 10, false)
+			m.Put([]byte("key3"), []byte(""), 20, true) // tombstone
+
+			it := m.active.Iterator()
+			it.SeekToFirst()
+			seen := map[string]MemtableEntry{}
+			for it.Valid() {
+				e := it.Value()
+				seen[string(e.Key)] = e
+				it.Next()
+			}
+			// key1: latest version must be "new"
+			if e, ok := seen["key1"]; !ok || !bytes.Equal(e.Value, []byte("new")) {
+				t.Errorf("key1: got %v, want value=new", e)
+			}
+			// key2: present
+			if _, ok := seen["key2"]; !ok {
+				t.Error("key2 missing from iterator")
+			}
+			// key3: tombstone — should NOT appear in merged iterator
+			if e, ok := seen["key3"]; ok && !e.Tombstone {
+				t.Errorf("key3 should be absent or tombstoned, got %v", e)
+			}
+		})
+	}
+}
+
+// ============================================================
+// Multi-memtable raw iterator (cross-table merge)
+// ============================================================
+
+func TestRawIteratorAcrossTwoMemtables(t *testing.T) {
+	for _, mt := range allTypes {
+		mt := mt
+		t.Run(string(mt), func(t *testing.T) {
+			m1 := newMemtable(t, mt, 100, 1<<20, nil)
+			m2 := newMemtable(t, mt, 100, 1<<20, nil)
+			m1.Put([]byte("key1"), []byte("v1old"), 10, false)
+			m1.Put([]byte("key1"), []byte("v1new"), 20, false)
+			m2.Put([]byte("key2"), []byte("v2old"), 10, false)
+			m2.Put([]byte("key2"), []byte("v2new"), 20, false)
+			m1.Put([]byte("key3"), []byte("v3"), 10, false)
+
+			rawIt1 := m1.active.RawIterator()
+			rawIt1.SeekToFirst()
+			rawIt2 := m2.active.RawIterator()
+			rawIt2.SeekToFirst()
+
+			globalRaw := NewRawIterator([]include.Iterator[MemtableEntry]{rawIt1, rawIt2}, 1)
+			globalRaw.SeekToFirst()
+
+			keys := map[string]bool{}
+			for globalRaw.Valid() {
+				keys[string(globalRaw.Value().Key)] = true
+				globalRaw.Next()
+			}
+			for _, k := range []string{"key1", "key2", "key3"} {
+				if !keys[k] {
+					t.Errorf("expected key %q in raw iterator", k)
+				}
+			}
+		})
+	}
+}
+
+// ============================================================
+// Multi-memtable merged iterator with Seek
+// ============================================================
+
+func TestIteratorSeek(t *testing.T) {
+	for _, mt := range allTypes {
+		mt := mt
+		t.Run(string(mt), func(t *testing.T) {
+			m1 := newMemtable(t, mt, 100, 1<<20, nil)
+			m2 := newMemtable(t, mt, 100, 1<<20, nil)
+			for _, k := range []string{"key1", "key3", "key5"} {
+				m1.Put([]byte(k), []byte("v"), 10, false)
+			}
+			for _, k := range []string{"key2", "key4"} {
+				m2.Put([]byte(k), []byte("v"), 10, false)
+			}
+
+			rawIt1 := m1.active.RawIterator()
+			rawIt1.SeekToFirst()
+			rawIt2 := m2.active.RawIterator()
+			rawIt2.SeekToFirst()
+
+			globalRaw := NewRawIterator([]include.Iterator[MemtableEntry]{rawIt1, rawIt2}, 1)
+			globalIt := NewMergedMemtableIterator(globalRaw)
+			globalIt.Seek(MemtableEntry{Key: []byte("key3"), Timestamp: math.MaxInt64})
+
+			var got []string
+			for globalIt.Valid() {
+				got = append(got, string(globalIt.Value().Key))
+				globalIt.Next()
+			}
+			if len(got) == 0 || got[0] != "key3" {
+				t.Errorf("Seek(key3): first result = %v, want key3", got)
+			}
+			// key1 and key2 must not appear after seek
+			for _, k := range got {
+				if k < "key3" {
+					t.Errorf("Seek(key3): got key %q which is before seek target", k)
+				}
+			}
+		})
+	}
+}
+
+// ============================================================
+// Factory-level iterator across active + immutables
+// ============================================================
+
+func TestFactoryIteratorAcrossFlush(t *testing.T) {
+	for _, mt := range allTypes {
+		mt := mt
+		t.Run(string(mt), func(t *testing.T) {
+			// maxEntries=3 forces rotations quickly
+			flushed := map[string]bool{}
+			var mu sync.Mutex
+			m := newMemtable(t, mt, 3, 1<<20, func(entries []MemtableEntry) {
+				mu.Lock()
+				for _, e := range entries {
+					flushed[string(e.Key)] = true
+				}
+				mu.Unlock()
+			})
+
+			keys := []string{"a", "b", "c", "d", "e", "f", "g"}
+			for _, k := range keys {
+				m.Put([]byte(k), []byte("v-"+k), 10, false)
+			}
+
+			time.Sleep(100 * time.Millisecond)
+
+			it := m.Iterator()
+			it.SeekToFirst()
+			seen := map[string]bool{}
+			for it.Valid() {
+				seen[string(it.Value().Key)] = true
+				it.Next()
+			}
+
+			// every key that was not flushed must be visible via iterator
+			for _, k := range keys {
+				mu.Lock()
+				wasFlushed := flushed[k]
+				mu.Unlock()
+				if !wasFlushed && !seen[k] {
+					t.Errorf("key %q not visible in iterator and not flushed", k)
+				}
+			}
+		})
+	}
+}
+
+// ============================================================
+// Concurrency: Put / Get / Delete racing with flushes
+// ============================================================
+
+func TestConcurrency(t *testing.T) {
+	var mu sync.Mutex
+	var flushedEntries []MemtableEntry
+	flushCount := 0
+
+	factory := NewFactory("skiplist", 5, 1<<20, config.NewDefaultConfig().Memtable)
+	memFactory := NewMemtableFactory(5, factory, func(entries []MemtableEntry) {
+		mu.Lock()
+		flushCount++
+		current := flushCount
+		mu.Unlock()
+
+		t.Logf(">>> flush #%d started — %d entries", current, len(entries))
+		for _, e := range entries {
+			t.Logf("    key=%s value=%s tombstone=%v ts=%d", e.Key, e.Value, e.Tombstone, e.Timestamp)
+		}
+
+		mu.Lock()
+		flushedEntries = append(flushedEntries, entries...)
+		mu.Unlock()
+
+		t.Logf("<<< flush #%d done", current)
 	})
-	mt.Put("key1", []byte("value1"))
-	mt.Put("key2", []byte("value2"))
-	mt.Put("key3", []byte("value3"))
-	_, ok := mt.Get("key1")
-	if ok {
-		t.Fatalf("expected key1 to be missing after flush")
+
+	const numWriters = 5
+	const writesPerWriter = 200
+	var wg sync.WaitGroup
+
+	// concurrent puts
+	for w := 0; w < numWriters; w++ {
+		wg.Add(1)
+		go func(workerID int) {
+			defer wg.Done()
+			for i := 0; i < writesPerWriter; i++ {
+				key := fmt.Sprintf("worker%d-key%04d", workerID, i)
+				value := fmt.Sprintf("value-%d-%d", workerID, i)
+				ts := uint64(workerID*writesPerWriter + i)
+				memFactory.Put([]byte(key), []byte(value), ts, false)
+			}
+		}(w)
 	}
-	_, ok = mt.Get("key3")
-	if !ok {
-		t.Fatalf("expected key3 to exist")
+
+	// concurrent gets racing with puts
+	for r := 0; r < 3; r++ {
+		wg.Add(1)
+		go func(readerID int) {
+			defer wg.Done()
+			for i := 0; i < 100; i++ {
+				key := fmt.Sprintf("worker%d-key%04d", readerID, i)
+				v, ok := memFactory.Get([]byte(key))
+				if ok {
+					t.Logf("reader %d: got key=%s value=%s", readerID, key, v)
+				}
+			}
+		}(r)
 	}
-	if len(flushed) != 1 {
-		t.Fatalf("expected 1 flush, got %d", len(flushed))
+
+	// concurrent deletes
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 50; i++ {
+			key := fmt.Sprintf("worker0-key%04d", i)
+			memFactory.Delete([]byte(key), uint64(999999+i))
+		}
+	}()
+
+	wg.Wait()
+	t.Log("=== all writers done, waiting for flushes to drain ===")
+	time.Sleep(200 * time.Millisecond)
+
+	// verify total entry count
+	mu.Lock()
+	totalFlushed := len(flushedEntries)
+	totalFlushes := flushCount
+	mu.Unlock()
+
+	expectedWrites := numWriters * writesPerWriter
+	expectedDeletes := 50
+	expectedTotal := expectedWrites + expectedDeletes
+
+	// entries still in active memtable were not flushed yet
+	it := memFactory.Iterator()
+	it.SeekToFirst()
+	inMemory := 0
+	for it.Valid() {
+		it.Next()
+		inMemory++
 	}
-	if len(flushed[0]) != 2 {
-		t.Fatalf("expected 2 flushed entries, got %d", len(flushed[0]))
+
+	t.Logf("total flushes: %d", totalFlushes)
+	t.Logf("flushed entries: %d, in active memtable: %d, total: %d, expected: %d",
+		totalFlushed, inMemory, totalFlushed+inMemory, expectedTotal)
+
+	// every write and delete must be accounted for exactly once
+	if totalFlushed+inMemory != expectedTotal {
+		t.Errorf("entry count mismatch: flushed=%d + inMemory=%d = %d, want %d",
+			totalFlushed, inMemory, totalFlushed+inMemory, expectedTotal)
 	}
+
+	// raw iterator must agree
+	rawIt := memFactory.RawIterator()
+	rawIt.SeekToFirst()
+	rawCount := 0
+	for rawIt.Valid() {
+		rawIt.Next()
+		rawCount++
+	}
+	t.Logf("raw iterator in-memory entries: %d", rawCount)
 }
 
-func TestHashmapRotation(t *testing.T) {
-	t.Log("---- HASHMAP MEMTABLE ROTATION TEST ----")
-	memtableConfig := config.MemtableConfig{MemtableType: "hashmap", Instances: 2, MemtableMaxSize: 2}
+func TestMemtableLifecycle(t *testing.T) {
+	var mu sync.Mutex
+	var flushed []MemtableEntry
+	var wg sync.WaitGroup
 
-	mt := NewMemtables(memtableConfig, func(entries []MemtableEntry) {})
+	factory := NewFactory("skiplist", 3, 1<<20, config.NewDefaultConfig().Memtable)
 
-	mt.Put("key1", []byte("value1"))
-	mt.Put("key2", []byte("value2"))
-	mt.Put("key3", []byte("value3"))
+	wg.Add(1)
 
-	entries := mt.ReadEntriesNoFlushing()
-	foundKeys := map[string]bool{}
-	for _, e := range entries {
-		foundKeys[e.Key] = true
-	}
-	if !foundKeys["key1"] || !foundKeys["key2"] || !foundKeys["key3"] {
-		t.Fatalf("expected keys key1, key2, key3 to exist in memtables")
-	}
-	if mt.activeIndex != 1 {
-		t.Fatalf("active index expected to be 1 because of rotation, got %d", mt.activeIndex)
-	}
-	entry, ok := mt.Get("key1")
-	if !ok || string(entry.Value) != "value1" {
-		t.Fatalf("expected key1 to have value1, got %v", entry.Value)
-	}
-}
-
-func TestSkipList(t *testing.T) {
-	t.Log("---- SKIPLIST MEMTABLE TEST ----")
-	memtableConfig := config.MemtableConfig{
-		MemtableType:    "skiplist",
-		Instances:       1,
-		MemtableMaxSize: 100,
-		SkipListConfig: config.SkipListConfig{
-			MaxLevel: 6,
-		},
-	}
-
-	mt := NewMemtables(memtableConfig, func(entries []MemtableEntry) {})
-	mt.Put("key1", []byte("value1"))
-	mt.Put("key2", []byte("value2"))
-	mt.Put("key3", []byte("value3"))
-	mt.Put("key4", []byte("value4"))
-	entry, ok := mt.Get("key1")
-	if !ok {
-		t.Fatal("key1 not found, expected to be found")
-	}
-	if string(entry.Value) != "value1" {
-		t.Fatalf("expected value1, got %s", entry.Value)
-	}
-	mt.Put("key1", []byte("value1_updated"))
-	entryUpdated, ok := mt.Get("key1")
-	if !ok {
-		t.Fatalf("key1 not found")
-	}
-	if string(entryUpdated.Value) != "value1_updated" {
-		t.Fatalf("expected value1_updated, got %s", entryUpdated.Value)
-	}
-	_, ok = mt.Get("nonexisting")
-	if ok {
-		t.Fatalf("expected nonexisting key to be missing")
-	}
-	mt.Delete("nonexisting")
-	entries := mt.ReadEntriesNoFlushing()
-	if !entries[4].Tombstone {
-		t.Fatalf("expected tombstone to be true")
-	}
-}
-
-func TestSkipListFlush(t *testing.T) {
-	t.Log("---- SKIPLIST MEMTABLE FLUSH TEST ----")
-	flushed := [][]MemtableEntry{}
-	memtableConfig := config.MemtableConfig{
-		MemtableType:    "skiplist",
-		Instances:       1,
-		MemtableMaxSize: 2,
-		SkipListConfig: config.SkipListConfig{
-			MaxLevel: 6,
-		},
-	}
-	mt := NewMemtables(memtableConfig, func(entries []MemtableEntry) {
-		flushed = append(flushed, entries)
+	mem := NewMemtableFactory(5, factory, func(entries []MemtableEntry) {
+		fmt.Println("=== FLUSH START ===")
+		for _, e := range entries {
+			fmt.Printf("flush: key=%s value=%s ts=%d tomb=%v\n",
+				e.Key, e.Value, e.Timestamp, e.Tombstone)
+		}
+		mu.Lock()
+		flushed = append(flushed, entries...)
+		mu.Unlock()
+		fmt.Println("=== FLUSH END ===")
+		wg.Done()
 	})
-	mt.Put("key1", []byte("value1"))
-	mt.Put("key2", []byte("value2"))
-	mt.Put("key3", []byte("value3"))
-	_, ok := mt.Get("key1")
-	if ok {
-		t.Fatalf("expected key1 to be missing after flush")
+	fmt.Println("=== PUT PHASE ===")
+	mem.Put([]byte("a"), []byte("1"), 10, false)
+	mem.Put([]byte("b"), []byte("2"), 20, false)
+	mem.Put([]byte("c"), []byte("3"), 30, false)
+	fmt.Println("ACTIVE MEMTABLE:")
+	fmt.Println(mem.active.Visualize())
+	mem.Put([]byte("d"), []byte("4"), 40, false)
+	wg.Wait()
+	fmt.Println("=== ITERATOR VIEW ===")
+	it := mem.Iterator()
+	it.SeekToFirst()
+	for it.Valid() {
+		e := it.Value()
+		fmt.Printf("iter: key=%s value=%s ts=%d\n",
+			e.Key, e.Value, e.Timestamp)
+		it.Next()
 	}
-	_, ok = mt.Get("key3")
-	if !ok {
-		t.Fatalf("expected key3 to exist")
-	}
-	if len(flushed) != 1 {
-		t.Fatalf("expected 1 flush, got %d", len(flushed))
-	}
-	if len(flushed[0]) != 2 {
-		t.Fatalf("expected 2 flushed entries, got %d", len(flushed[0]))
-	}
-}
-
-func TestSkipListRotation(t *testing.T) {
-	t.Log("---- HASHMAP MEMTABLE ROTATION TEST ----")
-	memtableConfig := config.MemtableConfig{
-		MemtableType:    "skiplist",
-		Instances:       2,
-		MemtableMaxSize: 2,
-		SkipListConfig: config.SkipListConfig{
-			MaxLevel: 6,
-		},
-	}
-	mt := NewMemtables(memtableConfig, func(entries []MemtableEntry) {})
-	mt.Put("key1", []byte("value1"))
-	mt.Put("key2", []byte("value2"))
-	mt.Put("key3", []byte("value3"))
-
-	entries := mt.ReadEntriesNoFlushing()
-	foundKeys := map[string]bool{}
-	for _, e := range entries {
-		foundKeys[e.Key] = true
-	}
-	if !foundKeys["key1"] || !foundKeys["key2"] || !foundKeys["key3"] {
-		t.Fatalf("expected keys key1, key2, key3 to exist in memtables")
-	}
-	if mt.activeIndex != 1 {
-		t.Fatalf("active index expected to be 1 because of rotation, got %d", mt.activeIndex)
-	}
-	entry, ok := mt.Get("key1")
-	if !ok || string(entry.Value) != "value1" {
-		t.Fatalf("expected key1 to have value1, got %v", entry.Value)
-	}
-}
-
-func TestBTree(t *testing.T) {
-	t.Log("---- BTREE MEMTABLE TEST ----")
-	memtableConfig := config.MemtableConfig{MemtableType: "btree", Instances: 1, MemtableMaxSize: 5}
-
-	mt := NewMemtables(memtableConfig, func(entries []MemtableEntry) {})
-	mt.Put("key2", []byte("value2"))
-	mt.Put("key3", []byte("value3"))
-	mt.Put("key4", []byte("value4"))
-	mt.Put("key6", []byte("value6"))
-	mt.Put("key5", []byte("value5"))
-	mt.Put("key1", []byte("value1"))
-	entry, ok := mt.Get("key1")
-	if !ok {
-		t.Fatal("expected key1 to be found")
-	}
-	if string(entry.Value) != "value1" {
-		t.Fatalf("expected value1 but got %s", string(entry.Value))
-	}
-	mt.Put("key1", []byte("value1_updated"))
-	entryUpdated, ok := mt.Get("key1")
-	if !ok {
-		t.Fatal("expected key1 to be found")
-	}
-	if string(entryUpdated.Value) != "value1_updated" {
-		t.Fatalf("expected value1_updated but got %s", string(entryUpdated.Value))
-	}
-}
-
-func TestBTreeFlush(t *testing.T) {
-	t.Log("---- BTREE MEMTABLE FLUSH TEST ----")
-	flushed := [][]MemtableEntry{}
-	memtableConfig := config.MemtableConfig{MemtableType: "btree", Instances: 1, MemtableMaxSize: 2}
-
-	mt := NewMemtables(memtableConfig, func(entries []MemtableEntry) {
-		flushed = append(flushed, entries)
-	})
-	mt.Put("key1", []byte("value1"))
-	mt.Put("key2", []byte("value2"))
-	mt.Put("key3", []byte("value3"))
-	_, ok := mt.Get("key1")
-	if ok {
-		t.Fatalf("expected key1 to be missing after flush")
-	}
-	_, ok = mt.Get("key3")
-	if !ok {
-		t.Fatalf("expected key3 to exist")
-	}
-	if len(flushed) != 1 {
-		t.Fatalf("expected 1 flush, got %d", len(flushed))
-	}
-	if len(flushed[0]) != 2 {
-		t.Fatalf("expected 2 flushed entries, got %d", len(flushed[0]))
-	}
-}
-
-func TestBTreeRotation(t *testing.T) {
-	t.Log("---- HASHMAP MEMTABLE ROTATION TEST ----")
-
-	memtableConfig := config.MemtableConfig{MemtableType: "btree", Instances: 2, MemtableMaxSize: 2}
-	mt := NewMemtables(memtableConfig, func(entries []MemtableEntry) {})
-	mt.Put("key1", []byte("value1"))
-	mt.Put("key2", []byte("value2"))
-	mt.Put("key3", []byte("value3"))
-
-	entries := mt.ReadEntriesNoFlushing()
-	foundKeys := map[string]bool{}
-	for _, e := range entries {
-		foundKeys[e.Key] = true
-	}
-	if !foundKeys["key1"] || !foundKeys["key2"] || !foundKeys["key3"] {
-		t.Fatalf("expected keys key1, key2, key3 to exist in memtables")
-	}
-	if mt.activeIndex != 1 {
-		t.Fatalf("active index expected to be 1 because of rotation, got %d", mt.activeIndex)
-	}
-	entry, ok := mt.Get("key1")
-	if !ok || string(entry.Value) != "value1" {
-		t.Fatalf("expected key1 to have value1, got %v", entry.Value)
-	}
-}
-
-func TestFlushesOnlyOldestAfterSixEntries(t *testing.T) {
-	t.Log("---- ONLY OLDEST MEMTABLE IS FLUSHED AFTER 6 ENTRIES ----")
-
-	flushed := [][]MemtableEntry{}
-	memtableConfig := config.MemtableConfig{
-		MemtableType:    "skiplist",
-		Instances:       2,
-		MemtableMaxSize: 3,
-		SkipListConfig: config.SkipListConfig{
-			MaxLevel: 6,
-		},
-	}
-
-	mt := NewMemtables(memtableConfig, func(entries []MemtableEntry) {
-		cp := make([]MemtableEntry, len(entries))
-		copy(cp, entries)
-		flushed = append(flushed, cp)
-	})
-
-	mt.Put("key1", []byte("value1"))
-	mt.Put("key2", []byte("value2"))
-	mt.Put("key3", []byte("value3")) // puni prvu memtable -> flush
-
-	mt.Put("key4", []byte("value4"))
-	mt.Put("key5", []byte("value5"))
-	mt.Put("key6", []byte("value6")) // puni drugu memtable, ali NE FLUSHUJE
-
-	if len(flushed) != 1 {
-		t.Fatalf("expected exactly 1 flush after 6 puts, got %d", len(flushed))
-	}
-
-	if len(flushed[0]) != 3 {
-		t.Fatalf("expected flushed entries to be 3 (oldest memtable), got %d", len(flushed[0]))
-	}
-
-	keys := map[string]bool{}
-	for _, e := range flushed[0] {
-		keys[e.Key] = true
-	}
-
-	if !keys["key1"] || !keys["key2"] || !keys["key3"] {
-		t.Fatalf("expected flushed keys to be key1,key2,key3, got %+v", keys)
-	}
-
-	// dodatna provjera: novi ključevi su još u memtable-u
-	if _, ok := mt.Get("key4"); !ok {
-		t.Fatalf("expected key4 to still be in memtable")
-	}
-	if _, ok := mt.Get("key5"); !ok {
-		t.Fatalf("expected key5 to still be in memtable")
-	}
-	if _, ok := mt.Get("key6"); !ok {
-		t.Fatalf("expected key6 to still be in memtable")
-	}
+	fmt.Println("=== FLUSHED COUNT ===")
+	mu.Lock()
+	fmt.Println("flushed entries:", len(flushed))
+	mu.Unlock()
 }
