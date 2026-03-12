@@ -16,7 +16,7 @@ var allTypes = []MemtableType{TypeBTree, TypeSkipList, TypeHashMap}
 
 func newMemtable(t *testing.T, mt MemtableType, maxEntries int, maxBytes uint64, handler func([]MemtableEntry)) *MemtableFactory {
 	t.Helper()
-	factory := NewFactory(mt, maxEntries, maxBytes, config.NewDefaultConfig().Memtable)
+	factory := NewFactory(config.NewDefaultConfig().Memtable)
 	return NewMemtableFactory(5, 1, factory, handler)
 }
 
@@ -359,7 +359,7 @@ func TestConcurrency(t *testing.T) {
 	var flushedEntries []MemtableEntry
 	flushCount := 0
 
-	factory := NewFactory("skiplist", 5, 1<<20, config.NewDefaultConfig().Memtable)
+	factory := NewFactory(config.NewDefaultConfig().Memtable)
 	memFactory := NewMemtableFactory(5, 0, factory, func(entries []MemtableEntry) {
 		mu.Lock()
 		flushCount++
@@ -470,7 +470,7 @@ func TestMemtableLifecycle(t *testing.T) {
 	var flushed []MemtableEntry
 	var wg sync.WaitGroup
 
-	factory := NewFactory("skiplist", 3, 1<<20, config.NewDefaultConfig().Memtable)
+	factory := NewFactory(config.NewDefaultConfig().Memtable)
 
 	wg.Add(1)
 

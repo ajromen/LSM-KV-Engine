@@ -19,11 +19,12 @@ const (
 	DefaultWalSegmentSize = 1 * 1024 * 1024
 
 	//memtable
-	MemtableType              = "hashmap"
-	DefaultMemtableMaxEntries = 1000
-	DefaultMemtableInstances  = 5
-	DefaultSkipListMaxLevel   = 10
-	DefaultBTreeMinimumDegree = 8
+	MemtableType                = "hashmap"
+	DefaultMemtableMaxEntries   = 1000
+	DefaultMemtableMaxSizeBytes = 1 << 20
+	DefaultMemtableInstances    = 5
+	DefaultSkipListMaxLevel     = 10
+	DefaultBTreeMinimumDegree   = 8
 
 	//SSTable
 	DefaultSSTableBlockSize           = 160
@@ -51,9 +52,10 @@ func NewDefaultConfig() *Config {
 			WALSegmentSize: DefaultWalSegmentSize,
 		},
 		Memtable: MemtableConfig{
-			MemtableType:    MemtableType,
-			MemtableMaxSize: DefaultMemtableMaxEntries,
-			Instances:       DefaultMemtableInstances,
+			MemtableType:         MemtableType,
+			MemtableMaxEntries:   DefaultMemtableMaxEntries,
+			MemtableMaxSizeBytes: DefaultMemtableMaxSizeBytes,
+			Instances:            DefaultMemtableInstances,
 			SkipListConfig: SkipListConfig{
 				MaxLevel: DefaultSkipListMaxLevel,
 			},

@@ -31,7 +31,7 @@ func NewEngine(flags *cli.FLags) (*Engine, error) {
 		return nil, err
 	}
 	sstableFactory := sstable.NewSSTableFactory(dataDir, cfg)
-	factory := memtable.NewFactory("skiplist", 10, 1<<20, cfg.Memtable)
+	factory := memtable.NewFactory(cfg.Memtable)
 	flushHandler := func(entries []memtable.MemtableEntry) {
 		if err := sstableFactory.FlushToSSTable(entries); err != nil {
 			return
