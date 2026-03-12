@@ -122,13 +122,15 @@ type IndexBlock struct {
 // NewIndexBlock CREATES AN EMPTY INDEX BLOCK WITH PREALLOCATED CAPACITY -> IMPORTANT: 256 != INDEX-BLOCK-SIZE
 func NewIndexBlock() *IndexBlock {
 	return &IndexBlock{
-		Entries: make([]IndexEntry, 0, 256),
+		Entries:  make([]IndexEntry, 0, 256),
+		RealSize: 4,
 	}
 }
 
 // AddEntry APPENDS AN INDEX ENTRY TO THE BLOCK
 func (block *IndexBlock) AddEntry(entry IndexEntry) {
 	block.Entries = append(block.Entries, entry)
+	block.RealSize += uint32(entry.EncodedSize())
 }
 
 // EncodeIndexBlock SERIALIZES THE INDEX BLOCK

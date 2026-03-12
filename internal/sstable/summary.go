@@ -95,7 +95,7 @@ func (s *SummarySegment) Encode() []byte {
 }
 
 func DecodeSummarySegment(buf []byte) (*SummarySegment, error) {
-	if len(buf) < 20 {
+	if len(buf) < 4 {
 		return nil, errors.New("buffer too small")
 	}
 

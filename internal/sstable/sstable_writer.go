@@ -18,19 +18,20 @@ type SSTableWriter struct {
 	filePath          string               // file path where sstable is written (base path if multi file format)
 	dataBlockBuilder  *DataBlockBuilder    // data block builder for building data block from records being written into sstable
 	indexSegment      *IndexSegment        // index segment of sstable : references data blocks
-	summarySegment    *SummarySegment      // summary segment of sstable : references index blocks
-	filterSegment     *FilterSegment       // filter segment of sstable
-	merkleTree        *MerkleTree          // merkle tree of sstable
-	footer            *Footer              // footer of sstable
-	currentBlockIndex uint32               // tracks current data block index
-	recordCount       uint64               // tracks number of records
-	minTimestamp      utils.Uint128        // min timestamp (newest record)
-	maxTimestamp      utils.Uint128        // max timestamp (oldest record)
-	minKeyLength      uint32               // smallest key by length
-	maxKeyLength      uint32               // largest key by length
-	minKey            []byte               // smallest key in sorting order
-	maxKey            []byte               // largest ket in sorting order
-	firstRecord       bool                 // whether it is first record
+	currentIndexBlock *IndexBlock
+	summarySegment    *SummarySegment // summary segment of sstable : references index blocks
+	filterSegment     *FilterSegment  // filter segment of sstable
+	merkleTree        *MerkleTree     // merkle tree of sstable
+	footer            *Footer         // footer of sstable
+	currentBlockIndex uint32          // tracks current data block index
+	recordCount       uint64          // tracks number of records
+	minTimestamp      utils.Uint128   // min timestamp (newest record)
+	maxTimestamp      utils.Uint128   // max timestamp (oldest record)
+	minKeyLength      uint32          // smallest key by length
+	maxKeyLength      uint32          // largest key by length
+	minKey            []byte          // smallest key in sorting order
+	maxKey            []byte          // largest ket in sorting order
+	firstRecord       bool            // whether it is first record
 }
 
 func NewSSTableWriter(filePath string, blockManager *block.BlockManager, cfg *config.Config, expectedElements int) (*SSTableWriter, error) {
@@ -53,6 +54,7 @@ func NewSSTableWriter(filePath string, blockManager *block.BlockManager, cfg *co
 		filePath:          filePath,
 		dataBlockBuilder:  NewDataBlockBuilder(1, cfg.SSTable.DataSegment.RestartInterval, blockManager.BlockSize()),
 		indexSegment:      NewIndexSegment(uint64(blockManager.BlockSize())),
+		currentIndexBlock: NewIndexBlock(),
 		summarySegment:    NewSummarySegment(1),
 		filterSegment:     filterSegment,
 		merkleTree:        NewMerkleTree(),
@@ -148,9 +150,11 @@ func (sw *SSTableWriter) flushDataBlock() error {
 	sw.merkleTree.AddLeaf(blockHash)
 
 	// step 4
-	indexBlock := NewIndexBlock()
-	indexBlock.AddFromDataBlock(sw.dataBlockBuilder, sw.currentBlockIndex)
-	sw.indexSegment.AddBlock(indexBlock)
+	sw.currentIndexBlock.AddFromDataBlock(sw.dataBlockBuilder, sw.currentBlockIndex)
+	if sw.currentIndexBlock.RealSize >= uint32(sw.config.IndexSegment.IndexBlockSize) {
+		sw.indexSegment.AddBlock(sw.currentIndexBlock)
+		sw.currentIndexBlock = NewIndexBlock()
+	}
 
 	// step 5
 	sw.dataBlockBuilder.Reset()
@@ -169,11 +173,15 @@ func (sw *SSTableWriter) flushDataBlock() error {
 // 7. Write metadata (merkle tree) segment on disk
 // 8. Write footer and sync storage
 func (w *SSTableWriter) Finalize() error {
+	// add remaining unfinished index block
 	// step 1
 	if w.dataBlockBuilder.RecordCount() > 0 {
 		if err := w.flushDataBlock(); err != nil {
 			return err
 		}
+	}
+	if len(w.currentIndexBlock.Entries) > 0 {
+		w.indexSegment.AddBlock(w.currentIndexBlock)
 	}
 
 	// step 2
@@ -207,9 +215,12 @@ func (w *SSTableWriter) Finalize() error {
 
 	// step 5
 	var indexOffsets []uint64
-	totalIndexSize := uint64(0)
+	// step 5 - write index blocks to disk and compute proper footer offsets
 	if len(w.indexSegment.Blocks) > 0 {
 		indexOffsets = make([]uint64, len(w.indexSegment.Blocks))
+		var firstOffset uint64
+		var lastOffsetPlusSize uint64
+
 		for i, indexBlock := range w.indexSegment.Blocks {
 			blockData := indexBlock.EncodeIndexBlock(config.DefaultIndexBlockSize)
 			offset, size, err := w.storage.WriteSegment(config.SegmentIndex, blockData)
@@ -217,12 +228,15 @@ func (w *SSTableWriter) Finalize() error {
 				return err
 			}
 			indexOffsets[i] = offset
+
 			if i == 0 {
-				w.footer.IndexHandler.Offset = offset
+				firstOffset = offset
 			}
-			totalIndexSize += uint64(size)
+			lastOffsetPlusSize = offset + uint64(size)
 		}
-		w.footer.IndexHandler.Size = uint32(totalIndexSize)
+
+		w.footer.IndexHandler.Offset = firstOffset
+		w.footer.IndexHandler.Size = uint32(lastOffsetPlusSize - firstOffset)
 	} else {
 		w.footer.IndexHandler.Offset = 0
 		w.footer.IndexHandler.Size = 0

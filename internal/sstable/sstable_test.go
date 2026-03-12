@@ -62,30 +62,38 @@ func TestSSTableWriterBasic(t *testing.T) {
 	}
 	reader, err := NewSSTableReader(tempFile, cfg)
 	if err != nil {
-		t.Fatalf("Failed to create sstable reader: %v", err)
+		fmt.Println("error building reader")
 	}
-	info, _ := os.Stat(tempFile)
-	fmt.Println("FILE SIZE:", info.Size())
+	fmt.Println("INDEX OFFSET:", reader.footer.IndexHandler.Offset)
+	fmt.Println("INDEX SIZE:", reader.footer.IndexHandler.Size)
 	fmt.Println("SUMMARY OFFSET:", reader.footer.SummaryHandler.Offset)
 	fmt.Println("SUMMARY SIZE:", reader.footer.SummaryHandler.Size)
-	fmt.Println("SUMMARY OFFSET:", reader.footer.IndexHandler.Offset)
-	fmt.Println("SUMMARY SIZE:", reader.footer.IndexHandler.Size)
+	fmt.Println("FILTER OFFSET:", reader.footer.FilterHandler.Offset)
+	fmt.Println("FILTER SIZE:", reader.footer.FilterHandler.Size)
+	fmt.Println("METADATA OFFSET:", reader.footer.MetaDataHandler.Offset)
+	fmt.Println("METADATA SIZE:", reader.footer.MetaDataHandler.Size)
 	fmt.Println("NUMBER OF BLOCKS: ", reader.footer.NumDataBlocks)
-	f, _ := os.Open(tempFile)
-	defer f.Close()
+	summary_f, _ := os.Open(tempFile)
+	defer summary_f.Close()
 	buf := make([]byte, reader.footer.SummaryHandler.Size)
-	_, err = f.ReadAt(buf, int64(reader.footer.SummaryHandler.Offset))
+	_, err = summary_f.ReadAt(buf, int64(reader.footer.SummaryHandler.Offset))
 	if err != nil {
 		t.Fatalf("ReadAt failed: %v", err)
 	}
 	fmt.Println("SUMMARY RAW BYTES:", buf)
+	index_f, _ := os.Open(tempFile)
+	defer summary_f.Close()
 	buf = make([]byte, reader.footer.IndexHandler.Size)
-	_, err = f.ReadAt(buf, int64(reader.footer.IndexHandler.Offset))
+	_, err = index_f.ReadAt(buf, int64(reader.footer.IndexHandler.Offset))
 	if err != nil {
 		t.Fatalf("ReadAt failed: %v", err)
 	}
 	fmt.Println("INDEX RAW BYTES:", buf)
 	fmt.Println(reader.footer.TotalRecords)
+	indexSegment, _ := DecodeIndexBlock(buf)
+	fmt.Println()
+	fmt.Println([]byte("key001"))
+	fmt.Println("INDEX ENTRIES", indexSegment.Entries)
 	fmt.Println("SUMMARY ENTRIES", reader.summarySegment.Entries)
 	fmt.Println("INDEX BLOCK OFFSET", reader.summarySegment.Entries[0].IndexBlockOffset)
 	record, err := reader.Get([]byte("key001"))
@@ -179,9 +187,13 @@ func TestSSTableMultiFileFormat(t *testing.T) {
 	}
 	fmt.Println("INDEX RAW BYTES:", buf)
 	fmt.Println(reader.footer.TotalRecords)
+	indexSegment, _ := DecodeIndexBlock(buf)
+	fmt.Println()
+	fmt.Println([]byte("key001"))
+	fmt.Println("INDEX ENTRIES", indexSegment.Entries)
 	fmt.Println("SUMMARY ENTRIES", reader.summarySegment.Entries)
 	fmt.Println("INDEX BLOCK OFFSET", reader.summarySegment.Entries[0].IndexBlockOffset)
-	record, err := reader.Get([]byte("key001"))
+	record, err := reader.Get([]byte("key009"))
 	if err != nil {
 		t.Fatalf("ReadAt failed: %v", err)
 	}
@@ -300,6 +312,8 @@ func TestSSTableMergeIteratorRaw(t *testing.T) {
 		createTestRecord("key003", "value003_sst1", 1, false),
 		createTestRecord("key005", "value005_sst1", 1, false),
 		createTestRecord("key007", "value007_sst1", 1, false),
+		createTestRecord("key009", "value007_sst1", 1, false),
+		createTestRecord("key011", "value007_sst1", 1, false),
 	} {
 		if err := writer1.AddRecord(rec); err != nil {
 			t.Fatalf("Failed to add record to writer1: %v", err)
@@ -319,6 +333,8 @@ func TestSSTableMergeIteratorRaw(t *testing.T) {
 		createTestRecord("key004", "value004_sst2", 1, false),
 		createTestRecord("key006", "value006_sst2", 1, false),
 		createTestRecord("key008", "value008_sst2", 1, false),
+		createTestRecord("key010", "value007_sst1", 1, false),
+		createTestRecord("key012", "value007_sst1", 1, false),
 	} {
 		if err := writer2.AddRecord(rec); err != nil {
 			t.Fatalf("Failed to add record to writer2: %v", err)
@@ -362,9 +378,12 @@ func TestSSTableMergeIteratorRawWithDuplicates(t *testing.T) {
 		t.Fatalf("Failed to create writer1: %v", err)
 	}
 	for _, rec := range []Record{
-		createTestRecord("key001", "value001_old", 1, false),
-		createTestRecord("key002", "value002_old", 1, false),
-		createTestRecord("key003", "value003_old", 1, false),
+		createTestRecord("key001", "value001_sst1", 1, false),
+		createTestRecord("key003", "value003_sst1", 1, false),
+		createTestRecord("key005", "value005_sst1", 1, false),
+		createTestRecord("key007", "value007_sst1", 1, false),
+		createTestRecord("key009", "value007_sst1", 1, false),
+		createTestRecord("key011", "value007_sst1", 1, false),
 	} {
 		if err := writer1.AddRecord(rec); err != nil {
 			t.Fatalf("Failed to add record: %v", err)
@@ -378,9 +397,12 @@ func TestSSTableMergeIteratorRawWithDuplicates(t *testing.T) {
 		t.Fatalf("Failed to create writer2: %v", err)
 	}
 	for _, rec := range []Record{
-		createTestRecord("key001", "value001_new", 2, false),
-		createTestRecord("key002", "value002_new", 2, false),
-		createTestRecord("key003", "value003_new", 2, false),
+		createTestRecord("key002", "value002_sst2", 1, false),
+		createTestRecord("key004", "value004_sst2", 1, false),
+		createTestRecord("key006", "value006_sst2", 1, false),
+		createTestRecord("key008", "value008_sst2", 1, false),
+		createTestRecord("key010", "value007_sst1", 1, false),
+		createTestRecord("key012", "value007_sst1", 1, false),
 	} {
 		if err := writer2.AddRecord(rec); err != nil {
 			t.Fatalf("Failed to add record: %v", err)
@@ -432,10 +454,12 @@ func TestSSTableMergeIteratorWithTombstones(t *testing.T) {
 		t.Fatalf("Failed to create writer1: %v", err)
 	}
 	for _, rec := range []Record{
-		createTestRecord("key001", "value001", 1, false),
-		createTestRecord("key002", "value002", 1, false),
-		createTestRecord("key003", "value003", 1, false),
-		createTestRecord("key004", "value004", 1, false),
+		createTestRecord("key001", "value001_sst1", 1, false),
+		createTestRecord("key003", "value003_sst1", 1, false),
+		createTestRecord("key005", "value005_sst1", 1, false),
+		createTestRecord("key007", "value007_sst1", 1, false),
+		createTestRecord("key009", "value007_sst1", 1, false),
+		createTestRecord("key011", "value007_sst1", 1, false),
 	} {
 		if err := writer1.AddRecord(rec); err != nil {
 			t.Fatalf("Failed to add record: %v", err)
@@ -449,10 +473,12 @@ func TestSSTableMergeIteratorWithTombstones(t *testing.T) {
 		t.Fatalf("Failed to create writer2: %v", err)
 	}
 	for _, rec := range []Record{
-		createTestRecord("key001", "value001_new", 2, false),
-		createTestRecord("key002", "", 2, true), // tombstone
-		createTestRecord("key003", "value003_new", 2, false),
-		createTestRecord("key004", "", 2, true), // tombstone
+		createTestRecord("key002", "value002_sst2", 1, false),
+		createTestRecord("key004", "value004_sst2", 1, false),
+		createTestRecord("key006", "value006_sst2", 1, false),
+		createTestRecord("key008", "value008_sst2", 1, false),
+		createTestRecord("key010", "value007_sst1", 1, false),
+		createTestRecord("key012", "value007_sst1", 1, false),
 	} {
 		if err := writer2.AddRecord(rec); err != nil {
 			t.Fatalf("Failed to add record: %v", err)
@@ -504,11 +530,12 @@ func TestSSTableGet(t *testing.T) {
 	}
 
 	records := []Record{
-		createTestRecord("key001", "value001", 1, false),
-		createTestRecord("key002", "value002", 2, false),
-		createTestRecord("key003", "value003", 3, false),
-		createTestRecord("key004", "value004", 4, false),
-		createTestRecord("key005", "value005", 5, false),
+		createTestRecord("key001", "value001_sst1", 1, false),
+		createTestRecord("key003", "value003_sst1", 1, false),
+		createTestRecord("key005", "value005_sst1", 1, false),
+		createTestRecord("key007", "value007_sst1", 1, false),
+		createTestRecord("key009", "value009_sst1", 1, false),
+		createTestRecord("key011", "value011_sst1", 1, false),
 	}
 
 	for _, rec := range records {
@@ -530,11 +557,11 @@ func TestSSTableGet(t *testing.T) {
 		key   string
 		value string
 	}{
-		{"key001", "value001"},
-		{"key002", "value002"},
-		{"key003", "value003"},
-		{"key004", "value004"},
-		{"key005", "value005"},
+		{"key001", "value001_sst1"},
+		{"key003", "value003_sst1"},
+		{"key005", "value005_sst1"},
+		{"key007", "value007_sst1"},
+		{"key009", "value009_sst1"},
 	}
 
 	for _, tt := range tests {

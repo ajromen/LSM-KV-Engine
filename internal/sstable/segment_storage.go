@@ -43,26 +43,41 @@ func OpenSingleFileStorage(filePath string) (*SingleFileStorage, error) {
 
 // WriteSegment APPENDS SEGMENT TO A FILE AND RETURNS ITS OFFSET + SIZE
 func (s *SingleFileStorage) WriteSegment(segType config.SegmentType, data []byte) (uint64, uint32, error) {
-	offset := s.offset
 	if (segType == config.SegmentData || segType == config.SegmentIndex) && s.blockManager != nil {
-		if len(data) < s.blockManager.BlockSize() {
-			padding := make([]byte, s.blockManager.BlockSize()-len(data))
-			data = append(data, padding...)
+		blockSize := uint64(s.blockManager.BlockSize())
+		remainder := s.offset % blockSize
+		if remainder != 0 {
+			padding := make([]byte, blockSize-remainder)
+			if _, err := s.file.Seek(int64(s.offset), io.SeekStart); err != nil {
+				return 0, 0, err
+			}
+			if _, err := s.file.Write(padding); err != nil {
+				return 0, 0, err
+			}
+			s.offset += uint64(len(padding))
 		}
+		if len(data) < s.blockManager.BlockSize() {
+			pad := make([]byte, s.blockManager.BlockSize()-len(data))
+			data = append(data, pad...)
+		}
+		offset := s.offset
 		blockKey := block.BlockKey{
 			FilePath: s.file.Name(),
-			Offset:   uint32(s.offset / uint64(s.blockManager.BlockSize())),
+			Offset:   uint32(s.offset / blockSize),
 		}
 		if err := s.blockManager.Write(blockKey, data); err != nil {
 			return 0, 0, err
 		}
-		if _, err := s.file.Seek(int64(len(data)), io.SeekCurrent); err != nil {
+		s.offset += uint64(len(data))
+		if _, err := s.file.Seek(int64(s.offset), io.SeekStart); err != nil {
 			return 0, 0, err
 		}
-		s.offset += uint64(len(data))
 		return offset, uint32(len(data)), nil
 	}
-
+	if _, err := s.file.Seek(int64(s.offset), io.SeekStart); err != nil {
+		return 0, 0, err
+	}
+	offset := s.offset
 	n, err := s.file.Write(data)
 	if err != nil {
 		return 0, 0, err
@@ -73,21 +88,28 @@ func (s *SingleFileStorage) WriteSegment(segType config.SegmentType, data []byte
 
 // ReadSegment READS SEGMENT FROM A FILE (OFFSET AND SIZE ARE FORWARDED FROM FOOTER)
 func (s *SingleFileStorage) ReadSegment(segType config.SegmentType, offset uint64, size uint32) ([]byte, error) {
+	if (segType == config.SegmentData || segType == config.SegmentIndex) && s.blockManager != nil {
+		blockSize := uint64(s.blockManager.BlockSize())
+		blockKey := block.BlockKey{
+			FilePath: s.file.Name(),
+			Offset:   uint32(offset / blockSize),
+		}
+		return s.blockManager.Read(blockKey)
+	}
 	data := make([]byte, size)
 	nTotal := 0
-	_, err := s.file.Seek(int64(offset), io.SeekStart)
-	if err != nil {
+	if _, err := s.file.Seek(int64(offset), io.SeekStart); err != nil {
 		return nil, err
 	}
 	for nTotal < int(size) {
 		n, err := s.file.Read(data[nTotal:])
+		nTotal += n
+		if err == io.EOF {
+			break
+		}
 		if err != nil {
 			return nil, err
 		}
-		if n == 0 {
-			break
-		}
-		nTotal += n
 	}
 	if nTotal != int(size) {
 		return nil, fmt.Errorf("expected to read %d bytes, got %d", size, nTotal)
@@ -219,25 +241,36 @@ func (m *MultiFileStorage) WriteSegment(segType config.SegmentType, data []byte)
 
 // ReadSegment READS SEGMENT FROM A FILE CORRESPONDING TO SEGMENT TYPE (OFFSET AND SIZE ARE FORWARDED FROM FOOTER)
 func (m *MultiFileStorage) ReadSegment(segType config.SegmentType, offset uint64, size uint32) ([]byte, error) {
+	if (segType == config.SegmentData || segType == config.SegmentIndex) && m.blockManager != nil {
+		file, err := m.getOrOpenFile(segType)
+		if err != nil {
+			return nil, err
+		}
+		blockSize := uint64(m.blockManager.BlockSize())
+		blockKey := block.BlockKey{
+			FilePath: file.Name(),
+			Offset:   uint32(offset / blockSize),
+		}
+		return m.blockManager.Read(blockKey)
+	}
 	file, err := m.getOrOpenFile(segType)
 	if err != nil {
 		return nil, err
 	}
 	data := make([]byte, size)
 	nTotal := 0
-	_, err = file.Seek(int64(offset), io.SeekStart)
-	if err != nil {
+	if _, err = file.Seek(int64(offset), io.SeekStart); err != nil {
 		return nil, err
 	}
 	for nTotal < int(size) {
 		n, err := file.Read(data[nTotal:])
+		nTotal += n
+		if err == io.EOF {
+			break
+		}
 		if err != nil {
 			return nil, err
 		}
-		if n == 0 {
-			break
-		}
-		nTotal += n
 	}
 	if nTotal != int(size) {
 		return nil, fmt.Errorf("expected to read %d bytes, got %d", size, nTotal)

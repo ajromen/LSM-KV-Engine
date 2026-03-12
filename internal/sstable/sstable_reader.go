@@ -9,7 +9,6 @@ package sstable
 import (
 	"bytes"
 	"errors"
-	"os"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/block"
 	"github.com/ajromen/LSM-KV-Engine/internal/config"
@@ -65,12 +64,10 @@ func NewSSTableReader(filePath string, cfg *config.Config) (*SSTableReader, erro
 		footer:       footer,
 		config:       cfg,
 	}
-
 	// load summary into RAM
 	if err := reader.loadSummary(); err != nil {
 		return nil, err
 	}
-
 	// load filter into RAM
 	if err := reader.loadFilter(); err != nil {
 		reader.filterSegment = nil
@@ -131,32 +128,25 @@ func (r *SSTableReader) loadMerkleTree() error {
 
 // loadIndexBlock reads a specific index block from index segment -> NEEDS TO BE FIXED!
 func (r *SSTableReader) loadIndexBlock(blockNumber int) (*IndexBlock, error) {
-	if r.footer == nil {
-		return nil, errors.New("no footer")
-	}
+
 	indexBlockSize := r.config.SSTable.IndexSegment.IndexBlockSize
-	offset := blockNumber
-	var file *os.File
-	switch s := r.storage.(type) {
-	case *SingleFileStorage:
-		file = s.File()
-	case *MultiFileStorage:
-		var err error
-		file, err = s.getOrOpenFile(config.SegmentIndex)
-		if err != nil {
-			return nil, err
-		}
-	default:
-		return nil, errors.New("unsupported storage type")
+
+	offset := r.footer.IndexHandler.Offset +
+		uint64(blockNumber)*uint64(indexBlockSize)
+	data, err := r.storage.ReadSegment(
+		config.SegmentIndex,
+		offset,
+		uint32(indexBlockSize),
+	)
+	if err != nil {
+		return nil, err
 	}
-	data := make([]byte, indexBlockSize-1)
-	if _, err := file.ReadAt(data, int64(offset)); err != nil {
-		return nil, fmt.Errorf("ReadAt failed at offset %d: %w", offset, err)
-	}
+
 	block, err := DecodeIndexBlock(data)
 	if err != nil {
 		return nil, err
 	}
+
 	return block, nil
 }
 
@@ -181,7 +171,7 @@ func (r *SSTableReader) Get(key []byte) (*Record, error) {
 	}
 
 	// step 3.1
-	indexBlock, err := r.loadIndexBlock(int(r.footer.IndexHandler.Offset) + indexBlockNum*r.config.SSTable.IndexSegment.IndexBlockSize - indexBlockNum)
+	indexBlock, err := r.loadIndexBlock(indexBlockNum)
 	if err != nil {
 		return nil, err
 	}
