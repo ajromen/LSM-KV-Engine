@@ -6,7 +6,9 @@ import (
 	"errors"
 	"hash/crc32"
 
+	"github.com/ajromen/LSM-KV-Engine/internal/data_structures"
 	"github.com/ajromen/LSM-KV-Engine/internal/encoders"
+	"github.com/ajromen/LSM-KV-Engine/internal/iterator"
 	"github.com/ajromen/LSM-KV-Engine/internal/utils"
 )
 
@@ -80,13 +82,13 @@ func AppendUvarint128ToSlice2(buf []byte, v utils.Uint128) []byte {
 // APPENDS A SINGLE RECORD TO THE CURRENT BLOCK -> RETURNS FALSE IF THE RECORD DOES NOT FIT IN THE REMAINING BLOCK CAPACITY
 
 func (builder *DataBlockBuilder) AddRecord(record Record) bool {
-	// if it is the first record store its key as first key for block index
 	if builder.recordCount == 0 {
 		builder.firstKey = append([]byte(nil), record.Key...)
 	}
-	// rough size estimation to avoid overflow
-	estimatedSize := len(record.Key) + len(record.Value) + 20
-	if len(builder.data)+estimatedSize > cap(builder.data) && builder.recordCount > 0 {
+	estimatedSize := len(record.Key)*2 + len(record.Value) + 32
+	reserved := 12 + (builder.recordCount/builder.restartInterval+1)*4
+
+	if len(builder.data)+estimatedSize+reserved > cap(builder.data) && builder.recordCount > 0 {
 		return false
 	}
 	keyOffset := uint32(len(builder.data))
@@ -127,10 +129,10 @@ func (builder *DataBlockBuilder) Finish(blockSize int) ([]byte, error) {
 		pos += 4
 	}
 	// append data size
-	binary.LittleEndian.PutUint32(block[pos:], uint32(len(data)))
+	binary.LittleEndian.PutUint32(block[blockSize-12:], uint32(len(data)))
 	pos += 4
 	// append restart count
-	binary.LittleEndian.PutUint32(block[pos:], restartCount)
+	binary.LittleEndian.PutUint32(block[blockSize-8:], restartCount)
 	pos += 4
 	// append CRC
 	crc := crc32.ChecksumIEEE(block[:blockSize-4])
@@ -170,32 +172,25 @@ func NewDataBlockReader(block []byte, restartInterval int, encodingType byte) (*
 	if len(block) < 12 {
 		return nil, errors.New("block too small")
 	}
+
 	// verify CRC
 	expectedCRC := binary.LittleEndian.Uint32(block[len(block)-4:])
 	actualCRC := crc32.ChecksumIEEE(block[:len(block)-4])
 	if expectedCRC != actualCRC {
 		return nil, errors.New("CRC mismatch")
 	}
-	// Locate metadata (skip padding)
-	endData := len(block) - 5
-	for endData > 0 && block[endData-4] == 0 {
-		endData--
-	}
-	//read number of restarts in restart array
-	restartCount := binary.LittleEndian.Uint32(block[endData-4 : endData])
-	// read the size of actual data
-	dataSize := binary.LittleEndian.Uint32(block[endData-8 : endData-4])
-	// read restart array
+
+	dataSize := binary.LittleEndian.Uint32(block[len(block)-12 : len(block)-8])
+	restartCount := binary.LittleEndian.Uint32(block[len(block)-8 : len(block)-4])
+
 	restartArray := make([]uint32, restartCount)
-	startRestart := int(dataSize)
 	for i := 0; i < int(restartCount); i++ {
-		offset := startRestart + i*4
+		offset := int(dataSize) + i*4
 		restartArray[i] = binary.LittleEndian.Uint32(block[offset : offset+4])
 	}
-	// take actual data from block
-	data := block[:dataSize]
+
 	return &DataBlockReader{
-		data:         data,
+		data:         block[:dataSize],
 		decoder:      encoders.NewEncoder(encodingType, restartInterval),
 		restartArray: restartArray,
 		pos:          0,
@@ -285,366 +280,430 @@ func (r *DataBlockReader) HasNext() bool {
 	return r.pos < r.dataSize
 }
 
-// DATA BLOCK ITERATOR PROVIDES SEQUENTIAL AND SEEK BASED ITERATION OVER RECORDS INSIDE A SINGLE SSTABLE DATA BLOCK
-type DataBlockIterator struct {
-	reader  *DataBlockReader // underlying block reader
-	current *Record          // record block iterator is currently pointing to
-	valid   bool             // is iterator in valid state
+type DataBlockIteratorRaw struct {
+	reader  *DataBlockReader
+	current *Record
+	valid   bool
 }
 
-func (i *DataBlockIterator) Reader() *DataBlockReader {
-	return i.reader
-}
-
-func (i *DataBlockIterator) Current() *Record {
-	return i.current
-}
-
-func (i *DataBlockIterator) Valid() bool {
-	return i.valid
-}
-
-func (i *DataBlockIterator) Close() error {
-	return nil
-}
-
-// CREATES A NEW ITERATOR OVER A RAW DATA BLOCK
-
-func NewDataBlockIterator(block []byte, restartInterval int, encodingType byte) (*DataBlockIterator, error) {
+func NewDataBlockIteratorRaw(block []byte, restartInterval int, encodingType byte) (*DataBlockIteratorRaw, error) {
 	reader, err := NewDataBlockReader(block, restartInterval, encodingType)
 	if err != nil {
 		return nil, err
 	}
-	// IMPORTANT : ITERATOR STATIS IN INVALID STATE UNTIL REWIND() OR SEEK() IS CALLED -> best practice iterator := NewIterator -> iterator.Rewind()
-	iterator := &DataBlockIterator{
-		reader:  reader,
-		current: nil,
-		valid:   false,
-	}
-	return iterator, nil
+	it := &DataBlockIteratorRaw{reader: reader}
+	return it, nil
 }
 
-// POSITIONS THE ITERATOR AT THE FIRST RECOND IN THE BLOCK
+func (it *DataBlockIteratorRaw) Valid() bool { return it.valid }
 
-func (i *DataBlockIterator) Rewind() error {
-	if err := i.reader.SeekToRestart(0); err != nil {
-		i.valid = false
-		return err
+func (it *DataBlockIteratorRaw) SeekToFirst() {
+	if err := it.reader.SeekToRestart(0); err != nil {
+		it.valid = false
+		return
 	}
-	record, err := i.reader.ReadRecord()
-	if err != nil {
-		i.valid = false
-		return err
-	}
-	i.current = record
-	i.valid = true
-	return nil
+	it.readNext()
 }
 
-// ADVANCES THE ITERATOR TO THE NEXT RECORD IN THE BLOCK
-
-func (i *DataBlockIterator) Next() error {
-	if !i.valid {
-		return nil
+func (it *DataBlockIteratorRaw) SeekToLast() {
+	if err := it.reader.SeekToRestart(0); err != nil {
+		it.valid = false
+		return
 	}
-	if !i.reader.HasNext() {
-		i.valid = false
-		return nil
+	var last *Record
+	for it.reader.HasNext() {
+		rec, err := it.reader.ReadRecord()
+		if err != nil {
+			break
+		}
+		last = rec
 	}
-	record, err := i.reader.ReadRecord()
-	if err != nil {
-		i.valid = false
-		return err
+	if last == nil {
+		it.valid = false
+		return
 	}
-	i.current = record
-	i.valid = true
-	return nil
+	it.current = last
+	it.valid = true
 }
 
-// MOVES THE ITERATOR TO THE FIRST RECORD WITH KEY >= TARGET -> binary search over restart points, then scans linearly
-
-func (i *DataBlockIterator) Seek(target []byte) error {
-	restarts := i.reader.restartArray
-	left := 0
-	right := len(restarts) - 1
-	best := 0
+func (it *DataBlockIteratorRaw) Seek(target Record) {
+	restarts := it.reader.restartArray
+	left, right, best := 0, len(restarts)-1, 0
 	for left <= right {
 		mid := left + (right-left)/2
-		r := i.reader
-		err := r.SeekToRestart(mid)
-		if err != nil {
-			return err
+		if err := it.reader.SeekToRestart(mid); err != nil {
+			it.valid = false
+			return
 		}
-		record, err := i.reader.ReadRecord()
+		rec, err := it.reader.ReadRecord()
 		if err != nil {
-			i.valid = false
-			return err
+			it.valid = false
+			return
 		}
-		cmp := bytes.Compare(record.Key, target)
-		if cmp < 0 {
+		if bytes.Compare(rec.Key, target.Key) < 0 {
 			best = mid
 			left = mid + 1
 		} else {
 			right = mid - 1
 		}
 	}
-	err := i.reader.SeekToRestart(best)
-	if err != nil {
-		return err
+	if err := it.reader.SeekToRestart(best); err != nil {
+		it.valid = false
+		return
 	}
-	for i.reader.HasNext() {
-		record, err := i.reader.ReadRecord()
+	for it.reader.HasNext() {
+		rec, err := it.reader.ReadRecord()
 		if err != nil {
-			i.valid = false
-			return err
-		}
-		cmp := bytes.Compare(record.Key, target)
-		if cmp >= 0 {
-			i.current = record
-			i.valid = true
-			return nil
-		}
-	}
-	i.valid = false
-	return nil
-}
-
-func (i *DataBlockIterator) Key() []byte {
-	return i.current.Key
-}
-
-func (i *DataBlockIterator) Value() []byte {
-	return i.current.Value
-}
-
-func (i *DataBlockIterator) Timestamp() utils.Uint128 {
-	return i.current.Timestamp
-}
-
-func (i *DataBlockIterator) Tombstone() bool {
-	return i.current.Tombstone
-}
-
-// MERGE ITERATOR MERGES TWO SORTED DATABLOCKITERATORS INTO ONE LOGICAL SORTED STREAM
-type MergeIterator struct {
-	iterator1 *DataBlockIterator // first input iterator
-	iterator2 *DataBlockIterator // second input iterator
-	Current   *DataBlockIterator // iterator that currently holds the smallest key
-	valid     bool               // whether any iterator has valid state
-}
-
-func NewMergeIterator(iterator1, iterator2 *DataBlockIterator) *MergeIterator {
-	iterator := &MergeIterator{
-		iterator1: iterator1,
-		iterator2: iterator2,
-		valid:     iterator1.Valid() || iterator2.Valid(),
-	}
-	if iterator1 != nil && iterator1.Valid() {
-		iterator.valid = true
-	}
-	if iterator2 != nil && iterator2.Valid() {
-		iterator.valid = true
-	}
-	iterator.selectCurrent()
-	return iterator
-}
-
-// CHOOSES WHICH UNDELYING ITERATOR CURRENTLY POINTS TO THE SMALLEST KEY (OR NEWEST VERSION OF SAME KEY)
-
-func (iterator *MergeIterator) selectCurrent() {
-	if !iterator.iterator1.Valid() && !iterator.iterator2.Valid() {
-		iterator.valid = false
-		return
-	}
-	if !iterator.iterator1.Valid() {
-		iterator.Current = iterator.iterator2
-		return
-	}
-	if !iterator.iterator2.Valid() {
-		iterator.Current = iterator.iterator1
-		return
-	}
-	if iterator.iterator1 == nil || !iterator.iterator1.Valid() {
-		if iterator.iterator2 == nil || !iterator.iterator2.Valid() {
-			iterator.valid = false
+			it.valid = false
 			return
 		}
-		iterator.Current = iterator.iterator2
+		if bytes.Compare(rec.Key, target.Key) >= 0 {
+			it.current = rec
+			it.valid = true
+			return
+		}
+	}
+	it.valid = false
+}
+
+func (it *DataBlockIteratorRaw) Next() {
+	if !it.valid {
 		return
 	}
-	cmp := bytes.Compare(iterator.iterator1.Key(), iterator.iterator2.Key())
-	if cmp < 0 {
-		iterator.Current = iterator.iterator1
-	} else if cmp > 0 {
-		iterator.Current = iterator.iterator2
-	} else {
-		if utils.Uint128GE(iterator.iterator1.Timestamp(), iterator.iterator2.Timestamp()) {
-			iterator.Current = iterator.iterator1
-		} else {
-			iterator.Current = iterator.iterator2
-		}
-	}
+	it.readNext()
 }
 
-// MOVES THE MERGE ITERATOR FORWARD
+func (it *DataBlockIteratorRaw) Prev() {
+	if !it.valid || it.current == nil {
+		return
+	}
+	targetKey := it.current.Key
+	targetTS := it.current.Timestamp
 
-func (iterator *MergeIterator) Advance() error {
-	if !iterator.valid {
-		return nil
+	if err := it.reader.SeekToRestart(0); err != nil {
+		it.valid = false
+		return
 	}
-	if !iterator.iterator1.Valid() && !iterator.iterator2.Valid() {
-		iterator.valid = false
-		return nil
+	var prev *Record
+	for it.reader.HasNext() {
+		rec, err := it.reader.ReadRecord()
+		if err != nil {
+			break
+		}
+		cmp := bytes.Compare(rec.Key, targetKey)
+		if cmp < 0 {
+			prev = rec
+			continue
+		}
+		if cmp == 0 && utils.Uint128GE(targetTS, rec.Timestamp) {
+			prev = rec
+			continue
+		}
+		break
 	}
-	if !iterator.iterator1.Valid() {
-		if err := iterator.iterator2.Next(); err != nil {
-			return err
-		}
-	} else if !iterator.iterator2.Valid() {
-		if err := iterator.iterator1.Next(); err != nil {
-			return err
-		}
-	} else {
-		cmp := bytes.Compare(iterator.iterator1.Key(), iterator.iterator2.Key())
-		if cmp == 0 {
-			if err := iterator.iterator1.Next(); err != nil {
-				return err
-			}
-			if err := iterator.iterator2.Next(); err != nil {
-				return err
-			}
-		} else if iterator.Current == iterator.iterator1 {
-			if err := iterator.iterator1.Next(); err != nil {
-				return err
-			}
-		} else {
-			if err := iterator.iterator2.Next(); err != nil {
-				return err
-			}
-		}
+	if prev == nil {
+		it.valid = false
+		return
 	}
-	iterator.selectCurrent()
-	return nil
+	it.current = prev
+	it.valid = true
 }
 
-func (iterator *MergeIterator) Close() error {
-	err := iterator.iterator1.Close()
+func (it *DataBlockIteratorRaw) Key() Record { return *it.current }
+
+func (it *DataBlockIteratorRaw) Value() Record { return *it.current }
+
+func (it *DataBlockIteratorRaw) readNext() {
+	if !it.reader.HasNext() {
+		it.valid = false
+		return
+	}
+	rec, err := it.reader.ReadRecord()
 	if err != nil {
-		return err
+		it.valid = false
+		return
 	}
-	err = iterator.iterator2.Close()
+	it.current = rec
+	it.valid = true
+}
+
+type DataBlockIterator struct {
+	rawIterator *DataBlockIteratorRaw
+	current     *Record
+	valid       bool
+}
+
+func NewDataBlockIterator(block []byte, restartInterval int, encodingType byte) (*DataBlockIterator, error) {
+	raw, err := NewDataBlockIteratorRaw(block, restartInterval, encodingType)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	return nil
-}
-
-func (iterator *MergeIterator) Valid() bool {
-	return iterator.valid
-}
-
-func (iterator *MergeIterator) Next() error {
-	return iterator.Advance()
-}
-
-func (iterator *MergeIterator) Key() []byte {
-	if iterator.Current == nil {
-		return nil
+	it := &DataBlockIterator{
+		rawIterator: raw,
 	}
-	return iterator.Current.Key()
+	return it, nil
 }
 
-func (iterator *MergeIterator) Value() []byte {
-	return iterator.Current.Value()
+func (it *DataBlockIterator) Valid() bool { return it.valid }
+
+func (it *DataBlockIterator) SeekToFirst() {
+	it.rawIterator.SeekToFirst()
+	it.advance(nil)
 }
 
-func (iterator *MergeIterator) Timestamp() utils.Uint128 {
-	return iterator.Current.Timestamp()
+func (it *DataBlockIterator) SeekToLast() {
+	it.rawIterator.SeekToFirst()
+	var last *Record
+	var prevKey []byte
+	for it.rawIterator.Valid() {
+		rec := it.rawIterator.Key()
+		if !rec.Tombstone && !bytes.Equal(rec.Key, prevKey) {
+			cp := rec
+			last = &cp
+			prevKey = rec.Key
+		}
+		it.rawIterator.Next()
+	}
+	if last == nil {
+		it.valid = false
+		return
+	}
+	it.current = last
+	it.valid = true
 }
 
-func (iterator *MergeIterator) Tombstone() bool {
-	return iterator.Current.Tombstone()
+func (it *DataBlockIterator) Seek(target Record) {
+	it.rawIterator.Seek(target)
+	it.advance(nil)
 }
 
-type MultiMergeIterator struct {
-	structure MergeStructure
+func (it *DataBlockIterator) Next() {
+	if !it.valid {
+		return
+	}
+	prevKey := it.current.Key
+	it.rawIterator.Next()
+	it.advance(prevKey)
+}
+
+func (it *DataBlockIterator) Prev() {
+	panic("DataBlockIterator: Prev not implemented")
+}
+
+func (it *DataBlockIterator) Key() Record { return *it.current }
+
+func (it *DataBlockIterator) Value() Record { return *it.current }
+
+func (it *DataBlockIterator) advance(prevKey []byte) {
+	for it.rawIterator.Valid() {
+		rec := it.rawIterator.Key()
+		if prevKey != nil && bytes.Equal(rec.Key, prevKey) {
+			it.rawIterator.Next()
+			continue
+		}
+		if rec.Tombstone {
+			prevKey = rec.Key
+			it.rawIterator.Next()
+			continue
+		}
+		cp := rec
+		it.current = &cp
+		it.valid = true
+		return
+	}
+	it.current = nil
+	it.valid = false
+}
+
+func recordComparator(a, b Record) int {
+	if c := bytes.Compare(a.Key, b.Key); c != 0 {
+		return c
+	}
+	if utils.Uint128GE(a.Timestamp, b.Timestamp) && !tsEqual(a.Timestamp, b.Timestamp) {
+		return -1
+	}
+	if utils.Uint128GE(b.Timestamp, a.Timestamp) && !tsEqual(a.Timestamp, b.Timestamp) {
+		return 1
+	}
+	return 0
+}
+
+func tsEqual(a, b utils.Uint128) bool {
+	return a.Low == b.Low && a.High == b.High
+}
+
+type MergeIteratorRaw struct {
+	structure data_structures.MergeStructure[Record]
+	current   *Record
 	valid     bool
 }
 
-func NewMultiMergeIterator(iterators []*DataBlockIterator, mergeStructure byte) *MultiMergeIterator {
-	if len(iterators) == 0 {
-		return &MultiMergeIterator{valid: false}
+func NewMergeIteratorRaw(iters []*DataBlockIteratorRaw, mergeStructure byte) *MergeIteratorRaw {
+	if len(iters) == 0 {
+		return &MergeIteratorRaw{valid: false}
 	}
-	active := make([]*DataBlockIterator, 0, len(iterators))
-	for _, it := range iterators {
+	wrapped := make([]iterator.Iterator[Record], 0, len(iters))
+	for _, it := range iters {
 		if it != nil && it.Valid() {
-			active = append(active, it)
+			wrapped = append(wrapped, it)
 		}
 	}
-	if len(active) == 0 {
-		return &MultiMergeIterator{valid: false}
+	if len(wrapped) == 0 {
+		return &MergeIteratorRaw{valid: false}
 	}
-	structure := NewMergeStructure(mergeStructure, iterators)
-	winner := structure.Winner()
-	return &MultiMergeIterator{
-		structure: structure,
-		valid:     winner != nil && winner.Valid(),
-	}
+	structure := data_structures.NewMergeStructure(mergeStructure, wrapped, recordComparator)
+	m := &MergeIteratorRaw{structure: structure}
+	m.syncFromWinner()
+	return m
 }
 
-func (m *MultiMergeIterator) Valid() bool {
-	return m.valid
+func (m *MergeIteratorRaw) Valid() bool { return m.valid }
+
+func (m *MergeIteratorRaw) SeekToFirst() {
+	for _, it := range m.structure.Iterators() {
+		it.SeekToFirst()
+		m.structure.Update(it)
+	}
+	m.syncFromWinner()
 }
 
-func (m *MultiMergeIterator) Key() []byte {
+func (m *MergeIteratorRaw) SeekToLast() {
+	for _, it := range m.structure.Iterators() {
+		it.SeekToLast()
+		m.structure.Update(it)
+	}
+	m.syncFromWinner()
+}
+
+func (m *MergeIteratorRaw) Seek(target Record) {
+	for _, it := range m.structure.Iterators() {
+		it.Seek(target)
+		m.structure.Update(it)
+	}
+	m.syncFromWinner()
+}
+
+func (m *MergeIteratorRaw) Next() {
 	if !m.valid {
-		return nil
+		return
 	}
-	return m.structure.Winner().Key()
-}
-
-func (m *MultiMergeIterator) Value() []byte {
-	if !m.valid {
-		return nil
-	}
-	return m.structure.Winner().Value()
-}
-
-func (m *MultiMergeIterator) Timestamp() utils.Uint128 {
-	if !m.valid {
-		return utils.Uint128{}
-	}
-	return m.structure.Winner().Timestamp()
-}
-
-func (m *MultiMergeIterator) Tombstone() bool {
-	if !m.valid {
-		return false
-	}
-	return m.structure.Winner().Tombstone()
-}
-
-func (m *MultiMergeIterator) Next() error {
-	if !m.valid {
-		return nil
-	}
-	currentKey := append([]byte(nil), m.Key()...)
-	for {
-		winner := m.structure.Winner()
-		if winner == nil || !winner.Valid() {
-			break
-		}
-		if !bytes.Equal(winner.Key(), currentKey) {
-			break
-		}
-		m.structure.Update(winner)
-	}
-
 	winner := m.structure.Winner()
-	m.valid = winner != nil && winner.Valid()
-	return nil
+	if winner == nil {
+		m.valid = false
+		return
+	}
+	m.structure.Advance(winner)
+	m.syncFromWinner()
 }
 
-func (m *MultiMergeIterator) Close() error {
-	return nil
+func (m *MergeIteratorRaw) Prev() {
+	panic("MergeIteratorRaw: Prev not implemented")
+}
+
+func (m *MergeIteratorRaw) Key() Record   { return *m.current }
+func (m *MergeIteratorRaw) Value() Record { return *m.current }
+
+func (m *MergeIteratorRaw) syncFromWinner() {
+	winner := m.structure.Winner()
+	if winner == nil || !winner.Valid() {
+		m.current = nil
+		m.valid = false
+		return
+	}
+	rec := winner.Key()
+	m.current = &rec
+	m.valid = true
+}
+
+type MergeIterator struct {
+	raw     *MergeIteratorRaw
+	current *Record
+	valid   bool
+}
+
+func NewMergeIterator(iters []*DataBlockIteratorRaw, mergeStructure byte) *MergeIterator {
+	raw := NewMergeIteratorRaw(iters, mergeStructure)
+	m := &MergeIterator{raw: raw}
+	m.advance(nil)
+	return m
+}
+
+func (m *MergeIterator) Valid() bool { return m.valid }
+
+func (m *MergeIterator) SeekToFirst() {
+	m.raw.SeekToFirst()
+	m.advance(nil)
+}
+
+func (m *MergeIterator) SeekToLast() {
+	m.raw.SeekToFirst()
+	var last *Record
+	var prevKey []byte
+	for m.raw.Valid() {
+		rec := m.raw.Key()
+		if !rec.Tombstone && !bytes.Equal(rec.Key, prevKey) {
+			cp := rec
+			last = &cp
+			prevKey = rec.Key
+		}
+		m.skipCurrentKey()
+	}
+	if last == nil {
+		m.valid = false
+		return
+	}
+	m.current = last
+	m.valid = true
+}
+
+func (m *MergeIterator) Seek(target Record) {
+	m.raw.Seek(target)
+	m.advance(nil)
+}
+
+func (m *MergeIterator) Next() {
+	if !m.valid {
+		return
+	}
+	prevKey := m.current.Key
+	m.skipCurrentKey()
+	m.advance(prevKey)
+}
+
+func (m *MergeIterator) Prev() {
+	panic("MergeIterator: Prev not implemented")
+}
+
+func (m *MergeIterator) skipCurrentKey() {
+	if !m.raw.Valid() {
+		return
+	}
+	currentKey := append([]byte(nil), m.raw.Key().Key...)
+	for m.raw.Valid() && bytes.Equal(m.raw.Key().Key, currentKey) {
+		m.raw.Next()
+	}
+}
+
+func (m *MergeIterator) Key() Record   { return *m.current }
+func (m *MergeIterator) Value() Record { return *m.current }
+
+func (m *MergeIterator) advance(prevKey []byte) {
+	for m.raw.Valid() {
+		rec := m.raw.Key()
+		if prevKey != nil && bytes.Equal(rec.Key, prevKey) {
+			m.skipCurrentKey()
+			continue
+		}
+		if rec.Tombstone {
+			prevKey = append([]byte(nil), rec.Key...)
+			m.skipCurrentKey()
+			continue
+		}
+		cp := rec
+		m.current = &cp
+		m.valid = true
+		return
+	}
+	m.current = nil
+	m.valid = false
 }

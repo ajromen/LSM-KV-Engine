@@ -99,7 +99,11 @@ func TestFilterSegmentWriteReadFile(t *testing.T) {
 	defer os.Remove(tmpFile.Name())
 	defer tmpFile.Close()
 
-	n, err := segment.WriteToFile(tmpFile)
+	data, err := segment.Encode()
+	if err != nil {
+		t.Fatalf("encode failed: %v", err)
+	}
+	n, err := tmpFile.Write(data)
 	if err != nil {
 		t.Fatalf("write failed: %v", err)
 	}
@@ -107,9 +111,16 @@ func TestFilterSegmentWriteReadFile(t *testing.T) {
 		t.Fatalf("no bytes written")
 	}
 
-	readSegment, err := ReadFilterFromFile(tmpFile, 0, n)
-	if err != nil {
+	if _, err := tmpFile.Seek(0, 0); err != nil {
+		t.Fatalf("seek failed: %v", err)
+	}
+	readData := make([]byte, n)
+	if _, err := tmpFile.Read(readData); err != nil {
 		t.Fatalf("read failed: %v", err)
+	}
+	readSegment, err := DecodeFilterSegment(readData)
+	if err != nil {
+		t.Fatalf("decode failed: %v", err)
 	}
 
 	if !readSegment.Filter().MightContainString("apple") {

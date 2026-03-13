@@ -21,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 	"hash/crc32"
-	"os"
 )
 
 type SummaryEntry struct {
@@ -95,7 +94,7 @@ func (s *SummarySegment) Encode() []byte {
 }
 
 func DecodeSummarySegment(buf []byte) (*SummarySegment, error) {
-	if len(buf) < 20 {
+	if len(buf) < 4 {
 		return nil, errors.New("buffer too small")
 	}
 
@@ -285,26 +284,4 @@ func BuildSummaryFromIndex(
 	}
 
 	return summary
-}
-
-////////////////////////////////////////////////////////////
-// FILE IO
-////////////////////////////////////////////////////////////
-
-func (s *SummarySegment) WriteToFile(file *os.File) (int, error) {
-	data := s.Encode()
-	return file.Write(data)
-}
-
-func ReadSummaryFromFile(file *os.File, offset uint64, size int) (*SummarySegment, error) {
-	if _, err := file.Seek(int64(offset), 0); err != nil {
-		return nil, err
-	}
-
-	data := make([]byte, size)
-	if _, err := file.Read(data); err != nil {
-		return nil, err
-	}
-
-	return DecodeSummarySegment(data)
 }

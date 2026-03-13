@@ -7,11 +7,13 @@ import (
 
 // FLags should be pointers to allow nil value when flag is not explicitly provided
 type FLags struct {
-	ConfigPath      *string
-	Debug           *bool
-	MemtableMaxSize *int
-	//MemtableMaxSizeKb   *int
+	ConfigPath             *string
+	Debug                  *bool
+	MemtableMaxSize        *int
+	MemtableMaxSizeKb      *uint64
 	MemtableType           *string
+	Instances              *int
+	SSTableFormat          *string
 	BlockCacheMaxBlocks    *int
 	LSMCompactionAlgorithm *string
 	LSMMaxLayers           *int
@@ -21,8 +23,10 @@ func ParseFlags() *FLags {
 	var configPathOpt OptionalString
 	var debugOpt OptionalBool
 	var mtMaxSizeOpt OptionalInt
-	//var mtMaxSizeKbOpt OptionalInt
+	var mtMaxSizeKbOpt OptionalUInt64
+	var instancesOpt OptionalInt
 	var mtTypeOpt OptionalString
+	var sstFormatOpt OptionalString
 	var BlockCacheMaxBlocksOpt OptionalInt
 	var LSMCompactionAlgorithmOpt OptionalString
 	var LSMMaxLayersOpt OptionalInt
@@ -32,8 +36,10 @@ func ParseFlags() *FLags {
 	flagBool(&debugOpt, "debug", "Debug mode")
 	flagBool(&debugOpt, "d", "Debug mode")
 	flagInt(&mtMaxSizeOpt, "memtable-max-size", "Max memtable size in bytes")
-	//flagInt(&mtMaxSizeKbOpt, "memtable-max-size-kb", "Max memtable size in kilobytes")
+	flagUint64(&mtMaxSizeKbOpt, "memtable-max-size-kb", "Max memtable size in kb")
+	flagInt(&instancesOpt, "instances", "Number of memtable instances")
 	flagString(&mtTypeOpt, "memtable-type", "hashmap, skiplist or btree")
+	flagString(&sstFormatOpt, "sst-format", "sst format (single-file / multi-file)")
 	flagInt(&BlockCacheMaxBlocksOpt, "block-cache-max-blocks", "Max number of blocks in the block cache")
 	flagString(&LSMCompactionAlgorithmOpt, "lsm-compaction", "LSM compaction algorithm: size-tiered, leveled")
 	flagInt(&LSMMaxLayersOpt, "lsm-levels", "Max number of LSM levels")
@@ -41,11 +47,13 @@ func ParseFlags() *FLags {
 	flag.Parse()
 
 	return &FLags{
-		ConfigPath:      configPathOpt.Get(),
-		Debug:           debugOpt.Get(),
-		MemtableMaxSize: mtMaxSizeOpt.Get(),
-		//MemtableMaxSizeKb: mtMaxSizeKbOpt.Get(),
+		ConfigPath:             configPathOpt.Get(),
+		Debug:                  debugOpt.Get(),
+		MemtableMaxSize:        mtMaxSizeOpt.Get(),
+		MemtableMaxSizeKb:      mtMaxSizeKbOpt.Get(),
 		MemtableType:           mtTypeOpt.Get(),
+		Instances:              instancesOpt.Get(),
+		SSTableFormat:          sstFormatOpt.Get(),
 		LSMCompactionAlgorithm: LSMCompactionAlgorithmOpt.Get(),
 		LSMMaxLayers:           LSMMaxLayersOpt.Get(),
 	}
@@ -67,6 +75,48 @@ func flagInt(opt *OptionalInt, name, description string) {
 		if err != nil {
 			opt.set = false
 		}
+		return nil
+	})
+}
+
+func flagUint16(opt *OptionalUInt16, name, description string) {
+	flag.Func(name, description, func(v string) error {
+		val, err := strconv.ParseUint(v, 10, 16)
+		if err != nil {
+			opt.set = false
+			return err
+		}
+
+		opt.val = uint16(val)
+		opt.set = true
+		return nil
+	})
+}
+
+func flagUint32(opt *OptionalUInt32, name, description string) {
+	flag.Func(name, description, func(v string) error {
+		val, err := strconv.ParseUint(v, 10, 32)
+		if err != nil {
+			opt.set = false
+			return err
+		}
+
+		opt.val = uint32(val)
+		opt.set = true
+		return nil
+	})
+}
+
+func flagUint64(opt *OptionalUInt64, name, description string) {
+	flag.Func(name, description, func(v string) error {
+		val, err := strconv.ParseUint(v, 10, 64)
+		if err != nil {
+			opt.set = false
+			return err
+		}
+
+		opt.val = uint64(val)
+		opt.set = true
 		return nil
 	})
 }

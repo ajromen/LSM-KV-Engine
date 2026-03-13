@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"hash/crc32"
-	"os"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/probabilistics"
 )
@@ -97,29 +96,4 @@ func DecodeFilterSegment(data []byte) (*FilterSegment, error) {
 	return &FilterSegment{
 		filter: bloom,
 	}, nil
-}
-
-////////////////////////////////////////////////////////////
-// FILE IO
-////////////////////////////////////////////////////////////
-
-func (segment *FilterSegment) WriteToFile(file *os.File) (int, error) {
-	data, err := segment.Encode()
-	if err != nil {
-		return 0, err
-	}
-	return file.Write(data)
-}
-
-func ReadFilterFromFile(file *os.File, offset uint64, size int) (*FilterSegment, error) {
-	if _, err := file.Seek(int64(offset), 0); err != nil {
-		return nil, err
-	}
-
-	data := make([]byte, size)
-	if _, err := file.Read(data); err != nil {
-		return nil, err
-	}
-
-	return DecodeFilterSegment(data)
 }

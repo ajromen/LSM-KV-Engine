@@ -2,11 +2,9 @@ package probabilistics
 
 import (
 	"encoding/binary"
-	"encoding/json"
 	"fmt"
 	"io"
 	"math"
-	"os"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/config"
 )
@@ -100,67 +98,6 @@ func (c *CountMinSketch) Clear() {
 			c.table[i][j] = 0
 		}
 	}
-}
-
-// OVAJ DEO BRACO SA JSON, TO NE SLUZI PROJEKTU AL SLUZI ZA TESTIRANJE
-// DA NE MORAMO DA DESIFRUJEMO BINARNI FAJL NEGO OTVORIS JSON
-
-type CountMinSketchJSON struct {
-	K          uint     `json:"k"`
-	M          uint     `json:"m"`
-	Confidence float64  `json:"confidence"`
-	Accuracy   float64  `json:"accuracy"`
-	Table      [][]uint `json:"table"`
-	Seeds      [][]byte `json:"seeds"`
-}
-
-func (c *CountMinSketch) MarshalJSON() ([]byte, error) {
-	seeds := make([][]byte, len(c.hashFunctions))
-	for i, v := range c.hashFunctions {
-		seeds[i] = v.Seed
-	}
-
-	j := CountMinSketchJSON{
-		K:          c.k,
-		M:          c.m,
-		Confidence: c.confidence,
-		Accuracy:   c.accuracy,
-		Table:      c.table,
-		Seeds:      seeds,
-	}
-	return json.Marshal(j)
-}
-
-func (c *CountMinSketch) UnmarshalJSON(data []byte) error {
-	var j CountMinSketchJSON
-	err := json.Unmarshal(data, &j)
-	if err != nil {
-		return err
-	}
-	c.k = j.K
-	c.m = j.M
-	c.confidence = j.Confidence
-	c.accuracy = j.Accuracy
-	c.table = j.Table
-	c.hashFunctions = CreateHashFunctions(j.Seeds)
-
-	return nil
-}
-
-func (c *CountMinSketch) WriteToJSON(path string) error {
-	data, err := json.MarshalIndent(c, "", " ")
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(path, data, 0644)
-}
-
-func (c *CountMinSketch) ReadFromJSON(path string) error {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return err
-	}
-	return json.Unmarshal(data, c)
 }
 
 // ZNACI BRACO OVO SE KORISTI KAD TREBA DA SE ZAPISUJE U OSTALE STVARI U PROJEKTU

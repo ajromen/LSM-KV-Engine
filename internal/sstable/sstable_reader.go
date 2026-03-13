@@ -9,7 +9,6 @@ package sstable
 import (
 	"bytes"
 	"errors"
-	"fmt"
 	"os"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/block"
@@ -28,10 +27,33 @@ type SSTableReader struct {
 	config         *config.Config      // config for given sstable
 }
 
+// detectSSTableFormat determines if an SSTable is single-file or multi-file format
+func detectSSTableFormat(filePath string) (byte, error) {
+	// Check if multi-file format exists (look for .footer file)
+	footerFile := filePath + ".footer"
+	if _, err := os.Stat(footerFile); err == nil {
+		// .footer file exists, this is multi-file format
+		return 1, nil
+	}
+
+	// Otherwise it's single-file format
+	return 0, nil
+}
+
 // NewSSTableReader opens an SSTable file and loads all necessary segments into RAM
-func NewSSTableReader(filePath string, blockManager *block.BlockManager, cfg *config.Config) (*SSTableReader, error) {
-	// storage opens file too
-	storage, err := OpenStorage(filePath, cfg)
+func NewSSTableReader(filePath string, cfg *config.Config) (*SSTableReader, error) {
+	fileFormat, err := detectSSTableFormat(filePath)
+	if err != nil {
+		return nil, err
+	}
+	var storage SegmentStorage
+	if fileFormat == 0 {
+		// Single-file format
+		storage, err = OpenSingleFileStorage(filePath)
+	} else {
+		// Multi-file format
+		storage, err = OpenMultiFileStorage(filePath)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -46,7 +68,6 @@ func NewSSTableReader(filePath string, blockManager *block.BlockManager, cfg *co
 	case *MultiFileStorage:
 		offset = 0
 	}
-
 	// read and validate footer
 	footerData, err := storage.ReadSegment(config.SegmentFooter, offset, FooterSize)
 	if err != nil {
@@ -57,7 +78,7 @@ func NewSSTableReader(filePath string, blockManager *block.BlockManager, cfg *co
 	if err := footer.Validate(); err != nil {
 		return nil, err
 	}
-
+	blockManager := block.NewBlockManager(int(footer.BlockSize), 100)
 	// initialize reader
 	reader := &SSTableReader{
 		storage:      storage,
@@ -66,12 +87,10 @@ func NewSSTableReader(filePath string, blockManager *block.BlockManager, cfg *co
 		footer:       footer,
 		config:       cfg,
 	}
-
 	// load summary into RAM
 	if err := reader.loadSummary(); err != nil {
 		return nil, err
 	}
-
 	// load filter into RAM
 	if err := reader.loadFilter(); err != nil {
 		reader.filterSegment = nil
@@ -132,32 +151,25 @@ func (r *SSTableReader) loadMerkleTree() error {
 
 // loadIndexBlock reads a specific index block from index segment -> NEEDS TO BE FIXED!
 func (r *SSTableReader) loadIndexBlock(blockNumber int) (*IndexBlock, error) {
-	if r.footer == nil {
-		return nil, errors.New("no footer")
-	}
+
 	indexBlockSize := r.config.SSTable.IndexSegment.IndexBlockSize
-	offset := blockNumber
-	var file *os.File
-	switch s := r.storage.(type) {
-	case *SingleFileStorage:
-		file = s.File()
-	case *MultiFileStorage:
-		var err error
-		file, err = s.getOrOpenFile(config.SegmentIndex)
-		if err != nil {
-			return nil, err
-		}
-	default:
-		return nil, errors.New("unsupported storage type")
+
+	offset := r.footer.IndexHandler.Offset +
+		uint64(blockNumber)*uint64(indexBlockSize)
+	data, err := r.storage.ReadSegment(
+		config.SegmentIndex,
+		offset,
+		uint32(indexBlockSize),
+	)
+	if err != nil {
+		return nil, err
 	}
-	data := make([]byte, indexBlockSize-1)
-	if _, err := file.ReadAt(data, int64(offset)); err != nil {
-		return nil, fmt.Errorf("ReadAt failed at offset %d: %w", offset, err)
-	}
+
 	block, err := DecodeIndexBlock(data)
 	if err != nil {
 		return nil, err
 	}
+
 	return block, nil
 }
 
@@ -182,7 +194,7 @@ func (r *SSTableReader) Get(key []byte) (*Record, error) {
 	}
 
 	// step 3.1
-	indexBlock, err := r.loadIndexBlock(int(r.footer.IndexHandler.Offset) + indexBlockNum*r.config.SSTable.IndexSegment.IndexBlockSize - indexBlockNum)
+	indexBlock, err := r.loadIndexBlock(indexBlockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -195,8 +207,12 @@ func (r *SSTableReader) Get(key []byte) (*Record, error) {
 
 	// step 4
 	dataBlockIdx := indexBlock.Entries[entryIdx].BlockIndex
+	dataFilePath := r.filePath
+	if _, err := os.Stat(r.filePath + ".data"); err == nil {
+		dataFilePath = r.filePath + ".data"
+	}
 	blockKey := block.BlockKey{
-		FilePath: r.filePath,
+		FilePath: dataFilePath,
 		Offset:   dataBlockIdx,
 	}
 	blockData, err := r.blockManager.Read(blockKey)
@@ -205,24 +221,23 @@ func (r *SSTableReader) Get(key []byte) (*Record, error) {
 	}
 
 	// step 5
-	iterator, err := NewDataBlockIterator(blockData, int(r.footer.RestartInterval), r.footer.EncodingType)
+	iterator, err := NewDataBlockIteratorRaw(blockData, int(r.footer.RestartInterval), r.footer.EncodingType)
 	if err != nil {
 		return nil, err
 	}
-	iterator.Rewind()
-	defer iterator.Close()
-	if err := iterator.Seek(key); err != nil {
-		return nil, err
-	}
+	iterator.Seek(Record{Key: key})
 
-	// return record
-	if bytes.Equal(iterator.Current().Key, key) {
-		return &Record{
-			Timestamp: iterator.Timestamp(),
-			Tombstone: iterator.Tombstone(),
-			Key:       iterator.Key(),
-			Value:     iterator.Value(),
-		}, nil
+	if !iterator.Valid() {
+		return nil, nil
 	}
-	return nil, nil
+	rec := iterator.Key()
+	if !bytes.Equal(rec.Key, key) {
+		return nil, nil
+	}
+	return &Record{
+		Timestamp: rec.Timestamp,
+		Tombstone: rec.Tombstone,
+		Key:       rec.Key,
+		Value:     rec.Value,
+	}, nil
 }

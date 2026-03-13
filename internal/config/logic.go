@@ -41,13 +41,23 @@ func LoadConfig(flags *cli.FLags) (*Config, error) {
 
 func (c *Config) applyFlags(flags *cli.FLags) error {
 	if flags.MemtableMaxSize != nil {
-		c.Memtable.MemtableMaxSize = *flags.MemtableMaxSize
+		c.Memtable.MemtableMaxEntries = *flags.MemtableMaxSize
 	}
-	//if flags.MemtableMaxSizeKb != nil {
-	//	c.Memtable.MemtableSizeKB = *flags.MemtableMaxSizeKb
-	//}
+	if flags.MemtableMaxSizeKb != nil {
+		c.Memtable.MemtableMaxSizeBytes = *flags.MemtableMaxSizeKb
+	}
 	if flags.MemtableType != nil {
 		c.Memtable.MemtableType = *flags.MemtableType
+	}
+	if flags.Instances != nil {
+		c.Memtable.Instances = *flags.Instances
+	}
+	if flags.SSTableFormat != nil {
+		if *flags.SSTableFormat == "single-file" {
+			c.SSTable.Format = FormatSingleFile
+		} else if *flags.SSTableFormat == "multi-file" {
+			c.SSTable.Format = FormatMultiFile
+		}
 	}
 	if flags.BlockCacheMaxBlocks != nil {
 		c.BlockManager.BlockCacheMaxBlocks = *flags.BlockCacheMaxBlocks
@@ -62,19 +72,24 @@ func (c *Config) applyFlags(flags *cli.FLags) error {
 }
 
 func (c *Config) validateFields() error {
-	//if c.Memtable.MemtableMaxSize <= 0 &&
-	//	c.Memtable.MemtableSizeKB <= 0 {
-	//	return fmt.Errorf("memtable size must be positive")
-	//}
 
-	if c.Memtable.MemtableMaxSize <= 0 {
-		return fmt.Errorf("memtable size must be positive")
+	if c.Memtable.MemtableMaxEntries <= 0 {
+		return fmt.Errorf("memtable size entries must be positive")
+	}
+	if c.Memtable.MemtableMaxSizeBytes <= 0 {
+		return fmt.Errorf("memtable size bytes must be positive")
+	}
+	if c.Memtable.Instances <= 0 {
+		return fmt.Errorf("instances must be positive")
 	}
 
 	if c.Memtable.MemtableType != "hashmap" &&
 		c.Memtable.MemtableType != "skiplist" &&
 		c.Memtable.MemtableType != "btree" {
 		return fmt.Errorf("invalid memtable type")
+	}
+	if c.SSTable.Format != FormatSingleFile && c.SSTable.Format != FormatMultiFile {
+		return fmt.Errorf("invalid sstable format")
 	}
 
 	if c.BlockManager.BlockSize%(4*1024) != 0 {

@@ -2,7 +2,6 @@ package probabilistics
 
 import (
 	"bytes"
-	"encoding/json"
 	"math"
 	"testing"
 
@@ -192,36 +191,5 @@ func TestBloomFilter_BinaryInvalidMagic(t *testing.T) {
 	err := bf.FromBytes([]byte("NOT!"))
 	if err == nil {
 		t.Fatalf("ocekivao sam gresku za neispravan magic")
-	}
-}
-
-func TestBloomFilter_JSONRoundTrip(t *testing.T) {
-	expectedN := uint(200)
-	p := 0.01
-	m := calculateM(expectedN, p)
-	k := calculateK(m, expectedN)
-	seeds := makeDeterministicSeeds(int(k), 32)
-
-	bf := NewBloomFilterWithParams(expectedN, p, seeds)
-	bf.Add([]byte("abc"))
-
-	data, err := json.Marshal(bf)
-	if err != nil {
-		t.Fatalf("Marshal error: %v", err)
-	}
-
-	var bf2 BloomFilter
-	if err := json.Unmarshal(data, &bf2); err != nil {
-		t.Fatalf("Unmarshal error: %v", err)
-	}
-
-	if bf2.n != bf.n || bf2.p != bf.p || bf2.m != bf.m || bf2.k != bf.k {
-		t.Fatalf("parametri nisu jednaki posle JSON round-trip")
-	}
-	if !bytes.Equal(bf2.bits, bf.bits) {
-		t.Fatalf("bitset nije isti posle JSON round-trip")
-	}
-	if !bf2.MightContain([]byte("abc")) {
-		t.Fatalf("posle JSON round-trip, dodati element mora biti prepoznat")
 	}
 }

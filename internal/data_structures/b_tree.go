@@ -1,6 +1,8 @@
 package data_structures
 
-type Comparator[T any] func(a, b T) int
+import (
+	"strings"
+)
 
 type BTreeNode[T any] struct {
 	nodeData []T
@@ -13,6 +15,17 @@ type BTree[T any] struct {
 	t    int
 	cmp  Comparator[T]
 	size int
+}
+
+type stackEntry[T any] struct {
+	node  *BTreeNode[T]
+	index int
+}
+type BTreeIterator[T any] struct {
+	tree           *BTree[T]
+	currentNode    *BTreeNode[T]
+	indexInNode    int
+	stackOfParents Stack[stackEntry[T]]
 }
 
 func NewBTree[T any](t int, cmp Comparator[T]) *BTree[T] {
@@ -29,35 +42,73 @@ func NewBTree[T any](t int, cmp Comparator[T]) *BTree[T] {
 	}
 }
 
-func (btn *BTreeNode[T]) search(key T, cmp Comparator[T]) (T, bool) {
+func (node *BTreeNode[T]) lowerBound(target T, cmp Comparator[T]) (T, bool) {
 	i := 0
-	for i < len(btn.nodeData) && cmp(key, btn.nodeData[i]) > 0 {
+	for i < len(node.nodeData) && cmp(node.nodeData[i], target) < 0 {
 		i++
 	}
-	if i < len(btn.nodeData) && cmp(key, btn.nodeData[i]) == 0 {
-		return btn.nodeData[i], true
-	}
-	if btn.leaf {
+	if node.leaf {
+		if i < len(node.nodeData) {
+			return node.nodeData[i], true
+		}
 		var zero T
 		return zero, false
 	}
-	return btn.children[i].search(key, cmp)
+	if i < len(node.children) {
+		if val, found := node.children[i].lowerBound(target, cmp); found {
+			return val, true
+		}
+	}
+	if i < len(node.nodeData) {
+		return node.nodeData[i], true
+	}
+	var zero T
+	return zero, false
 }
 
-func (bt *BTree[T]) SearchTree(key T) (T, bool) {
-	entry, succ := bt.root.search(key, bt.cmp)
-	return entry, succ
+func (bt *BTree[T]) LowerBound(target T) (T, bool) {
+	if bt.root == nil {
+		var zero T
+		return zero, false
+	}
+	return bt.root.lowerBound(target, bt.cmp)
+}
+
+func (node *BTreeNode[T]) upperBound(target T, cmp Comparator[T]) (T, bool) {
+	i := 0
+	for i < len(node.nodeData) && cmp(node.nodeData[i], target) <= 0 {
+		i++
+	}
+	if node.leaf {
+		if i < len(node.nodeData) {
+			return node.nodeData[i], true
+		}
+		var zero T
+		return zero, false
+	}
+	if i < len(node.children) {
+		if val, found := node.children[i].upperBound(target, cmp); found {
+			return val, true
+		}
+	}
+	if i < len(node.nodeData) {
+		return node.nodeData[i], true
+	}
+	var zero T
+	return zero, false
+}
+
+func (bt *BTree[T]) UpperBound(target T) (T, bool) {
+	if bt.root == nil {
+		var zero T
+		return zero, false
+	}
+	return bt.root.upperBound(target, bt.cmp)
 }
 
 func (btn *BTreeNode[T]) insertNonFull(val T, t int, cmp Comparator[T]) {
 	i := len(btn.nodeData) - 1
 	if btn.leaf {
-		for j := 0; j < len(btn.nodeData); j++ {
-			if cmp(btn.nodeData[j], val) == 0 {
-				btn.nodeData[j] = val
-				return
-			}
-		}
 		btn.nodeData = append(btn.nodeData, val)
 		for i >= 0 && cmp(val, btn.nodeData[i]) < 0 {
 			btn.nodeData[i+1] = btn.nodeData[i]
@@ -134,9 +185,119 @@ func (bt *BTree[T]) Insert(val T) {
 	bt.size++
 }
 
+func (node *BTreeNode[T]) delete(key T, t int, cmp Comparator[T]) bool {
+	i := 0
+	for i < len(node.nodeData) && cmp(key, node.nodeData[i]) > 0 {
+		i++
+	}
+	if i < len(node.nodeData) && cmp(key, node.nodeData[i]) == 0 {
+		if node.leaf {
+			node.nodeData = append(node.nodeData[:i], node.nodeData[i+1:]...)
+			return true
+		}
+		leftChild := node.children[i]
+		rightChild := node.children[i+1]
+		if len(leftChild.nodeData) >= t {
+			pred := leftChild.getMax()
+			node.nodeData[i] = pred
+			return leftChild.delete(pred, t, cmp)
+		}
+		if len(rightChild.nodeData) >= t {
+			succ := rightChild.getMin()
+			node.nodeData[i] = succ
+			return rightChild.delete(succ, t, cmp)
+		}
+		node.merge(i)
+		return leftChild.delete(key, t, cmp)
+	}
+
+	if node.leaf {
+		return false
+	}
+
+	child := node.children[i]
+	if len(child.nodeData) < t {
+		node.fill(i, t)
+	}
+	if i > len(node.nodeData) {
+		return node.children[i-1].delete(key, t, cmp)
+	}
+	return node.children[i].delete(key, t, cmp)
+}
+
+func (node *BTreeNode[T]) getMin() T {
+	current := node
+	for !current.leaf {
+		current = current.children[0]
+	}
+	return current.nodeData[0]
+}
+
+func (node *BTreeNode[T]) getMax() T {
+	current := node
+	for !current.leaf {
+		current = current.children[len(current.children)-1]
+	}
+	return current.nodeData[len(current.nodeData)-1]
+}
+
 func (bt *BTree[T]) MarkDeleted(val T, setDeleted func(*T)) {
 	setDeleted(&val)
 	bt.Insert(val)
+}
+
+func (node *BTreeNode[T]) fill(i int, t int) {
+	if i > 0 && len(node.children[i-1].nodeData) >= t {
+		node.borrowFromPrev(i)
+	} else if i < len(node.children)-1 && len(node.children[i+1].nodeData) >= t {
+		node.borrowFromNext(i)
+	} else {
+		if i < len(node.children)-1 {
+			node.merge(i)
+		} else {
+			node.merge(i - 1)
+		}
+	}
+}
+
+func (node *BTreeNode[T]) borrowFromPrev(i int) {
+	child := node.children[i]
+	sibling := node.children[i-1]
+
+	child.nodeData = append([]T{node.nodeData[i-1]}, child.nodeData...)
+	node.nodeData[i-1] = sibling.nodeData[len(sibling.nodeData)-1]
+	sibling.nodeData = sibling.nodeData[:len(sibling.nodeData)-1]
+
+	if !child.leaf {
+		child.children = append([]*BTreeNode[T]{sibling.children[len(sibling.children)-1]}, child.children...)
+		sibling.children = sibling.children[:len(sibling.children)-1]
+	}
+}
+
+func (node *BTreeNode[T]) borrowFromNext(i int) {
+	child := node.children[i]
+	sibling := node.children[i+1]
+
+	child.nodeData = append(child.nodeData, node.nodeData[i])
+	node.nodeData[i] = sibling.nodeData[0]
+	sibling.nodeData = sibling.nodeData[1:]
+
+	if !child.leaf {
+		child.children = append(child.children, sibling.children[0])
+		sibling.children = sibling.children[1:]
+	}
+}
+
+func (node *BTreeNode[T]) merge(i int) {
+	child := node.children[i]
+	sibling := node.children[i+1]
+	child.nodeData = append(child.nodeData, node.nodeData[i])
+	child.nodeData = append(child.nodeData, sibling.nodeData...)
+	if !child.leaf {
+		child.children = append(child.children, sibling.children...)
+	}
+	node.nodeData = append(node.nodeData[:i], node.nodeData[i+1:]...)
+	node.children = append(node.children[:i+1], node.children[i+2:]...)
 }
 
 func (bt *BTree[T]) EntriesInOrder() []T {
@@ -147,4 +308,202 @@ func (bt *BTree[T]) EntriesInOrder() []T {
 
 func (bt *BTree[T]) Size() int {
 	return bt.size
+}
+
+func (bt *BTree[T]) Reset() {
+	nodeEntry := &BTreeNode[T]{
+		nodeData: make([]T, 0),
+		leaf:     true,
+		children: make([]*BTreeNode[T], 0),
+	}
+	bt.root = nodeEntry
+	bt.size = 0
+}
+
+func (bt *BTree[T]) Iterator() *BTreeIterator[T] {
+	return &BTreeIterator[T]{
+		tree:           bt,
+		currentNode:    nil,
+		indexInNode:    -1,
+		stackOfParents: Stack[stackEntry[T]]{data: make([]stackEntry[T], 0)},
+	}
+}
+
+func (it *BTreeIterator[T]) Valid() bool {
+	return it.currentNode != nil && it.indexInNode != -1
+}
+
+func (it *BTreeIterator[T]) SeekToFirst() {
+	it.stackOfParents.Clear()
+	node := it.tree.root
+	if node == nil {
+		it.currentNode = nil
+		it.indexInNode = -1
+		return
+	}
+	for !node.leaf {
+		it.stackOfParents.Push(stackEntry[T]{node, 0})
+		node = node.children[0]
+	}
+	it.currentNode = node
+	it.indexInNode = 0
+}
+
+func (it *BTreeIterator[T]) SeekToLast() {
+	node := it.tree.root
+	if node == nil {
+		it.currentNode = nil
+		it.indexInNode = -1
+		return
+	}
+	it.stackOfParents.Clear()
+	for !node.leaf {
+		it.stackOfParents.Push(stackEntry[T]{node, len(node.children) - 1})
+		node = node.children[len(node.children)-1]
+	}
+	it.currentNode = node
+	it.indexInNode = len(node.nodeData) - 1
+}
+
+func (it *BTreeIterator[T]) Seek(target T) {
+	node := it.tree.root
+	if node == nil {
+		it.currentNode = nil
+		it.indexInNode = -1
+		return
+	}
+	it.stackOfParents.Clear()
+	for !node.leaf {
+		i := 0
+		for i < len(node.nodeData) && it.tree.cmp(node.nodeData[i], target) < 0 {
+			i++
+		}
+		it.stackOfParents.Push(stackEntry[T]{node, i})
+		node = node.children[i]
+	}
+	i := 0
+	for i < len(node.nodeData) && it.tree.cmp(node.nodeData[i], target) < 0 {
+		i++
+	}
+	if i < len(node.nodeData) {
+		it.currentNode = node
+		it.indexInNode = i
+	} else {
+		it.currentNode = nil
+		it.indexInNode = -1
+	}
+}
+
+func (it *BTreeIterator[T]) Next() {
+	if it.currentNode == nil {
+		return
+	}
+	if !it.currentNode.leaf {
+		it.stackOfParents.Push(stackEntry[T]{it.currentNode, it.indexInNode + 1})
+		node := it.currentNode.children[it.indexInNode+1]
+		for !node.leaf {
+			it.stackOfParents.Push(stackEntry[T]{node, 0})
+			node = node.children[0]
+		}
+		it.currentNode = node
+		it.indexInNode = 0
+		return
+	}
+	if it.indexInNode+1 < len(it.currentNode.nodeData) {
+		it.indexInNode++
+		return
+	}
+	for !it.stackOfParents.Empty() {
+		top := it.stackOfParents.Pop()
+		parent := top.node
+		idx := top.index
+		if idx < len(parent.nodeData) {
+			it.currentNode = parent
+			it.indexInNode = idx
+			return
+		}
+	}
+	it.currentNode = nil
+	it.indexInNode = -1
+}
+
+func (it *BTreeIterator[T]) Prev() {
+	if it.currentNode == nil {
+		return
+	}
+	if it.indexInNode-1 >= 0 {
+		it.indexInNode--
+		return
+	}
+	for !it.stackOfParents.Empty() {
+		top := it.stackOfParents.Pop()
+		parent := top.node
+		idx := top.index
+		if idx > 0 {
+			node := parent.children[idx-1]
+			it.stackOfParents.Push(stackEntry[T]{parent, idx - 1})
+			for !node.leaf {
+				it.stackOfParents.Push(stackEntry[T]{node, len(node.children) - 1})
+				node = node.children[len(node.children)-1]
+			}
+			it.currentNode = node
+			it.indexInNode = len(node.nodeData) - 1
+			return
+		}
+	}
+	it.currentNode = nil
+	it.indexInNode = -1
+}
+
+func (it *BTreeIterator[T]) Key() T {
+	if it.currentNode == nil {
+		var zero T
+		return zero
+	}
+	return it.currentNode.nodeData[it.indexInNode]
+}
+
+func (it *BTreeIterator[T]) Value() T {
+	if it.currentNode == nil {
+		var zero T
+		return zero
+	}
+	return it.currentNode.nodeData[it.indexInNode]
+}
+
+func (bt *BTree[T]) Visualize(formatter func(T) string) string {
+	if bt.root == nil || len(bt.root.nodeData) == 0 {
+		return "BTree empty.\n"
+	}
+	var result strings.Builder
+	result.WriteString("\n========== B-TREE ==========\n")
+	type levelNode struct {
+		node  *BTreeNode[T]
+		level int
+	}
+	queue := []levelNode{{bt.root, 0}}
+	currentLevel := 0
+	for len(queue) > 0 {
+		ln := queue[0]
+		queue = queue[1:]
+		if ln.level != currentLevel {
+			result.WriteString("\n")
+			currentLevel = ln.level
+		}
+		result.WriteString("[ ")
+		for i, val := range ln.node.nodeData {
+			result.WriteString(formatter(val))
+			if i != len(ln.node.nodeData)-1 {
+				result.WriteString(" | ")
+			}
+		}
+		result.WriteString(" ] ")
+		if !ln.node.leaf {
+			for _, child := range ln.node.children {
+				queue = append(queue, levelNode{child, ln.level + 1})
+			}
+		}
+	}
+	result.WriteString("\n============================\n")
+	return result.String()
 }

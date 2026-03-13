@@ -5,15 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"hash/crc32"
-	"io"
-	"os"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/config"
 	"github.com/ajromen/LSM-KV-Engine/internal/utils"
 )
 
 const (
-	FooterSize  = 117
+	FooterSize  = 125
 	MagicNumber = 0x53535442
 )
 
@@ -28,11 +26,12 @@ type Footer struct {
 	SummaryHandler         SegmentHandler // handler for summary segment
 	MetaDataHandler        SegmentHandler // handler for metadatahandler
 	NumDataBlocks          uint32         // number of data blocks in sstable
-	MinTimeStamp           utils.Uint128  // min timestamp in sstable
-	MaxTimeStamp           utils.Uint128  // max timestamp in sstable
-	MinKeyLength           uint32         // min keylength in sstable
-	MaxKeyLength           uint32         // max keylength in sstable
-	TotalRecords           uint64         // number of records in sstable
+	BlockSize              uint64
+	MinTimeStamp           utils.Uint128 // min timestamp in sstable
+	MaxTimeStamp           utils.Uint128 // max timestamp in sstable
+	MinKeyLength           uint32        // min keylength in sstable
+	MaxKeyLength           uint32        // max keylength in sstable
+	TotalRecords           uint64        // number of records in sstable
 	RestartInterval        uint32
 	EncodingType           byte
 	CompressionType        byte   // type of compression = 0 always
@@ -56,6 +55,7 @@ func NewFooter(config config.SSTableConfig) *Footer {
 		RestartInterval:        uint32(config.DataSegment.RestartInterval),
 		EncodingType:           1,
 		MergeIteratorStructure: 1,
+		BlockSize:              uint64(config.DataSegment.BlockSize),
 	}
 }
 
@@ -85,6 +85,8 @@ func (f *Footer) Encode() []byte {
 	binary.LittleEndian.PutUint32(buf[pos:], f.MetaDataHandler.Size)
 	pos += 4
 
+	binary.LittleEndian.PutUint64(buf[pos:], f.BlockSize)
+	pos += 8
 	binary.LittleEndian.PutUint32(buf[pos:], f.NumDataBlocks)
 	pos += 4
 
@@ -156,6 +158,8 @@ func (f *Footer) Decode(buf []byte) error {
 	f.MetaDataHandler.Size = binary.LittleEndian.Uint32(buf[pos:])
 	pos += 4
 
+	f.BlockSize = binary.LittleEndian.Uint64(buf[pos:])
+	pos += 8
 	f.NumDataBlocks = binary.LittleEndian.Uint32(buf[pos:])
 	pos += 4
 
@@ -237,59 +241,4 @@ func (f *Footer) ReadFromStorage(storage SegmentStorage, offset uint64) error {
 	}
 
 	return f.Decode(data)
-}
-
-func (f *Footer) WriteToFile(file *os.File) error {
-	buf := f.Encode()
-	_, err := file.Write(buf)
-	return err
-}
-
-func (f *Footer) ReadFromFile(file *os.File) error {
-	_, err := file.Seek(-FooterSize, io.SeekEnd)
-	if err != nil {
-		return err
-	}
-
-	buf := make([]byte, FooterSize)
-	n, err := file.Read(buf)
-	if err != nil {
-		return err
-	}
-
-	if n != FooterSize {
-		return fmt.Errorf("expected %d bytes, got %d", FooterSize, n)
-	}
-	return f.Decode(buf)
-}
-
-func ReadFooterFromFile(filePath string) (*Footer, error) {
-	file, err := os.Open(filePath)
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-	footer := &Footer{}
-	err = footer.ReadFromFile(file)
-	if err == nil && footer.Format == 0 {
-		return footer, nil
-	}
-	footerFile, err := os.Open(filePath + ".footer")
-	if err != nil {
-		return nil, fmt.Errorf("failed to read footer: %w", err)
-	}
-	defer footerFile.Close()
-	buf := make([]byte, FooterSize)
-	n, err := footerFile.Read(buf)
-	if err != nil {
-		return nil, err
-	}
-	if n != FooterSize {
-		return nil, fmt.Errorf("invalid footer size: got %d bytes", n)
-	}
-	footer = &Footer{}
-	if err := footer.Decode(buf); err != nil {
-		return nil, err
-	}
-	return footer, nil
 }

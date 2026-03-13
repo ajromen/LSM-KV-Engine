@@ -1,8 +1,6 @@
 package sstable
 
 import (
-	"fmt"
-	"io"
 	"os"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/block"
@@ -43,54 +41,56 @@ func OpenSingleFileStorage(filePath string) (*SingleFileStorage, error) {
 
 // WriteSegment APPENDS SEGMENT TO A FILE AND RETURNS ITS OFFSET + SIZE
 func (s *SingleFileStorage) WriteSegment(segType config.SegmentType, data []byte) (uint64, uint32, error) {
-	offset := s.offset
 	if (segType == config.SegmentData || segType == config.SegmentIndex) && s.blockManager != nil {
-		if len(data) < s.blockManager.BlockSize() {
-			padding := make([]byte, s.blockManager.BlockSize()-len(data))
-			data = append(data, padding...)
+		blockSize := uint64(s.blockManager.BlockSize())
+		remainder := s.offset % blockSize
+		if remainder != 0 {
+			padding := make([]byte, blockSize-remainder)
+
+			err := s.blockManager.WriteNoBlock(s.file, s.offset, padding)
+			if err != nil {
+				return 0, 0, err
+			}
+
+			s.offset += uint64(len(padding))
 		}
+		if len(data) < s.blockManager.BlockSize() {
+			pad := make([]byte, s.blockManager.BlockSize()-len(data))
+			data = append(data, pad...)
+		}
+		offset := s.offset
 		blockKey := block.BlockKey{
 			FilePath: s.file.Name(),
-			Offset:   uint32(s.offset / uint64(s.blockManager.BlockSize())),
+			Offset:   uint32(s.offset / blockSize),
 		}
 		if err := s.blockManager.Write(blockKey, data); err != nil {
-			return 0, 0, err
-		}
-		if _, err := s.file.Seek(int64(len(data)), io.SeekCurrent); err != nil {
 			return 0, 0, err
 		}
 		s.offset += uint64(len(data))
 		return offset, uint32(len(data)), nil
 	}
-
-	n, err := s.file.Write(data)
+	offset := s.offset
+	err := s.blockManager.WriteNoBlock(s.file, offset, data)
 	if err != nil {
 		return 0, 0, err
 	}
-	s.offset += uint64(n)
-	return offset, uint32(n), nil
+	s.offset += uint64(len(data))
+	return offset, uint32(len(data)), nil
 }
 
 // ReadSegment READS SEGMENT FROM A FILE (OFFSET AND SIZE ARE FORWARDED FROM FOOTER)
 func (s *SingleFileStorage) ReadSegment(segType config.SegmentType, offset uint64, size uint32) ([]byte, error) {
-	data := make([]byte, size)
-	nTotal := 0
-	_, err := s.file.Seek(int64(offset), io.SeekStart)
+	if (segType == config.SegmentData || segType == config.SegmentIndex) && s.blockManager != nil {
+		blockSize := uint64(s.blockManager.BlockSize())
+		blockKey := block.BlockKey{
+			FilePath: s.file.Name(),
+			Offset:   uint32(offset / blockSize),
+		}
+		return s.blockManager.Read(blockKey)
+	}
+	data, err := s.blockManager.ReadNoBlock(s.file, offset, size)
 	if err != nil {
 		return nil, err
-	}
-	for nTotal < int(size) {
-		n, err := s.file.Read(data[nTotal:])
-		if err != nil {
-			return nil, err
-		}
-		if n == 0 {
-			break
-		}
-		nTotal += n
-	}
-	if nTotal != int(size) {
-		return nil, fmt.Errorf("expected to read %d bytes, got %d", size, nTotal)
 	}
 	return data, nil
 }
@@ -170,7 +170,7 @@ func (m *MultiFileStorage) getOrOpenFile(segType config.SegmentType) (*os.File, 
 func (m *MultiFileStorage) getFilePath(segType config.SegmentType) string {
 	switch segType {
 	case config.SegmentData:
-		return m.basePath
+		return m.basePath + ".data"
 	case config.SegmentFilter:
 		return m.basePath + ".filter"
 	case config.SegmentIndex:
@@ -209,12 +209,13 @@ func (m *MultiFileStorage) WriteSegment(segType config.SegmentType, data []byte)
 		m.offsets[segType] += uint64(len(data))
 		return offset, uint32(len(data)), nil
 	}
-	n, err := file.Write(data)
+	err = m.blockManager.WriteNoBlock(file, offset, data)
 	if err != nil {
 		return 0, 0, err
 	}
-	m.offsets[segType] += uint64(n)
-	return offset, uint32(n), nil
+
+	m.offsets[segType] += uint64(len(data))
+	return offset, uint32(len(data)), nil
 }
 
 // ReadSegment READS SEGMENT FROM A FILE CORRESPONDING TO SEGMENT TYPE (OFFSET AND SIZE ARE FORWARDED FROM FOOTER)
@@ -223,25 +224,20 @@ func (m *MultiFileStorage) ReadSegment(segType config.SegmentType, offset uint64
 	if err != nil {
 		return nil, err
 	}
-	data := make([]byte, size)
-	nTotal := 0
-	_, err = file.Seek(int64(offset), io.SeekStart)
+	if (segType == config.SegmentData || segType == config.SegmentIndex) && m.blockManager != nil {
+		blockSize := uint64(m.blockManager.BlockSize())
+		blockKey := block.BlockKey{
+			FilePath: file.Name(),
+			Offset:   uint32(offset / blockSize),
+		}
+		return m.blockManager.Read(blockKey)
+	}
+
+	data, err := m.blockManager.ReadNoBlock(file, offset, size)
 	if err != nil {
 		return nil, err
 	}
-	for nTotal < int(size) {
-		n, err := file.Read(data[nTotal:])
-		if err != nil {
-			return nil, err
-		}
-		if n == 0 {
-			break
-		}
-		nTotal += n
-	}
-	if nTotal != int(size) {
-		return nil, fmt.Errorf("expected to read %d bytes, got %d", size, nTotal)
-	}
+
 	return data, nil
 }
 
