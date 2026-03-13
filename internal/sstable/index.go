@@ -256,38 +256,6 @@ func (seg *IndexSegment) AddBlock(block *IndexBlock) {
 	seg.Blocks = append(seg.Blocks, block)
 }
 
-// WriteToFile WRITES INDEX SEGMENT TO FILE -> not used
-func (seg *IndexSegment) WriteToFile(file *os.File) ([]uint32, error) {
-	offsets := make([]uint32, len(seg.Blocks))
-	var currentOffset int32 = 0
-	for i, block := range seg.Blocks {
-		offsets[i] = uint32(currentOffset)
-		data := block.EncodeIndexBlock(seg.IndexBlockSize)
-		n, err := file.Write(data)
-		if err != nil {
-			return nil, err
-		}
-		currentOffset += int32(n)
-		for j := range block.Entries {
-			block.Entries[j].BlockIndex = offsets[i]
-		}
-	}
-	seg.BlockOffsets = offsets
-	return offsets, nil
-}
-
-// ReadBlockFromFile READS INDEX BLOCK FROM FILE FROM GIVEN OFFSET -> not used
-func (seg *IndexSegment) ReadBlockFromFile(file *os.File, offset uint64, size int) (*IndexBlock, error) {
-	if _, err := file.Seek(int64(offset), 0); err != nil {
-		return nil, err
-	}
-	data := make([]byte, size)
-	if _, err := file.Read(data); err != nil {
-		return nil, err
-	}
-	return DecodeIndexBlock(data)
-}
-
 // AddEntryToBlock ADDS ENTRY AND CREATES A NEW BLOCK IF THE CURRENT ONE IS FULL
 func (seg *IndexSegment) AddEntryToBlock(entry IndexEntry, blockSize int) {
 	if len(seg.Blocks) == 0 || len(seg.Blocks[len(seg.Blocks)-1].Entries) >= blockSize {

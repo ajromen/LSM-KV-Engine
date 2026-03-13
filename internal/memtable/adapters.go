@@ -2,7 +2,7 @@ package memtable
 
 import (
 	"github.com/ajromen/LSM-KV-Engine/internal/data_structures"
-	"github.com/ajromen/LSM-KV-Engine/internal/include"
+	"github.com/ajromen/LSM-KV-Engine/internal/iterator"
 )
 
 // ---- BTree Store Adapter ----
@@ -43,11 +43,11 @@ func (s *BTreeStore) Visualize(formatter func(MemtableEntry) string) string {
 	return s.tree.Visualize(formatter)
 }
 
-func (s *BTreeStore) RawIterator() include.Iterator[MemtableEntry] {
+func (s *BTreeStore) RawIterator() iterator.Iterator[MemtableEntry] {
 	return NewRawSingleMemtableIterator(s.tree.Iterator())
 }
 
-func (s *BTreeStore) Iterator() include.Iterator[MemtableEntry] {
+func (s *BTreeStore) Iterator() iterator.Iterator[MemtableEntry] {
 	rawIt := s.RawIterator().(*RawSingleMemtableIterator)
 	return NewSingleMemtableIterator(rawIt)
 }
@@ -90,11 +90,11 @@ func (s *SkipListStore) Search(entry MemtableEntry) *MemtableEntry {
 	return &result
 }
 
-func (s *SkipListStore) RawIterator() include.Iterator[MemtableEntry] {
+func (s *SkipListStore) RawIterator() iterator.Iterator[MemtableEntry] {
 	return NewRawSingleMemtableIterator(s.list.Iterator())
 }
 
-func (s *SkipListStore) Iterator() include.Iterator[MemtableEntry] {
+func (s *SkipListStore) Iterator() iterator.Iterator[MemtableEntry] {
 	rawIt := s.RawIterator().(*RawSingleMemtableIterator)
 	return NewSingleMemtableIterator(rawIt)
 }
@@ -147,11 +147,11 @@ func (s *HashMapStore) Visualize(f func(MemtableEntry) string) string {
 	return s.hmap.Visualize(f)
 }
 
-func (s *HashMapStore) RawIterator() include.Iterator[MemtableEntry] {
+func (s *HashMapStore) RawIterator() iterator.Iterator[MemtableEntry] {
 	return NewRawSingleMemtableIterator(s.hmap.Iterator())
 }
 
-func (s *HashMapStore) Iterator() include.Iterator[MemtableEntry] {
+func (s *HashMapStore) Iterator() iterator.Iterator[MemtableEntry] {
 	rawIt := s.RawIterator().(*RawSingleMemtableIterator)
 	return NewSingleMemtableIterator(rawIt)
 }
@@ -201,11 +201,11 @@ func (s *RBTreeStore) Visualize(formatter func(MemtableEntry) string) string {
 	return s.tree.Visualize(formatter)
 }
 
-func (s *RBTreeStore) RawIterator() include.Iterator[MemtableEntry] {
+func (s *RBTreeStore) RawIterator() iterator.Iterator[MemtableEntry] {
 	return NewRawSingleMemtableIterator(s.tree.Iterator())
 }
 
-func (s *RBTreeStore) Iterator() include.Iterator[MemtableEntry] {
+func (s *RBTreeStore) Iterator() iterator.Iterator[MemtableEntry] {
 	rawIt := s.RawIterator().(*RawSingleMemtableIterator)
 	return NewSingleMemtableIterator(rawIt)
 }
@@ -254,11 +254,11 @@ func (s *AVLTreeStore) Visualize(formatter func(MemtableEntry) string) string {
 	return s.tree.Visualize(formatter)
 }
 
-func (s *AVLTreeStore) RawIterator() include.Iterator[MemtableEntry] {
+func (s *AVLTreeStore) RawIterator() iterator.Iterator[MemtableEntry] {
 	return NewRawSingleMemtableIterator(s.tree.Iterator())
 }
 
-func (s *AVLTreeStore) Iterator() include.Iterator[MemtableEntry] {
+func (s *AVLTreeStore) Iterator() iterator.Iterator[MemtableEntry] {
 	rawIt := s.RawIterator().(*RawSingleMemtableIterator)
 	return NewSingleMemtableIterator(rawIt)
 }

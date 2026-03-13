@@ -106,7 +106,8 @@ func TestCompressorSaveLoad(t *testing.T) {
 	encoder := NewDictionaryEncoder()
 	encoder.AddToDict([]byte("key1"))
 	encoder.AddToDict([]byte("key2"))
-	err := SaveToFile(dir, name, encoder.Serialize())
+	path := filepath.Join(dir, name)
+	err := os.WriteFile(path, encoder.Serialize(), 0644)
 	if err != nil {
 		t.Fatalf("save failed: %v", err)
 	}

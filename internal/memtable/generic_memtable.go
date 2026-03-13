@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"math"
 
-	"github.com/ajromen/LSM-KV-Engine/internal/include"
+	"github.com/ajromen/LSM-KV-Engine/internal/iterator"
 )
 
 func NewGenericMemtable(store MemtableStore, maxNumEntries int, maxSizeBytes uint64) *GenericMemtable {
@@ -72,8 +72,10 @@ func (m *GenericMemtable) ReadEntries() []MemtableEntry {
 func (m *GenericMemtable) NumEntries() int   { return m.numEntries }
 func (m *GenericMemtable) SizeBytes() uint64 { return m.sizeBytes }
 
-func (m *GenericMemtable) RawIterator() include.Iterator[MemtableEntry] { return m.store.RawIterator() }
-func (m *GenericMemtable) Iterator() include.Iterator[MemtableEntry] {
+func (m *GenericMemtable) RawIterator() iterator.Iterator[MemtableEntry] {
+	return m.store.RawIterator()
+}
+func (m *GenericMemtable) Iterator() iterator.Iterator[MemtableEntry] {
 	return m.store.Iterator()
 }
 

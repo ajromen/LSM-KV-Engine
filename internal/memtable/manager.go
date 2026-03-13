@@ -3,7 +3,7 @@ package memtable
 import (
 	"sync"
 
-	"github.com/ajromen/LSM-KV-Engine/internal/include"
+	"github.com/ajromen/LSM-KV-Engine/internal/iterator"
 )
 
 type MemtableManager struct {
@@ -104,10 +104,10 @@ func (mm *MemtableManager) Delete(key []byte, timestamp uint64) {
 	}
 }
 
-func (mm *MemtableManager) RawIterator() include.Iterator[MemtableEntry] {
+func (mm *MemtableManager) RawIterator() iterator.Iterator[MemtableEntry] {
 	mm.mu.Lock()
 	defer mm.mu.Unlock()
-	var rawIters []include.Iterator[MemtableEntry]
+	var rawIters []iterator.Iterator[MemtableEntry]
 	if mm.active != nil {
 		activeIt := NewRawSingleMemtableIterator(mm.active.Iterator())
 		rawIters = append(rawIters, activeIt.(*RawSingleMemtableIterator))
@@ -119,11 +119,11 @@ func (mm *MemtableManager) RawIterator() include.Iterator[MemtableEntry] {
 	return NewRawIterator(rawIters, mm.mergeStructure)
 }
 
-func (mm *MemtableManager) Iterator() include.Iterator[MemtableEntry] {
+func (mm *MemtableManager) Iterator() iterator.Iterator[MemtableEntry] {
 	mm.mu.Lock()
 	defer mm.mu.Unlock()
 
-	var rawIters []include.Iterator[MemtableEntry]
+	var rawIters []iterator.Iterator[MemtableEntry]
 	if mm.active != nil {
 		rawIters = append(rawIters, NewRawSingleMemtableIterator(mm.active.Iterator()))
 	}

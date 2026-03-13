@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"crypto/rand"
 	"encoding/binary"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -455,61 +454,4 @@ func (b *BloomFilter) ToBytes() ([]byte, error) {
 func (b *BloomFilter) FromBytes(data []byte) error {
 	_, err := b.ReadFrom(bytes.NewReader(data))
 	return err
-}
-
-// helperi
-type bloomFilterJSON struct {
-	N     uint     `json:"n"`
-	P     float64  `json:"p"`
-	M     uint     `json:"m"`
-	K     uint     `json:"k"`
-	Bits  []byte   `json:"bits"`
-	Seeds [][]byte `json:"seeds"`
-}
-
-func (b *BloomFilter) MarshalJSON() ([]byte, error) {
-	if b == nil {
-		return []byte("null"), nil
-	}
-	return json.Marshal(bloomFilterJSON{
-		N:     b.n,
-		P:     b.p,
-		M:     b.m,
-		K:     b.k,
-		Bits:  b.bits,
-		Seeds: b.Seeds(),
-	})
-}
-
-func (b *BloomFilter) UnmarshalJSON(data []byte) error {
-	if b == nil {
-		return errors.New("nil bloom filter")
-	}
-	var j bloomFilterJSON
-	if err := json.Unmarshal(data, &j); err != nil {
-		return err
-	}
-	if j.N == 0 {
-		return errors.New("neispravan bloom filter: n=0")
-	}
-	if j.P <= 0 || j.P >= 1 {
-		return errors.New("neispravan bloom filter: p van opsega")
-	}
-	if j.M == 0 || j.K == 0 {
-		return errors.New("neispravan bloom filter: m/k neispravno")
-	}
-	if len(j.Seeds) != int(j.K) {
-		return fmt.Errorf("neispravan bloom filter: broj seed-ova (%d) != k (%d)", len(j.Seeds), j.K)
-	}
-
-	b.n = j.N
-	b.p = j.P
-	b.m = j.M
-	b.k = j.K
-
-	b.bits = make([]byte, len(j.Bits))
-	copy(b.bits, j.Bits)
-
-	b.hashFunctions = CreateHashFunctions(j.Seeds)
-	return nil
 }

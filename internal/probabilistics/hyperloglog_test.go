@@ -2,7 +2,6 @@ package probabilistics
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"math"
 	"testing"
@@ -192,74 +191,6 @@ func TestHyperLogLog_FromBytesInvalidMagic(t *testing.T) {
 	var h HyperLogLog
 	if err := h.FromBytes([]byte("BAD!")); err == nil {
 		t.Fatalf("ocekivana greska za neispravan magic")
-	}
-}
-
-func TestHyperLogLog_JSONRoundTrip(t *testing.T) {
-	h := NewHyperLogLogWithParams(14, fixedSeed(0xAB, 32))
-	for i := 0; i < 1200; i++ {
-		h.AddString(fmt.Sprintf("json-%d", i))
-	}
-
-	data, err := json.Marshal(h)
-	if err != nil {
-		t.Fatalf("MarshalJSON error: %v", err)
-	}
-
-	var h2 HyperLogLog
-	if err := json.Unmarshal(data, &h2); err != nil {
-		t.Fatalf("UnmarshalJSON error: %v", err)
-	}
-
-	if h.Count() != h2.Count() {
-		t.Fatalf("count nije isti posle JSON round-trip: c1=%d c2=%d", h.Count(), h2.Count())
-	}
-}
-
-func TestHyperLogLog_JSONInvalidCases(t *testing.T) {
-
-	j1 := hyperLogLogJSON{
-		Precision: 3,
-		Seed:      []byte{1},
-		Registers: make([]uint8, 16),
-	}
-	b1, err := json.Marshal(j1)
-	if err != nil {
-		t.Fatalf("marshal j1 error: %v", err)
-	}
-	var h1 HyperLogLog
-	if err := json.Unmarshal(b1, &h1); err == nil {
-		t.Fatalf("ocekivana greska za invalid precision")
-	}
-
-	// invalid registers length (precision=4 => m=16)
-	j2 := hyperLogLogJSON{
-		Precision: 4,
-		Seed:      []byte{1},
-		Registers: make([]uint8, 15),
-	}
-	b2, err := json.Marshal(j2)
-	if err != nil {
-		t.Fatalf("marshal j2 error: %v", err)
-	}
-	var h2 HyperLogLog
-	if err := json.Unmarshal(b2, &h2); err == nil {
-		t.Fatalf("ocekivana greska za neispravnu duzinu registara")
-	}
-
-	// invalid empty seed
-	j3 := hyperLogLogJSON{
-		Precision: 4,
-		Seed:      []byte{},
-		Registers: make([]uint8, 16),
-	}
-	b3, err := json.Marshal(j3)
-	if err != nil {
-		t.Fatalf("marshal j3 error: %v", err)
-	}
-	var h3 HyperLogLog
-	if err := json.Unmarshal(b3, &h3); err == nil {
-		t.Fatalf("ocekivana greška za prazan seed")
 	}
 }
 
