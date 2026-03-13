@@ -10,6 +10,15 @@ import (
 	"github.com/ajromen/LSM-KV-Engine/internal/core"
 )
 
+const helpText = `LSM-KV-Engine CLI
+
+Commands:
+  put <key> <value>   Store a key-value pair
+  get <key>           Retrieve the value of a key
+  del <key>           Delete a key
+  help                Show this help message
+  exit | quit         Close the engine and exit`
+
 func main() {
 	flags := cli.ParseFlags()
 	engine, err := core.NewEngine(flags)
@@ -46,7 +55,7 @@ func RunCli(engine *core.Engine) {
 			engine.Close()
 			return
 		case "help":
-			fmt.Println("commands...")
+			fmt.Println(helpText)
 		default:
 			fmt.Println("Unknown command: ", parts[0])
 		}
