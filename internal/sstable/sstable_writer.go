@@ -196,6 +196,7 @@ func (w *SSTableWriter) Finalize() error {
 	w.footer.MaxTimeStamp = w.maxTimestamp
 	w.footer.MinKeyLength = w.minKeyLength
 	w.footer.MaxKeyLength = w.maxKeyLength
+	w.footer.Format = w.config.Format
 
 	// step 4
 	if w.filterSegment != nil {

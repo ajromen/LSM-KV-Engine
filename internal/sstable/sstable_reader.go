@@ -9,6 +9,7 @@ package sstable
 import (
 	"bytes"
 	"errors"
+	"os"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/block"
 	"github.com/ajromen/LSM-KV-Engine/internal/config"
@@ -26,10 +27,33 @@ type SSTableReader struct {
 	config         *config.Config      // config for given sstable
 }
 
+// detectSSTableFormat determines if an SSTable is single-file or multi-file format
+func detectSSTableFormat(filePath string) (byte, error) {
+	// Check if multi-file format exists (look for .footer file)
+	footerFile := filePath + ".footer"
+	if _, err := os.Stat(footerFile); err == nil {
+		// .footer file exists, this is multi-file format
+		return 1, nil
+	}
+
+	// Otherwise it's single-file format
+	return 0, nil
+}
+
 // NewSSTableReader opens an SSTable file and loads all necessary segments into RAM
 func NewSSTableReader(filePath string, cfg *config.Config) (*SSTableReader, error) {
-	// storage opens file too
-	storage, err := OpenStorage(filePath, cfg)
+	fileFormat, err := detectSSTableFormat(filePath)
+	if err != nil {
+		return nil, err
+	}
+	var storage SegmentStorage
+	if fileFormat == 0 {
+		// Single-file format
+		storage, err = OpenSingleFileStorage(filePath)
+	} else {
+		// Multi-file format
+		storage, err = OpenMultiFileStorage(filePath)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -44,7 +68,6 @@ func NewSSTableReader(filePath string, cfg *config.Config) (*SSTableReader, erro
 	case *MultiFileStorage:
 		offset = 0
 	}
-
 	// read and validate footer
 	footerData, err := storage.ReadSegment(config.SegmentFooter, offset, FooterSize)
 	if err != nil {
@@ -184,8 +207,12 @@ func (r *SSTableReader) Get(key []byte) (*Record, error) {
 
 	// step 4
 	dataBlockIdx := indexBlock.Entries[entryIdx].BlockIndex
+	dataFilePath := r.filePath
+	if _, err := os.Stat(r.filePath + ".data"); err == nil {
+		dataFilePath = r.filePath + ".data"
+	}
 	blockKey := block.BlockKey{
-		FilePath: r.filePath,
+		FilePath: dataFilePath,
 		Offset:   dataBlockIdx,
 	}
 	blockData, err := r.blockManager.Read(blockKey)

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/block"
 	"github.com/ajromen/LSM-KV-Engine/internal/config"
@@ -41,14 +42,27 @@ func (f *SSTableFactory) LoadExistingSSTables() error {
 	if err != nil {
 		return err
 	}
-	sstableFiles := make([]string, 0)
+	sstableFiles := make(map[string]bool)
 	for _, file := range files {
-		if !file.IsDir() && filepath.Ext(file.Name()) == ".sst" {
-			sstableFiles = append(sstableFiles, filepath.Join(f.dataDir, file.Name()))
+		if !file.IsDir() {
+			name := file.Name()
+			// Single-file: 000000.sst
+			if filepath.Ext(name) == ".sst" && !strings.Contains(strings.TrimSuffix(name, ".sst"), ".") {
+				sstableFiles[filepath.Join(f.dataDir, name)] = true
+			}
+			// Multi-file: 000000.sst.data -> add 000000.sst to list
+			if strings.HasSuffix(name, ".sst.data") {
+				basePath := filepath.Join(f.dataDir, strings.TrimSuffix(name, ".data"))
+				sstableFiles[basePath] = true
+			}
 		}
 	}
-	sort.Strings(sstableFiles)
-	for _, filePath := range sstableFiles {
+	sortedFiles := make([]string, 0, len(sstableFiles))
+	for file := range sstableFiles {
+		sortedFiles = append(sortedFiles, file)
+	}
+	sort.Strings(sortedFiles)
+	for _, filePath := range sortedFiles {
 		reader, err := NewSSTableReader(filePath, f.config)
 		if err != nil {
 			return err

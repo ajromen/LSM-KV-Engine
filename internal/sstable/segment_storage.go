@@ -192,7 +192,7 @@ func (m *MultiFileStorage) getOrOpenFile(segType config.SegmentType) (*os.File, 
 func (m *MultiFileStorage) getFilePath(segType config.SegmentType) string {
 	switch segType {
 	case config.SegmentData:
-		return m.basePath
+		return m.basePath + ".data"
 	case config.SegmentFilter:
 		return m.basePath + ".filter"
 	case config.SegmentIndex:
