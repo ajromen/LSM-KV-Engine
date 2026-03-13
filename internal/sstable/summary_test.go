@@ -115,7 +115,8 @@ func TestSummarySegmentWriteReadFile(t *testing.T) {
 	defer os.Remove(tmpFile.Name())
 	defer tmpFile.Close()
 
-	n, err := summary.WriteToFile(tmpFile)
+	data := summary.Encode()
+	n, err := tmpFile.Write(data)
 	if err != nil {
 		t.Fatalf("write failed: %v", err)
 	}
@@ -123,9 +124,16 @@ func TestSummarySegmentWriteReadFile(t *testing.T) {
 		t.Fatalf("no bytes written")
 	}
 
-	readSummary, err := ReadSummaryFromFile(tmpFile, 0, n)
-	if err != nil {
+	if _, err := tmpFile.Seek(0, 0); err != nil {
+		t.Fatalf("seek failed: %v", err)
+	}
+	readData := make([]byte, n)
+	if _, err := tmpFile.Read(readData); err != nil {
 		t.Fatalf("read failed: %v", err)
+	}
+	readSummary, err := DecodeSummarySegment(readData)
+	if err != nil {
+		t.Fatalf("decode failed: %v", err)
 	}
 
 	if !bytes.Equal(readSummary.MinKey, summary.MinKey) {

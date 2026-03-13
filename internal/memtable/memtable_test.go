@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/config"
-	"github.com/ajromen/LSM-KV-Engine/internal/include"
+	"github.com/ajromen/LSM-KV-Engine/internal/iterator"
 )
 
 var allTypes = []MemtableType{TypeBTree, TypeSkipList, TypeHashMap}
@@ -242,7 +242,7 @@ func TestRawIteratorAcrossTwoMemtables(t *testing.T) {
 			rawIt2 := m2.active.RawIterator()
 			rawIt2.SeekToFirst()
 
-			globalRaw := NewRawIterator([]include.Iterator[MemtableEntry]{rawIt1, rawIt2}, 1)
+			globalRaw := NewRawIterator([]iterator.Iterator[MemtableEntry]{rawIt1, rawIt2}, 1)
 			globalRaw.SeekToFirst()
 
 			keys := map[string]bool{}
@@ -281,7 +281,7 @@ func TestIteratorSeek(t *testing.T) {
 			rawIt2 := m2.active.RawIterator()
 			rawIt2.SeekToFirst()
 
-			globalRaw := NewRawIterator([]include.Iterator[MemtableEntry]{rawIt1, rawIt2}, 1)
+			globalRaw := NewRawIterator([]iterator.Iterator[MemtableEntry]{rawIt1, rawIt2}, 1)
 			globalIt := NewMergedMemtableIterator(globalRaw)
 			globalIt.Seek(MemtableEntry{Key: []byte("key3"), Timestamp: math.MaxInt64})
 

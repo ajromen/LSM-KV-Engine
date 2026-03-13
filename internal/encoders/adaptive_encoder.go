@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"hash/fnv"
-	"os"
 )
 
 type candidate struct {
@@ -188,20 +187,4 @@ func (ad *AdaptiveDict) ReadDictionary(data []byte) error {
 		ad.nextId = i + 1
 	}
 	return nil
-}
-
-func (ad *AdaptiveDict) WriteToFile(filepath string) error {
-	data, err := ad.WriteDictionary()
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(filepath, data, 0666)
-}
-
-func (ad *AdaptiveDict) ReadFromFile(filepath string) error {
-	data, err := os.ReadFile(filepath)
-	if err != nil {
-		return err
-	}
-	return ad.ReadDictionary(data)
 }

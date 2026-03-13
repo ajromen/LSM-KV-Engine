@@ -8,7 +8,7 @@ import (
 
 	"github.com/ajromen/LSM-KV-Engine/internal/data_structures"
 	"github.com/ajromen/LSM-KV-Engine/internal/encoders"
-	"github.com/ajromen/LSM-KV-Engine/internal/include"
+	"github.com/ajromen/LSM-KV-Engine/internal/iterator"
 	"github.com/ajromen/LSM-KV-Engine/internal/utils"
 )
 
@@ -542,7 +542,7 @@ func NewMergeIteratorRaw(iters []*DataBlockIteratorRaw, mergeStructure byte) *Me
 	if len(iters) == 0 {
 		return &MergeIteratorRaw{valid: false}
 	}
-	wrapped := make([]include.Iterator[Record], 0, len(iters))
+	wrapped := make([]iterator.Iterator[Record], 0, len(iters))
 	for _, it := range iters {
 		if it != nil && it.Valid() {
 			wrapped = append(wrapped, it)

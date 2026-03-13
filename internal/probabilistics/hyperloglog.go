@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"crypto/rand"
 	"encoding/binary"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -385,57 +384,6 @@ func (h *HyperLogLog) ToBytes() ([]byte, error) {
 func (h *HyperLogLog) FromBytes(data []byte) error {
 	_, err := h.ReadFrom(bytes.NewReader(data))
 	return err
-}
-
-// JSON helperi
-type hyperLogLogJSON struct {
-	Precision uint8   `json:\"precision\"`
-	Seed      []byte  `json:\"seed\"`
-	Registers []uint8 `json:\"registers\"`
-}
-
-func (h *HyperLogLog) MarshalJSON() ([]byte, error) {
-	if h == nil {
-		return []byte("null"), nil
-	}
-	seedCopy := make([]byte, len(h.hashFn.Seed))
-	copy(seedCopy, h.hashFn.Seed)
-	regsCopy := make([]uint8, len(h.registers))
-	copy(regsCopy, h.registers)
-	return json.Marshal(hyperLogLogJSON{
-		Precision: h.precision,
-		Seed:      seedCopy,
-		Registers: regsCopy,
-	})
-}
-
-func (h *HyperLogLog) UnmarshalJSON(data []byte) error {
-	if h == nil {
-		return errors.New("nil hyperloglog")
-	}
-	var j hyperLogLogJSON
-	if err := json.Unmarshal(data, &j); err != nil {
-		return err
-	}
-	if j.Precision < 4 || j.Precision > 18 {
-		return fmt.Errorf("neispravna preciznost: %d", j.Precision)
-	}
-	m := uint32(1) << j.Precision
-	if len(j.Registers) != int(m) {
-		return fmt.Errorf("neispravna dužina registara: %d (očekivano %d)", len(j.Registers), m)
-	}
-	if len(j.Seed) == 0 {
-		return errors.New("neispravan seed")
-	}
-
-	h.precision = j.Precision
-	h.m = m
-	h.registers = make([]uint8, len(j.Registers))
-	copy(h.registers, j.Registers)
-	seedCopy := make([]byte, len(j.Seed))
-	copy(seedCopy, j.Seed)
-	h.hashFn = HashWithSeed{Seed: seedCopy}
-	return nil
 }
 
 // Merge operator podrška (2.3 zadatak): ADD element se zapisuje kao operand (HLM1)

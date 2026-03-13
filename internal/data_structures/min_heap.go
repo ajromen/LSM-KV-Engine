@@ -1,9 +1,9 @@
 package data_structures
 
-import "github.com/ajromen/LSM-KV-Engine/internal/include"
+import "github.com/ajromen/LSM-KV-Engine/internal/iterator"
 
 type PriorityQueueItem[T any] struct {
-	iterator include.Iterator[T]
+	iterator iterator.Iterator[T]
 }
 
 type HeapPriorityQueue[T any] struct {
@@ -81,7 +81,7 @@ func (h *HeapPriorityQueue[T]) heapify() {
 	}
 }
 
-func NewHeapPriorityQueue[T any](iters []include.Iterator[T], cmp Comparator[T]) *HeapPriorityQueue[T] {
+func NewHeapPriorityQueue[T any](iters []iterator.Iterator[T], cmp Comparator[T]) *HeapPriorityQueue[T] {
 	h := &HeapPriorityQueue[T]{
 		data: make([]*PriorityQueueItem[T], 0, len(iters)),
 		cmp:  cmp,
@@ -95,14 +95,14 @@ func NewHeapPriorityQueue[T any](iters []include.Iterator[T], cmp Comparator[T])
 	return h
 }
 
-func (h *HeapPriorityQueue[T]) Winner() include.Iterator[T] {
+func (h *HeapPriorityQueue[T]) Winner() iterator.Iterator[T] {
 	if h.isEmpty() {
 		return nil
 	}
 	return h.data[0].iterator
 }
 
-func (h *HeapPriorityQueue[T]) Update(it include.Iterator[T]) {
+func (h *HeapPriorityQueue[T]) Update(it iterator.Iterator[T]) {
 	for idx, item := range h.data {
 		if item.iterator == it {
 			if !it.Valid() {
@@ -121,7 +121,7 @@ func (h *HeapPriorityQueue[T]) Update(it include.Iterator[T]) {
 	}
 }
 
-func (h *HeapPriorityQueue[T]) Advance(it include.Iterator[T]) {
+func (h *HeapPriorityQueue[T]) Advance(it iterator.Iterator[T]) {
 	if h.isEmpty() {
 		return
 	}
@@ -139,8 +139,8 @@ func (h *HeapPriorityQueue[T]) Advance(it include.Iterator[T]) {
 	}
 }
 
-func (h *HeapPriorityQueue[T]) Iterators() []include.Iterator[T] {
-	iterators := []include.Iterator[T]{}
+func (h *HeapPriorityQueue[T]) Iterators() []iterator.Iterator[T] {
+	iterators := []iterator.Iterator[T]{}
 	for _, it := range h.data {
 		iterators = append(iterators, it.iterator)
 	}

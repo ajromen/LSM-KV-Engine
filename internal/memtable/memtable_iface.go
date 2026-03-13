@@ -1,6 +1,6 @@
 package memtable
 
-import "github.com/ajromen/LSM-KV-Engine/internal/include"
+import "github.com/ajromen/LSM-KV-Engine/internal/iterator"
 
 type MemtableEntry struct {
 	Key       []byte
@@ -20,8 +20,8 @@ type MemtableStore interface {
 	Reset()
 	Size() int
 	Visualize(func(MemtableEntry) string) string
-	RawIterator() include.Iterator[MemtableEntry]
-	Iterator() include.Iterator[MemtableEntry]
+	RawIterator() iterator.Iterator[MemtableEntry]
+	Iterator() iterator.Iterator[MemtableEntry]
 }
 
 type Memtable interface {
@@ -35,8 +35,8 @@ type Memtable interface {
 	NumEntries() int
 	SizeBytes() uint64
 	Visualize() string
-	RawIterator() include.Iterator[MemtableEntry]
-	Iterator() include.Iterator[MemtableEntry]
+	RawIterator() iterator.Iterator[MemtableEntry]
+	Iterator() iterator.Iterator[MemtableEntry]
 }
 
 type MemtableType string

@@ -4,14 +4,14 @@ import (
 	"bytes"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/data_structures"
-	"github.com/ajromen/LSM-KV-Engine/internal/include"
+	"github.com/ajromen/LSM-KV-Engine/internal/iterator"
 )
 
 type RawSingleMemtableIterator struct {
-	it include.Iterator[MemtableEntry]
+	it iterator.Iterator[MemtableEntry]
 }
 
-func NewRawSingleMemtableIterator(it include.Iterator[MemtableEntry]) include.Iterator[MemtableEntry] {
+func NewRawSingleMemtableIterator(it iterator.Iterator[MemtableEntry]) iterator.Iterator[MemtableEntry] {
 	return &RawSingleMemtableIterator{
 		it: it,
 	}
@@ -55,7 +55,7 @@ type SingleMemtableIterator struct {
 	valid   bool
 }
 
-func NewSingleMemtableIterator(rawIt *RawSingleMemtableIterator) include.Iterator[MemtableEntry] {
+func NewSingleMemtableIterator(rawIt *RawSingleMemtableIterator) iterator.Iterator[MemtableEntry] {
 	it := &SingleMemtableIterator{
 		rawIt: rawIt,
 	}
@@ -128,11 +128,11 @@ type RawIterator struct {
 	valid     bool
 }
 
-func NewRawIterator(iterators []include.Iterator[MemtableEntry], mergeStructure byte) *RawIterator {
+func NewRawIterator(iterators []iterator.Iterator[MemtableEntry], mergeStructure byte) *RawIterator {
 	if len(iterators) == 0 {
 		return &RawIterator{valid: false}
 	}
-	active := []include.Iterator[MemtableEntry]{}
+	active := []iterator.Iterator[MemtableEntry]{}
 	for _, it := range iterators {
 		if it != nil && it.Valid() {
 			active = append(active, it)
@@ -289,7 +289,7 @@ type MergedMemtableIterator struct {
 	valid       bool
 }
 
-func NewMergedMemtableIterator(rawIterator *RawIterator) include.Iterator[MemtableEntry] {
+func NewMergedMemtableIterator(rawIterator *RawIterator) iterator.Iterator[MemtableEntry] {
 	it := &MergedMemtableIterator{
 		rawIterator: rawIterator,
 	}

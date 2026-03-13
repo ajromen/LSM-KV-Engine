@@ -57,19 +57,27 @@ func TestAdaptiveDictWindowing(t *testing.T) {
 func TestAdaptiveDictPersistence(t *testing.T) {
 	t.Log("---- ADAPTIVE DICT PERSISTENCE TEST ----")
 	ad := NewAdaptiveDict(100, 15)
-	val := []byte("persistent-val") // 14b
+	val := []byte("persistent-val")
 	ad.EncodeValue(val)
 	ad.EncodeValue(val)
+
 	tmpFile := "test_adaptive.dict"
 	defer os.Remove(tmpFile)
-	err := ad.WriteToFile(tmpFile)
+	data, err := ad.WriteDictionary()
 	if err != nil {
+		t.Fatalf("failed to serialize: %v", err)
+	}
+	if err := os.WriteFile(tmpFile, data, 0666); err != nil {
 		t.Fatalf("failed to write: %v", err)
 	}
+
 	newAd := NewAdaptiveDict(100, 15)
-	err = newAd.ReadFromFile(tmpFile)
+	fileData, err := os.ReadFile(tmpFile)
 	if err != nil {
 		t.Fatalf("failed to read: %v", err)
+	}
+	if err := newAd.ReadDictionary(fileData); err != nil {
+		t.Fatalf("failed to deserialize: %v", err)
 	}
 	vType, payload := newAd.EncodeValue(val)
 	if vType != 1 {

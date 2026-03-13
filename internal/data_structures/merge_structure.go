@@ -1,12 +1,12 @@
 package data_structures
 
-import "github.com/ajromen/LSM-KV-Engine/internal/include"
+import "github.com/ajromen/LSM-KV-Engine/internal/iterator"
 
 type MergeStructure[T any] interface {
-	Winner() include.Iterator[T]
-	Update(it include.Iterator[T])
-	Advance(it include.Iterator[T])
-	Iterators() []include.Iterator[T]
+	Winner() iterator.Iterator[T]
+	Update(it iterator.Iterator[T])
+	Advance(it iterator.Iterator[T])
+	Iterators() []iterator.Iterator[T]
 	Cmp() Comparator[T]
 }
 
@@ -15,7 +15,7 @@ const (
 	WTree byte = 1
 )
 
-func NewMergeStructure[T any](t byte, iters []include.Iterator[T], cmp Comparator[T]) MergeStructure[T] {
+func NewMergeStructure[T any](t byte, iters []iterator.Iterator[T], cmp Comparator[T]) MergeStructure[T] {
 	switch t {
 	case Heap:
 		return NewHeapPriorityQueue(iters, cmp)

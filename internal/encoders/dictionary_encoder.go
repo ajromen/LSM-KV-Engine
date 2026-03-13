@@ -122,6 +122,7 @@ func Deserialize(data []byte) (*DictionaryEncoder, error) {
 	return encoder, nil
 }
 
+// used for testing only
 func LoadFromFile(dir, name string) (*DictionaryEncoder, error) {
 	path := filepath.Join(dir, name)
 	data, err := os.ReadFile(path)
@@ -134,11 +135,7 @@ func LoadFromFile(dir, name string) (*DictionaryEncoder, error) {
 	return Deserialize(data)
 }
 
-func SaveToFile(dir, name string, data []byte) error {
-	path := filepath.Join(dir, name)
-	return os.WriteFile(path, data, 0644)
-}
-
+// used for testing only
 func (encoder *DictionaryEncoder) AppendLastToFile(dir, name string) error {
 	if len(encoder.keys) == 0 {
 		return errors.New("append last: dictionary is empty")

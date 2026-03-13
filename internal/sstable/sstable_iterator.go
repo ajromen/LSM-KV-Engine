@@ -5,7 +5,7 @@ import (
 
 	"github.com/ajromen/LSM-KV-Engine/internal/block"
 	"github.com/ajromen/LSM-KV-Engine/internal/data_structures"
-	"github.com/ajromen/LSM-KV-Engine/internal/include"
+	"github.com/ajromen/LSM-KV-Engine/internal/iterator"
 )
 
 type sstableBlockSource struct {
@@ -226,10 +226,10 @@ type SSTableMergeIteratorRaw struct {
 	valid     bool
 }
 
-var _ include.Iterator[Record] = (*SSTableMergeIteratorRaw)(nil)
+var _ iterator.Iterator[Record] = (*SSTableMergeIteratorRaw)(nil)
 
 func NewSSTableMergeIteratorRaw(readers []*SSTableReader, mergeStructure byte) (*SSTableMergeIteratorRaw, error) {
-	wrapped := make([]include.Iterator[Record], 0, len(readers))
+	wrapped := make([]iterator.Iterator[Record], 0, len(readers))
 	for _, r := range readers {
 		it, err := NewSSTableIteratorRaw(r)
 		if err != nil {
@@ -311,7 +311,7 @@ type SSTableMergeIterator struct {
 	valid   bool
 }
 
-var _ include.Iterator[Record] = (*SSTableMergeIterator)(nil)
+var _ iterator.Iterator[Record] = (*SSTableMergeIterator)(nil)
 
 func NewSSTableMergeIterator(readers []*SSTableReader, mergeStructure byte) (*SSTableMergeIterator, error) {
 	raw, err := NewSSTableMergeIteratorRaw(readers, mergeStructure)
