@@ -155,3 +155,110 @@ func (s *HashMapStore) Iterator() include.Iterator[MemtableEntry] {
 	rawIt := s.RawIterator().(*RawSingleMemtableIterator)
 	return NewSingleMemtableIterator(rawIt)
 }
+
+// ---- RBTree store adapter ----
+
+type RBTreeStore struct {
+	tree *data_structures.RBTree[MemtableEntry]
+}
+
+func NewRBTreeStore(
+	cmp data_structures.Comparator[MemtableEntry],
+	cmpIgnoringTimestamp data_structures.Comparator[MemtableEntry],
+) *RBTreeStore {
+	return &RBTreeStore{
+		tree: data_structures.NewRBTree[MemtableEntry](cmp, cmpIgnoringTimestamp),
+	}
+}
+
+func (s *RBTreeStore) Insert(entry MemtableEntry) {
+	s.tree.Insert(entry)
+}
+
+func (s *RBTreeStore) Search(entry MemtableEntry) *MemtableEntry {
+	node := s.tree.LowerBound(entry)
+	if node == nil {
+		return nil
+	}
+
+	val := node.Key
+	return &val
+}
+
+func (s *RBTreeStore) EntriesInOrder() []MemtableEntry {
+	return s.tree.EntriesInOrder()
+}
+
+func (s *RBTreeStore) Reset() {
+	s.tree.Reset()
+}
+
+func (s *RBTreeStore) Size() int {
+	return s.tree.Size()
+}
+
+func (s *RBTreeStore) Visualize(formatter func(MemtableEntry) string) string {
+	return s.tree.Visualize(formatter)
+}
+
+func (s *RBTreeStore) RawIterator() include.Iterator[MemtableEntry] {
+	return NewRawSingleMemtableIterator(s.tree.Iterator())
+}
+
+func (s *RBTreeStore) Iterator() include.Iterator[MemtableEntry] {
+	rawIt := s.RawIterator().(*RawSingleMemtableIterator)
+	return NewSingleMemtableIterator(rawIt)
+}
+
+// ---- AVLTree store adapter ----
+
+type AVLTreeStore struct {
+	tree *data_structures.AVLTree[MemtableEntry]
+}
+
+func NewAVLTreeStore(
+	cmp data_structures.Comparator[MemtableEntry],
+	cmpIgnoringTimestamp data_structures.Comparator[MemtableEntry],
+) *AVLTreeStore {
+	return &AVLTreeStore{
+		tree: data_structures.NewAVLTree[MemtableEntry](cmp, cmpIgnoringTimestamp),
+	}
+}
+
+func (s *AVLTreeStore) Insert(entry MemtableEntry) {
+	s.tree.Insert(entry)
+}
+
+func (s *AVLTreeStore) Search(entry MemtableEntry) *MemtableEntry {
+	node := s.tree.LowerBound(entry)
+	if node == nil {
+		return nil
+	}
+	val := node.Key
+	return &val
+}
+
+func (s *AVLTreeStore) EntriesInOrder() []MemtableEntry {
+	return s.tree.EntriesInOrder()
+}
+
+func (s *AVLTreeStore) Reset() {
+	s.tree.Reset()
+}
+
+func (s *AVLTreeStore) Size() int {
+	return s.tree.Size()
+}
+
+func (s *AVLTreeStore) Visualize(formatter func(MemtableEntry) string) string {
+	return s.tree.Visualize(formatter)
+}
+
+func (s *AVLTreeStore) RawIterator() include.Iterator[MemtableEntry] {
+	return NewRawSingleMemtableIterator(s.tree.Iterator())
+}
+
+func (s *AVLTreeStore) Iterator() include.Iterator[MemtableEntry] {
+	rawIt := s.RawIterator().(*RawSingleMemtableIterator)
+	return NewSingleMemtableIterator(rawIt)
+}

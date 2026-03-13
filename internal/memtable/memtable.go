@@ -44,6 +44,10 @@ func NewMemtable(cfg config.MemtableConfig) Memtable {
 		store = NewSkipListStore(level, cmp)
 	case "hashmap":
 		store = NewHashMapStore()
+	case "rbtree":
+		store = NewRBTreeStore(cmp, cmp)
+	case "avltree":
+		store = NewAVLTreeStore(cmp, cmp)
 	default:
 		panic("unknown memtable type: " + t)
 	}
