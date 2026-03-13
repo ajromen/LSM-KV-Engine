@@ -149,3 +149,24 @@ func (bm *BlockManager) EnsureSize(path string, sizeBytes int64) error {
 	// Truncate file
 	return f.Truncate(sizeBytes)
 }
+
+// used for specific parts of database
+func (bm *BlockManager) WriteNoBlock(f *os.File, offset uint64, data []byte) error {
+	_, err := f.Seek(int64(offset), io.SeekStart)
+	if err != nil {
+		return err
+	}
+	_, err = f.Write(data)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (bm *BlockManager) ReadNoBlock(f *os.File, offset uint64, size uint32) ([]byte, error) {
+	data := make([]byte, size)
+	if _, err := f.ReadAt(data, int64(offset)); err != nil {
+		return nil, err
+	}
+	return data, nil
+}

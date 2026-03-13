@@ -63,7 +63,7 @@ func RunCli(engine *core.Engine) {
 }
 
 func handlePut(engine *core.Engine, parts []string) {
-	if len(parts) < 3 {
+	if len(parts) != 3 {
 		fmt.Println("Usage: put <key> <value>")
 		return
 	}
@@ -77,7 +77,7 @@ func handlePut(engine *core.Engine, parts []string) {
 }
 
 func handleGet(engine *core.Engine, parts []string) {
-	if len(parts) < 2 {
+	if len(parts) != 2 {
 		fmt.Println("Usage: get <key>")
 		return
 	}
@@ -88,14 +88,14 @@ func handleGet(engine *core.Engine, parts []string) {
 		return
 	}
 	if !found {
-		fmt.Println("Get: not found")
+		fmt.Println("Get: key '" + key + "' not found")
 		return
 	}
 	fmt.Println(string(value))
 }
 
 func handleDelete(engine *core.Engine, parts []string) {
-	if len(parts) < 2 {
+	if len(parts) != 2 {
 		fmt.Println("Usage: delete <key>")
 		return
 	}
