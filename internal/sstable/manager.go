@@ -14,7 +14,7 @@ import (
 	"github.com/ajromen/LSM-KV-Engine/internal/utils"
 )
 
-type SSTableFactory struct {
+type SSTableManager struct {
 	config        *config.Config
 	sstables      []*SSTableReader
 	blockManager  *block.BlockManager
@@ -22,23 +22,23 @@ type SSTableFactory struct {
 	dataDir       string
 }
 
-func NewSSTableFactory(dataDir string, cfg *config.Config) *SSTableFactory {
-	factory := &SSTableFactory{
+func NewSSTableManager(dataDir string, cfg *config.Config) *SSTableManager {
+	manager := &SSTableManager{
 		config:        cfg,
 		sstables:      make([]*SSTableReader, 0),
 		nextSSTableID: 0,
 		dataDir:       dataDir,
 	}
 	blockSize := cfg.SSTable.DataSegment.BlockSize
-	factory.blockManager = block.NewBlockManager(blockSize, 100)
-	if err := factory.LoadExistingSSTables(); err != nil {
+	manager.blockManager = block.NewBlockManager(blockSize, 100)
+	if err := manager.LoadExistingSSTables(); err != nil {
 		panic(err)
 	}
-	return factory
+	return manager
 }
 
-func (f *SSTableFactory) LoadExistingSSTables() error {
-	files, err := os.ReadDir(f.dataDir)
+func (sm *SSTableManager) LoadExistingSSTables() error {
+	files, err := os.ReadDir(sm.dataDir)
 	if err != nil {
 		return err
 	}
@@ -48,11 +48,11 @@ func (f *SSTableFactory) LoadExistingSSTables() error {
 			name := file.Name()
 			// Single-file: 000000.sst
 			if filepath.Ext(name) == ".sst" && !strings.Contains(strings.TrimSuffix(name, ".sst"), ".") {
-				sstableFiles[filepath.Join(f.dataDir, name)] = true
+				sstableFiles[filepath.Join(sm.dataDir, name)] = true
 			}
 			// Multi-file: 000000.sst.data -> add 000000.sst to list
 			if strings.HasSuffix(name, ".sst.data") {
-				basePath := filepath.Join(f.dataDir, strings.TrimSuffix(name, ".data"))
+				basePath := filepath.Join(sm.dataDir, strings.TrimSuffix(name, ".data"))
 				sstableFiles[basePath] = true
 			}
 		}
@@ -63,31 +63,31 @@ func (f *SSTableFactory) LoadExistingSSTables() error {
 	}
 	sort.Strings(sortedFiles)
 	for _, filePath := range sortedFiles {
-		reader, err := NewSSTableReader(filePath, f.config)
+		reader, err := NewSSTableReader(filePath, sm.config)
 		if err != nil {
 			return err
 		}
-		f.sstables = append(f.sstables, reader)
+		sm.sstables = append(sm.sstables, reader)
 		var id uint64
 		fmt.Sscanf(filepath.Base(filePath), "%d.sst", &id)
-		if id >= f.nextSSTableID {
-			f.nextSSTableID = id + 1
+		if id >= sm.nextSSTableID {
+			sm.nextSSTableID = id + 1
 		}
 	}
-	fmt.Printf("Loaded %d existing SSTables\n", len(f.sstables))
+	fmt.Printf("Loaded %d existing SSTables\n", len(sm.sstables))
 	return nil
 }
 
-func (f *SSTableFactory) FlushToSSTable(entries []memtable.MemtableEntry) error {
+func (sm *SSTableManager) FlushToSSTable(entries []memtable.MemtableEntry) error {
 	if len(entries) == 0 {
 		return nil
 	}
 	fmt.Printf("Flushing %d entries\n", len(entries))
 	sort.Slice(entries, func(i, j int) bool { return bytes.Compare(entries[i].Key, entries[j].Key) < 0 })
-	sstableID := f.nextSSTableID
-	f.nextSSTableID++
-	filePath := filepath.Join(f.dataDir, fmt.Sprintf("%06d.sst", sstableID))
-	writer, err := NewSSTableWriter(filePath, f.blockManager, f.config, len(entries))
+	sstableID := sm.nextSSTableID
+	sm.nextSSTableID++
+	filePath := filepath.Join(sm.dataDir, fmt.Sprintf("%06d.sst", sstableID))
+	writer, err := NewSSTableWriter(filePath, sm.blockManager, sm.config, len(entries))
 	if err != nil {
 		return err
 	}
@@ -105,18 +105,18 @@ func (f *SSTableFactory) FlushToSSTable(entries []memtable.MemtableEntry) error 
 	if err := writer.Finalize(); err != nil {
 		return err
 	}
-	reader, err := NewSSTableReader(filePath, f.config)
+	reader, err := NewSSTableReader(filePath, sm.config)
 	if err != nil {
 		return err
 	}
-	f.sstables = append(f.sstables, reader)
+	sm.sstables = append(sm.sstables, reader)
 	fmt.Printf("SSTable %s created with %d entries\n", filepath.Base(filePath), len(entries))
 	return nil
 }
 
-func (f *SSTableFactory) Get(key []byte) ([]byte, bool, error) {
-	for i := len(f.sstables) - 1; i >= 0; i-- {
-		record, err := f.sstables[i].Get(key)
+func (sm *SSTableManager) Get(key []byte) ([]byte, bool, error) {
+	for i := len(sm.sstables) - 1; i >= 0; i-- {
+		record, err := sm.sstables[i].Get(key)
 		if err != nil {
 			return nil, false, err
 		}

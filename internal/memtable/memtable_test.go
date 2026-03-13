@@ -14,10 +14,10 @@ import (
 
 var allTypes = []MemtableType{TypeBTree, TypeSkipList, TypeHashMap}
 
-func newMemtable(t *testing.T, mt MemtableType, maxEntries int, maxBytes uint64, handler func([]MemtableEntry)) *MemtableFactory {
+func newMemtable(t *testing.T, mt MemtableType, maxEntries int, maxBytes uint64, handler func([]MemtableEntry)) *MemtableManager {
 	t.Helper()
 	factory := NewFactory(config.NewDefaultConfig().Memtable)
-	return NewMemtableFactory(5, 1, factory, handler)
+	return NewMemtableManager(5, 1, factory, handler)
 }
 
 // ============================================================
@@ -304,10 +304,10 @@ func TestIteratorSeek(t *testing.T) {
 }
 
 // ============================================================
-// Factory-level iterator across active + immutables
+// Manager-level iterator across active + immutables
 // ============================================================
 
-func TestFactoryIteratorAcrossFlush(t *testing.T) {
+func TestManagerIteratorAcrossFlush(t *testing.T) {
 	for _, mt := range allTypes {
 		mt := mt
 		t.Run(string(mt), func(t *testing.T) {
@@ -360,7 +360,7 @@ func TestConcurrency(t *testing.T) {
 	flushCount := 0
 
 	factory := NewFactory(config.NewDefaultConfig().Memtable)
-	memFactory := NewMemtableFactory(5, 0, factory, func(entries []MemtableEntry) {
+	memManager := NewMemtableManager(5, 0, factory, func(entries []MemtableEntry) {
 		mu.Lock()
 		flushCount++
 		current := flushCount
@@ -391,7 +391,7 @@ func TestConcurrency(t *testing.T) {
 				key := fmt.Sprintf("worker%d-key%04d", workerID, i)
 				value := fmt.Sprintf("value-%d-%d", workerID, i)
 				ts := uint64(workerID*writesPerWriter + i)
-				memFactory.Put([]byte(key), []byte(value), ts, false)
+				memManager.Put([]byte(key), []byte(value), ts, false)
 			}
 		}(w)
 	}
@@ -403,7 +403,7 @@ func TestConcurrency(t *testing.T) {
 			defer wg.Done()
 			for i := 0; i < 100; i++ {
 				key := fmt.Sprintf("worker%d-key%04d", readerID, i)
-				v, ok := memFactory.Get([]byte(key))
+				v, ok := memManager.Get([]byte(key))
 				if ok {
 					t.Logf("reader %d: got key=%s value=%s", readerID, key, v)
 				}
@@ -417,7 +417,7 @@ func TestConcurrency(t *testing.T) {
 		defer wg.Done()
 		for i := 0; i < 50; i++ {
 			key := fmt.Sprintf("worker0-key%04d", i)
-			memFactory.Delete([]byte(key), uint64(999999+i))
+			memManager.Delete([]byte(key), uint64(999999+i))
 		}
 	}()
 
@@ -436,7 +436,7 @@ func TestConcurrency(t *testing.T) {
 	expectedTotal := expectedWrites + expectedDeletes
 
 	// entries still in active memtable were not flushed yet
-	it := memFactory.Iterator()
+	it := memManager.Iterator()
 	it.SeekToFirst()
 	inMemory := 0
 	for it.Valid() {
@@ -455,7 +455,7 @@ func TestConcurrency(t *testing.T) {
 	}
 
 	// raw iterator must agree
-	rawIt := memFactory.RawIterator()
+	rawIt := memManager.RawIterator()
 	rawIt.SeekToFirst()
 	rawCount := 0
 	for rawIt.Valid() {
@@ -474,7 +474,7 @@ func TestMemtableLifecycle(t *testing.T) {
 
 	wg.Add(1)
 
-	mem := NewMemtableFactory(5, 0, factory, func(entries []MemtableEntry) {
+	mem := NewMemtableManager(5, 0, factory, func(entries []MemtableEntry) {
 		fmt.Println("=== FLUSH START ===")
 		for _, e := range entries {
 			fmt.Printf("flush: key=%s value=%s ts=%d tomb=%v\n",

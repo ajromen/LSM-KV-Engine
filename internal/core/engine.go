@@ -12,8 +12,8 @@ import (
 
 type Engine struct {
 	config          *config.Config
-	memtableFactory *memtable.MemtableFactory
-	sstableFactory  *sstable.SSTableFactory
+	memtableManager *memtable.MemtableManager
+	sstableManager  *sstable.SSTableManager
 }
 
 func currentTimestamp() uint64 {
@@ -30,34 +30,34 @@ func NewEngine(flags *cli.FLags) (*Engine, error) {
 	if err := os.MkdirAll(dataDir, 0755); err != nil {
 		return nil, err
 	}
-	sstableFactory := sstable.NewSSTableFactory(dataDir, cfg)
+	sstableManager := sstable.NewSSTableManager(dataDir, cfg)
 	factory := memtable.NewFactory(cfg.Memtable)
 	flushHandler := func(entries []memtable.MemtableEntry) {
-		if err := sstableFactory.FlushToSSTable(entries); err != nil {
+		if err := sstableManager.FlushToSSTable(entries); err != nil {
 			return
 		}
 	}
-	memFactory := memtable.NewMemtableFactory(3, 0, factory, flushHandler)
+	memManager := memtable.NewMemtableManager(3, 0, factory, flushHandler)
 	engine := &Engine{
 		config:          cfg,
-		memtableFactory: memFactory,
-		sstableFactory:  sstableFactory,
+		memtableManager: memManager,
+		sstableManager:  sstableManager,
 	}
 	return engine, nil
 }
 
 func (engine *Engine) Put(key []byte, value []byte) error {
 	ts := currentTimestamp()
-	engine.memtableFactory.Put(key, value, ts, false)
+	engine.memtableManager.Put(key, value, ts, false)
 	return nil
 }
 
 func (engine *Engine) Get(key []byte) ([]byte, bool, error) {
-	entry, found := engine.memtableFactory.Get(key)
+	entry, found := engine.memtableManager.Get(key)
 	if found {
 		return entry, true, nil
 	}
-	entry, found, err := engine.sstableFactory.Get(key)
+	entry, found, err := engine.sstableManager.Get(key)
 	if err != nil {
 		return nil, false, err
 	}
@@ -69,7 +69,7 @@ func (engine *Engine) Get(key []byte) ([]byte, bool, error) {
 
 func (engine *Engine) Delete(key []byte) error {
 	ts := currentTimestamp()
-	engine.memtableFactory.Put(key, nil, ts, true)
+	engine.memtableManager.Put(key, nil, ts, true)
 	return nil
 }
 
