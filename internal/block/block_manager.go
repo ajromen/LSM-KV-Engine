@@ -35,6 +35,16 @@ func (bm *BlockManager) Read(key BlockKey) ([]byte, error) {
 		return val, nil
 	}
 
+	data, err := bm.ReadNoCache(key)
+	if err != nil {
+		return nil, err
+	}
+
+	bm.cache.Put(key, data)
+	return data, nil
+}
+
+func (bm *BlockManager) ReadNoCache(key BlockKey) ([]byte, error) {
 	f, err := os.Open(key.FilePath)
 	if err != nil {
 		return nil, err
@@ -50,7 +60,7 @@ func (bm *BlockManager) Read(key BlockKey) ([]byte, error) {
 	}
 	cpy := make([]byte, len(val))
 	copy(cpy, val)
-	bm.cache.Put(key, cpy)
+
 	return cpy, nil
 }
 
@@ -59,6 +69,18 @@ func (bm *BlockManager) Write(key BlockKey, value []byte) error {
 		return fmt.Errorf("invalid block size")
 	}
 
+	err := bm.WriteNoCache(key, value)
+	if err != nil {
+		return err
+	}
+
+	cpy := make([]byte, len(value))
+	copy(cpy, value)
+	bm.cache.Put(key, cpy)
+	return nil
+}
+
+func (bm *BlockManager) WriteNoCache(key BlockKey, value []byte) error {
 	f, err := os.OpenFile(key.FilePath, os.O_CREATE|os.O_RDWR, 0o644)
 	if err != nil {
 		return err
@@ -70,9 +92,6 @@ func (bm *BlockManager) Write(key BlockKey, value []byte) error {
 		return err
 	}
 
-	cpy := make([]byte, len(value))
-	copy(cpy, value)
-	bm.cache.Put(key, cpy)
 	return nil
 }
 
@@ -91,12 +110,20 @@ func (bm *BlockManager) WriteAt(f *os.File, key BlockKey, value []byte) error {
 		return fmt.Errorf("invalid block size")
 	}
 
-	offset := int64(bm.blockSize) * int64(key.Offset)
-	if _, err := f.WriteAt(value, offset); err != nil {
+	err := bm.WriteAtNoCache(f, key, value)
+	if err != nil {
 		return err
 	}
 
 	bm.cache.Put(key, value)
+	return nil
+}
+
+func (bm *BlockManager) WriteAtNoCache(f *os.File, key BlockKey, value []byte) error {
+	offset := int64(bm.blockSize) * int64(key.Offset)
+	if _, err := f.WriteAt(value, offset); err != nil {
+		return err
+	}
 	return nil
 }
 
