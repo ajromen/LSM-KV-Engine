@@ -109,6 +109,10 @@ func (c *Config) validateFields() error {
 		return fmt.Errorf("invalid LSM compaction algorithm")
 	}
 
+	if !fileExists(c.SavePath) {
+		return fmt.Errorf("save path does not exist")
+	}
+
 	// TODO continue validation
 	return nil
 }
@@ -148,4 +152,9 @@ func (c *SSTableConfig) SegmentPaths(basePath string) map[SegmentType]string {
 		paths[SegmentFooter] = basePath + ".footer"
 	}
 	return paths
+}
+
+func fileExists(filename string) bool {
+	_, err := os.Stat(filename)
+	return err == nil
 }
