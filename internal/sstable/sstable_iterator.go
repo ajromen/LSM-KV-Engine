@@ -8,6 +8,9 @@ import (
 	"github.com/ajromen/LSM-KV-Engine/internal/iterator"
 )
 
+// sstableBlockSource provides block-level acces to an SSTable
+// it is responsible for loading data blocks, caching already-read blocks in memory and creating iterators over individual blocks
+// this abstraction prevents sstable iterators from needing to know anything about block managing
 type sstableBlockSource struct {
 	reader     *SSTableReader
 	numBlocks  int
@@ -15,6 +18,7 @@ type sstableBlockSource struct {
 	blockCache map[int][]byte
 }
 
+// newSSTableBlockSource constructs a block source from an SSTableReader
 func newSSTableBlockSource(reader *SSTableReader) *sstableBlockSource {
 	return &sstableBlockSource{
 		reader:     reader,
@@ -24,6 +28,7 @@ func newSSTableBlockSource(reader *SSTableReader) *sstableBlockSource {
 	}
 }
 
+// loadBlock loads a block from disk if it is not already cached
 func (s *sstableBlockSource) loadBlock(n int) ([]byte, error) {
 	if data, ok := s.blockCache[n]; ok {
 		return data, nil
@@ -40,6 +45,7 @@ func (s *sstableBlockSource) loadBlock(n int) ([]byte, error) {
 	return data, nil
 }
 
+// blockIteratorRaw creates a raw iterator for n-th block in given sstable
 func (s *sstableBlockSource) blockIteratorRaw(n int) (*DataBlockIteratorRaw, error) {
 	data, err := s.loadBlock(n)
 	if err != nil {
@@ -48,6 +54,8 @@ func (s *sstableBlockSource) blockIteratorRaw(n int) (*DataBlockIteratorRaw, err
 	return NewDataBlockIteratorRaw(data, int(s.reader.footer.RestartInterval), s.reader.footer.EncodingType)
 }
 
+// SSTableIteratorRaw iterates over all records in an SSTable at raw level
+// exposing all records including tombstones and older versions of same key
 type SSTableIteratorRaw struct {
 	src       *sstableBlockSource
 	blockIdx  int
@@ -56,6 +64,7 @@ type SSTableIteratorRaw struct {
 	valid     bool
 }
 
+// NewSSTableIteratorRaw creates a new raw iterator and positions it at the first record
 func NewSSTableIteratorRaw(reader *SSTableReader) (*SSTableIteratorRaw, error) {
 	it := &SSTableIteratorRaw{src: newSSTableBlockSource(reader)}
 	it.SeekToFirst()
@@ -90,28 +99,36 @@ func (it *SSTableIteratorRaw) SeekToLast() {
 	it.valid = false
 }
 
+// Seek positions the iterator to the first record >= target
+// this uses the sstable indexing structure - Summary -> Index -> Data
 func (it *SSTableIteratorRaw) Seek(target Record) {
+	// find index block containing the key from summary
 	indexBlockNum := it.src.reader.summarySegment.FindIndexBlockNumber(target.Key)
 	if indexBlockNum < 0 {
 		it.valid = false
 		return
 	}
+	// load that index block
 	indexBlock, err := it.src.reader.loadIndexBlock(indexBlockNum)
 	if err != nil {
 		it.valid = false
 		return
 	}
+	// find entry within index block
 	entryIdx := indexBlock.FindBlock(target.Key)
 	if entryIdx < 0 {
 		it.valid = false
 		return
 	}
+	// take the logical offset of data block from entry in index block
 	dataBlockIdx := indexBlock.Entries[entryIdx].BlockIndex
+	// create raw iterator over that data block
 	blockIterator, err := it.src.blockIteratorRaw(int(dataBlockIdx))
 	if err != nil {
 		it.valid = false
 		return
 	}
+	// position given iterator on targeting record
 	blockIterator.Seek(target)
 	it.blockIdx = int(dataBlockIdx)
 	it.blockIter = blockIterator
@@ -125,16 +142,19 @@ func (it *SSTableIteratorRaw) Seek(target Record) {
 	}
 }
 
+// Next moves iterator forward
 func (it *SSTableIteratorRaw) Next() {
 	if !it.valid {
 		return
 	}
 	it.blockIter.Next()
+	// check if still inside same block
 	if it.blockIter.Valid() {
 		rec := it.blockIter.Key()
 		it.current = &rec
 		return
 	}
+	// if not move to next block
 	it.blockIdx++
 	for it.blockIdx < it.src.numBlocks {
 		bi, err := it.src.blockIteratorRaw(it.blockIdx)
@@ -152,6 +172,7 @@ func (it *SSTableIteratorRaw) Next() {
 		}
 		it.blockIdx++
 	}
+	// end of sstable data
 	it.current = nil
 	it.valid = false
 	it.blockIter = nil
@@ -161,6 +182,7 @@ func (it *SSTableIteratorRaw) Prev() {
 	panic("SSTableIteratorRaw: Prev not implemented")
 }
 
+// advanceBlock moves forward until a block with at least one record is found.
 func (it *SSTableIteratorRaw) advanceBlock() {
 	for it.blockIdx < it.src.numBlocks {
 		bi, err := it.src.blockIteratorRaw(it.blockIdx)
@@ -185,6 +207,9 @@ func (it *SSTableIteratorRaw) advanceBlock() {
 func (it *SSTableIteratorRaw) Key() Record   { return *it.current }
 func (it *SSTableIteratorRaw) Value() Record { return *it.current }
 
+// SSTableIterator iterates over all records in sstable with filtering
+// filtering -> skipping older versions of the same key and if the newest version of key is tombstone skip that key completely
+// it uses raw sstable iterator and its method but has a special method called advance
 type SSTableIterator struct {
 	raw     *SSTableIteratorRaw
 	current *Record
@@ -249,6 +274,7 @@ func (it *SSTableIterator) Prev() {
 	panic("SSTableIterator: Prev not implemented")
 }
 
+// advance skips tombstones and duplicate keys.
 func (it *SSTableIterator) advance(prevKey []byte) {
 	for it.raw.Valid() {
 		rec := it.raw.Key()
@@ -273,6 +299,8 @@ func (it *SSTableIterator) advance(prevKey []byte) {
 func (it *SSTableIterator) Key() Record   { return *it.current }
 func (it *SSTableIterator) Value() Record { return *it.current }
 
+// SSTableMergeIteratorRaw merges multiple SSTableIteratorRaw instances using a merge structure
+// it produces records in sorted order across all sstables
 type SSTableMergeIteratorRaw struct {
 	structure data_structures.MergeStructure[Record]
 	current   *Record
@@ -358,6 +386,8 @@ func (m *SSTableMergeIteratorRaw) syncFromWinner() {
 	m.valid = true
 }
 
+// SSTableMergeIterator uses SSTableMergeIteratorRaw logic and has special method advance for filtering
+// filtering -> skipping older versions of the same key and if the newest version of key is tombstone skip that key completely
 type SSTableMergeIterator struct {
 	raw     *SSTableMergeIteratorRaw
 	current *Record
