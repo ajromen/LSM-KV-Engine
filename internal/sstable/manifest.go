@@ -16,7 +16,7 @@ const ManifestFileName = "MANIFEST.json"
 type SSTableManifest struct {
 	Id           uint64 `json:"id"`
 	BaseFileName string `json:"base_file_name"`
-	IsMulti      bool   `json:"is_multi"`
+	Format       byte   `json:"is_multi"`
 	Layer        uint64 `json:"layer"`
 }
 
@@ -51,18 +51,18 @@ func (m *Manifest) reconstruct(fileDir string) error {
 	if err != nil {
 		return err
 	}
-	sstableFiles := make(map[string]bool)
+	sstableFiles := make(map[string]byte)
 	for _, file := range files {
 		if !file.IsDir() {
 			name := file.Name()
 			// Single-file: 000000.sst
 			if filepath.Ext(name) == ".sst" && !strings.Contains(strings.TrimSuffix(name, ".sst"), ".") {
-				sstableFiles[filepath.Join(fileDir, name)] = false
+				sstableFiles[filepath.Join(fileDir, name)] = 0
 			}
 			// Multi-file: 000000.sst.data -> add 000000.sst to list
 			if strings.HasSuffix(name, ".sst.data") {
 				basePath := filepath.Join(fileDir, strings.TrimSuffix(name, ".data"))
-				sstableFiles[basePath] = true
+				sstableFiles[basePath] = 1
 			}
 		}
 	}
@@ -83,7 +83,7 @@ func (m *Manifest) reconstruct(fileDir string) error {
 		sst := SSTableManifest{
 			Layer:        0,
 			BaseFileName: filepath.Base(filePath),
-			IsMulti:      sstableFiles[filePath],
+			Format:       sstableFiles[filePath],
 			Id:           id,
 		}
 		m.Layers[0] = append(m.Layers[0], sst)
@@ -99,8 +99,18 @@ func (m *Manifest) load() error {
 	return nil
 }
 
-func (m *Manifest) Save() error {
+func (m *Manifest) save() error {
 	err := block.WriteJSON(path.Join(m.FileDir, ManifestFileName), m)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (m *Manifest) AddSSTable(sstManifest SSTableManifest) error {
+	layer := int(sstManifest.Layer)
+	m.Layers[layer] = append(m.Layers[layer], sstManifest)
+	err := m.save()
 	if err != nil {
 		return err
 	}

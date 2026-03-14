@@ -14,13 +14,22 @@ type SegmentStorage interface {
 	ReadSegment(segType config.SegmentType, offset uint64, size uint32) ([]byte, error)
 	Close() error
 	Sync() error
+	SetBlockManager(bm *block.BlockManager)
 }
 
 // SingleFileStorage STORES ALL SSTABLE SEGMENTS IN A SINGLE PHYSICAL FILE
 type SingleFileStorage struct {
 	file         *os.File            // single file all segments are written into
 	offset       uint64              // current write offset in the file
-	blockManager *block.BlockManager // block manager for writing blocks
+	BlockManager *block.BlockManager // block manager for writing blocks
+}
+
+func (s *SingleFileStorage) SetBlockManager(bm *block.BlockManager) {
+	s.BlockManager = bm
+}
+
+func (m *MultiFileStorage) SetBlockManager(bm *block.BlockManager) {
+	m.BlockManager = bm
 }
 
 func NewSingleFileStorage(filePath string, blockManager *block.BlockManager) (*SingleFileStorage, error) {
@@ -28,7 +37,7 @@ func NewSingleFileStorage(filePath string, blockManager *block.BlockManager) (*S
 	if err != nil {
 		return nil, err
 	}
-	return &SingleFileStorage{file: file, offset: 0, blockManager: blockManager}, nil
+	return &SingleFileStorage{file: file, offset: 0, BlockManager: blockManager}, nil
 }
 
 func OpenSingleFileStorage(filePath string) (*SingleFileStorage, error) {
@@ -41,21 +50,21 @@ func OpenSingleFileStorage(filePath string) (*SingleFileStorage, error) {
 
 // WriteSegment APPENDS SEGMENT TO A FILE AND RETURNS ITS OFFSET + SIZE
 func (s *SingleFileStorage) WriteSegment(segType config.SegmentType, data []byte) (uint64, uint32, error) {
-	if (segType == config.SegmentData || segType == config.SegmentIndex) && s.blockManager != nil {
-		blockSize := uint64(s.blockManager.BlockSize())
+	if (segType == config.SegmentData || segType == config.SegmentIndex) && s.BlockManager != nil {
+		blockSize := uint64(s.BlockManager.BlockSize())
 		remainder := s.offset % blockSize
 		if remainder != 0 {
 			padding := make([]byte, blockSize-remainder)
 
-			err := s.blockManager.WriteNoBlock(s.file, s.offset, padding)
+			err := s.BlockManager.WriteNoBlock(s.file, s.offset, padding)
 			if err != nil {
 				return 0, 0, err
 			}
 
 			s.offset += uint64(len(padding))
 		}
-		if len(data) < s.blockManager.BlockSize() {
-			pad := make([]byte, s.blockManager.BlockSize()-len(data))
+		if len(data) < s.BlockManager.BlockSize() {
+			pad := make([]byte, s.BlockManager.BlockSize()-len(data))
 			data = append(data, pad...)
 		}
 		offset := s.offset
@@ -63,14 +72,14 @@ func (s *SingleFileStorage) WriteSegment(segType config.SegmentType, data []byte
 			FilePath: s.file.Name(),
 			Offset:   uint32(s.offset / blockSize),
 		}
-		if err := s.blockManager.Write(blockKey, data); err != nil {
+		if err := s.BlockManager.Write(blockKey, data); err != nil {
 			return 0, 0, err
 		}
 		s.offset += uint64(len(data))
 		return offset, uint32(len(data)), nil
 	}
 	offset := s.offset
-	err := s.blockManager.WriteNoBlock(s.file, offset, data)
+	err := s.BlockManager.WriteNoBlock(s.file, offset, data)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -80,15 +89,15 @@ func (s *SingleFileStorage) WriteSegment(segType config.SegmentType, data []byte
 
 // ReadSegment READS SEGMENT FROM A FILE (OFFSET AND SIZE ARE FORWARDED FROM FOOTER)
 func (s *SingleFileStorage) ReadSegment(segType config.SegmentType, offset uint64, size uint32) ([]byte, error) {
-	if (segType == config.SegmentData || segType == config.SegmentIndex) && s.blockManager != nil {
-		blockSize := uint64(s.blockManager.BlockSize())
+	if (segType == config.SegmentData || segType == config.SegmentIndex) && s.BlockManager != nil {
+		blockSize := uint64(s.BlockManager.BlockSize())
 		blockKey := block.BlockKey{
 			FilePath: s.file.Name(),
 			Offset:   uint32(offset / blockSize),
 		}
-		return s.blockManager.Read(blockKey)
+		return s.BlockManager.Read(blockKey)
 	}
-	data, err := s.blockManager.ReadNoBlock(s.file, offset, size)
+	data, err := s.BlockManager.ReadNoBlock(s.file, offset, size)
 	if err != nil {
 		return nil, err
 	}
@@ -118,7 +127,7 @@ type MultiFileStorage struct {
 	basePath     string                          // base path on which prefixes like .footer are added
 	files        map[config.SegmentType]*os.File // open file handles per segment type
 	offsets      map[config.SegmentType]uint64   // current write offsets per segment
-	blockManager *block.BlockManager             // block manager for writing blocks
+	BlockManager *block.BlockManager             // block manager for writing blocks
 }
 
 func NewMultiFileStorage(basePath string, blockManager *block.BlockManager) (*MultiFileStorage, error) {
@@ -126,7 +135,7 @@ func NewMultiFileStorage(basePath string, blockManager *block.BlockManager) (*Mu
 		basePath:     basePath,
 		files:        make(map[config.SegmentType]*os.File),
 		offsets:      make(map[config.SegmentType]uint64),
-		blockManager: blockManager,
+		BlockManager: blockManager,
 	}, nil
 }
 
@@ -193,23 +202,23 @@ func (m *MultiFileStorage) WriteSegment(segType config.SegmentType, data []byte)
 		return 0, 0, err
 	}
 	offset := m.offsets[segType]
-	if (segType == config.SegmentData || segType == config.SegmentIndex) && m.blockManager != nil {
-		if len(data) < m.blockManager.BlockSize() {
-			padding := make([]byte, m.blockManager.BlockSize()-len(data))
+	if (segType == config.SegmentData || segType == config.SegmentIndex) && m.BlockManager != nil {
+		if len(data) < m.BlockManager.BlockSize() {
+			padding := make([]byte, m.BlockManager.BlockSize()-len(data))
 			data = append(data, padding...)
 		}
 		blockKey := block.BlockKey{
 			FilePath: file.Name(),
-			Offset:   uint32(offset / uint64(m.blockManager.BlockSize())),
+			Offset:   uint32(offset / uint64(m.BlockManager.BlockSize())),
 		}
-		if err := m.blockManager.Write(blockKey, data); err != nil {
+		if err := m.BlockManager.Write(blockKey, data); err != nil {
 			return 0, 0, err
 		}
 
 		m.offsets[segType] += uint64(len(data))
 		return offset, uint32(len(data)), nil
 	}
-	err = m.blockManager.WriteNoBlock(file, offset, data)
+	err = m.BlockManager.WriteNoBlock(file, offset, data)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -224,16 +233,16 @@ func (m *MultiFileStorage) ReadSegment(segType config.SegmentType, offset uint64
 	if err != nil {
 		return nil, err
 	}
-	if (segType == config.SegmentData || segType == config.SegmentIndex) && m.blockManager != nil {
-		blockSize := uint64(m.blockManager.BlockSize())
+	if (segType == config.SegmentData || segType == config.SegmentIndex) && m.BlockManager != nil {
+		blockSize := uint64(m.BlockManager.BlockSize())
 		blockKey := block.BlockKey{
 			FilePath: file.Name(),
 			Offset:   uint32(offset / blockSize),
 		}
-		return m.blockManager.Read(blockKey)
+		return m.BlockManager.Read(blockKey)
 	}
 
-	data, err := m.blockManager.ReadNoBlock(file, offset, size)
+	data, err := m.BlockManager.ReadNoBlock(file, offset, size)
 	if err != nil {
 		return nil, err
 	}

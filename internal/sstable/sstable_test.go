@@ -60,7 +60,7 @@ func TestSSTableWriterBasic(t *testing.T) {
 	if _, err := os.Stat(tempFile); os.IsNotExist(err) {
 		t.Fatalf("SSTable file was not created")
 	}
-	reader, err := NewSSTableReader(tempFile, cfg)
+	reader, err := NewSSTableReader(tempFile, 0, cfg)
 	if err != nil {
 		fmt.Println("error building reader")
 	}
@@ -106,8 +106,8 @@ func TestSSTableWriterBasic(t *testing.T) {
 }
 
 func TestSSTableMultiFileFormat(t *testing.T) {
-	tempFile := filepath.Join(os.TempDir(), "test_sstable_multifile.db")
-	defer os.Remove(tempFile)
+	tempFile := filepath.Join(os.TempDir(), "test_sstable_multifile.sst")
+	defer os.Remove(tempFile + ".data")
 	defer os.Remove(tempFile + ".filter")
 	defer os.Remove(tempFile + ".index")
 	defer os.Remove(tempFile + ".summary")
@@ -145,7 +145,7 @@ func TestSSTableMultiFileFormat(t *testing.T) {
 		t.Fatalf("Failed to finalize: %v", err)
 	}
 	files := []string{
-		tempFile,
+		tempFile + ".data",
 		tempFile + ".filter",
 		tempFile + ".index",
 		tempFile + ".summary",
@@ -157,7 +157,7 @@ func TestSSTableMultiFileFormat(t *testing.T) {
 			t.Errorf("Expected file %s to exist", file)
 		}
 	}
-	reader, err := NewSSTableReader(tempFile, cfg)
+	reader, err := NewSSTableReader(tempFile, 1, cfg)
 	if err != nil {
 		t.Fatalf("Failed to create sstable reader: %v", err)
 	}
@@ -241,7 +241,7 @@ func TestSSTableIteratorRaw(t *testing.T) {
 	if _, err := os.Stat(tempFile); os.IsNotExist(err) {
 		t.Fatalf("SSTable file was not created")
 	}
-	reader, err := NewSSTableReader(tempFile, cfg)
+	reader, err := NewSSTableReader(tempFile, 0, cfg)
 	iterator, err := NewSSTableIteratorRaw(reader)
 	if err != nil {
 		t.Fatalf("Failed to create iterator: %v", err)
@@ -281,7 +281,7 @@ func TestSSTableIterator(t *testing.T) {
 	if _, err := os.Stat(tempFile); os.IsNotExist(err) {
 		t.Fatalf("SSTable file was not created")
 	}
-	reader, err := NewSSTableReader(tempFile, cfg)
+	reader, err := NewSSTableReader(tempFile, 0, cfg)
 	iterator, err := NewSSTableIterator(reader)
 	if err != nil {
 		t.Fatalf("Failed to create iterator: %v", err)
@@ -344,11 +344,11 @@ func TestSSTableMergeIteratorRaw(t *testing.T) {
 		t.Fatalf("Failed to finalize writer2: %v", err)
 	}
 
-	reader1, err := NewSSTableReader(tempFile1, cfg)
+	reader1, err := NewSSTableReader(tempFile1, 0, cfg)
 	if err != nil {
 		t.Fatalf("Failed to create reader1: %v", err)
 	}
-	reader2, err := NewSSTableReader(tempFile2, cfg)
+	reader2, err := NewSSTableReader(tempFile2, 0, cfg)
 	if err != nil {
 		t.Fatalf("Failed to create reader2: %v", err)
 	}
@@ -412,11 +412,11 @@ func TestSSTableMergeIteratorRawWithDuplicates(t *testing.T) {
 		t.Fatalf("Failed to finalize writer2: %v", err)
 	}
 
-	reader1, err := NewSSTableReader(tempFile1, cfg)
+	reader1, err := NewSSTableReader(tempFile1, 0, cfg)
 	if err != nil {
 		t.Fatalf("Failed to create reader1: %v", err)
 	}
-	reader2, err := NewSSTableReader(tempFile2, cfg)
+	reader2, err := NewSSTableReader(tempFile2, 0, cfg)
 	if err != nil {
 		t.Fatalf("Failed to create reader2: %v", err)
 	}
@@ -487,11 +487,11 @@ func TestSSTableMergeIteratorWithTombstones(t *testing.T) {
 	if err := writer2.Finalize(); err != nil {
 		t.Fatalf("Failed to finalize writer2: %v", err)
 	}
-	reader1, err := NewSSTableReader(tempFile1, cfg)
+	reader1, err := NewSSTableReader(tempFile1, 0, cfg)
 	if err != nil {
 		t.Fatalf("Failed to create reader1: %v", err)
 	}
-	reader2, err := NewSSTableReader(tempFile2, cfg)
+	reader2, err := NewSSTableReader(tempFile2, 0, cfg)
 	if err != nil {
 		t.Fatalf("Failed to create reader2: %v", err)
 	}
@@ -548,7 +548,7 @@ func TestSSTableGet(t *testing.T) {
 		t.Fatalf("Failed to finalize writer: %v", err)
 	}
 
-	reader, err := NewSSTableReader(tempFile, cfg)
+	reader, err := NewSSTableReader(tempFile, 0, cfg)
 	if err != nil {
 		t.Fatalf("Failed to create reader: %v", err)
 	}
