@@ -9,25 +9,35 @@ import (
 )
 
 type sstableBlockSource struct {
-	reader    *SSTableReader
-	numBlocks int
-	blockSize int
+	reader     *SSTableReader
+	numBlocks  int
+	blockSize  int
+	blockCache map[int][]byte
 }
 
 func newSSTableBlockSource(reader *SSTableReader) *sstableBlockSource {
 	return &sstableBlockSource{
-		reader:    reader,
-		numBlocks: int(reader.footer.NumDataBlocks),
-		blockSize: reader.blockManager.BlockSize(),
+		reader:     reader,
+		numBlocks:  int(reader.footer.NumDataBlocks),
+		blockSize:  reader.blockManager.BlockSize(),
+		blockCache: make(map[int][]byte),
 	}
 }
 
 func (s *sstableBlockSource) loadBlock(n int) ([]byte, error) {
+	if data, ok := s.blockCache[n]; ok {
+		return data, nil
+	}
 	key := block.BlockKey{
 		FilePath: s.reader.filePath,
 		Offset:   uint32(n),
 	}
-	return s.reader.blockManager.Read(key)
+	data, err := s.reader.blockManager.Read(key)
+	if err != nil {
+		return nil, err
+	}
+	s.blockCache[n] = data
+	return data, nil
 }
 
 func (s *sstableBlockSource) blockIteratorRaw(n int) (*DataBlockIteratorRaw, error) {
@@ -81,12 +91,37 @@ func (it *SSTableIteratorRaw) SeekToLast() {
 }
 
 func (it *SSTableIteratorRaw) Seek(target Record) {
-	it.SeekToFirst()
-	for it.valid {
-		if bytes.Compare(it.current.Key, target.Key) >= 0 {
-			return
-		}
-		it.Next()
+	indexBlockNum := it.src.reader.summarySegment.FindIndexBlockNumber(target.Key)
+	if indexBlockNum < 0 {
+		it.valid = false
+		return
+	}
+	indexBlock, err := it.src.reader.loadIndexBlock(indexBlockNum)
+	if err != nil {
+		it.valid = false
+		return
+	}
+	entryIdx := indexBlock.FindBlock(target.Key)
+	if entryIdx < 0 {
+		it.valid = false
+		return
+	}
+	dataBlockIdx := indexBlock.Entries[entryIdx].BlockIndex
+	blockIterator, err := it.src.blockIteratorRaw(int(dataBlockIdx))
+	if err != nil {
+		it.valid = false
+		return
+	}
+	blockIterator.Seek(target)
+	it.blockIdx = int(dataBlockIdx)
+	it.blockIter = blockIterator
+	if blockIterator.Valid() {
+		rec := blockIterator.Key()
+		it.current = &rec
+		it.valid = true
+	} else {
+		it.current = nil
+		it.valid = false
 	}
 }
 
@@ -101,7 +136,25 @@ func (it *SSTableIteratorRaw) Next() {
 		return
 	}
 	it.blockIdx++
-	it.advanceBlock()
+	for it.blockIdx < it.src.numBlocks {
+		bi, err := it.src.blockIteratorRaw(it.blockIdx)
+		if err != nil {
+			it.blockIdx++
+			continue
+		}
+		bi.SeekToFirst()
+		if bi.Valid() {
+			it.blockIter = bi
+			rec := bi.Key()
+			it.current = &rec
+			it.valid = true
+			return
+		}
+		it.blockIdx++
+	}
+	it.current = nil
+	it.valid = false
+	it.blockIter = nil
 }
 
 func (it *SSTableIteratorRaw) Prev() {
@@ -166,7 +219,7 @@ func (it *SSTableIterator) SeekToLast() {
 		if !rec.Tombstone && !bytes.Equal(rec.Key, prevKey) {
 			cp := rec
 			last = &cp
-			prevKey = rec.Key
+			prevKey = append([]byte(nil), rec.Key...)
 		}
 		it.raw.Next()
 	}
@@ -204,7 +257,7 @@ func (it *SSTableIterator) advance(prevKey []byte) {
 			continue
 		}
 		if rec.Tombstone {
-			prevKey = rec.Key
+			prevKey = append([]byte(nil), rec.Key...)
 			it.raw.Next()
 			continue
 		}
