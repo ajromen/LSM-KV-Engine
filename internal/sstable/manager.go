@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/block"
 	"github.com/ajromen/LSM-KV-Engine/internal/config"
@@ -14,22 +13,37 @@ import (
 	"github.com/ajromen/LSM-KV-Engine/internal/utils"
 )
 
+type Layer struct {
+	sstables []*SSTableReader
+}
+
+func newLayer() *Layer {
+	return &Layer{
+		sstables: make([]*SSTableReader, 0),
+	}
+}
+
 type SSTableManager struct {
-	config        *config.Config
-	sstables      []*SSTableReader
-	blockManager  *block.BlockManager
-	nextSSTableID uint64
-	dataDir       string
+	config       *config.Config
+	layers       []*Layer
+	blockManager *block.BlockManager
+	manifest     *Manifest
+	dataDir      string
 }
 
 func NewSSTableManager(dataDir string, cfg *config.Config) *SSTableManager {
 	manager := &SSTableManager{
-		config:        cfg,
-		sstables:      make([]*SSTableReader, 0),
-		nextSSTableID: 0,
-		dataDir:       dataDir,
+		config:  cfg,
+		dataDir: dataDir,
+		layers:  make([]*Layer, 0),
 	}
+	manager.layers = append(manager.layers, newLayer())
 	blockSize := cfg.SSTable.DataSegment.BlockSize
+	manifest, err := NewManifest(dataDir)
+	if err != nil {
+		panic(err)
+	}
+	manager.manifest = manifest
 	manager.blockManager = block.NewBlockManager(blockSize, 100)
 	if err := manager.LoadExistingSSTables(); err != nil {
 		panic(err)
@@ -37,55 +51,45 @@ func NewSSTableManager(dataDir string, cfg *config.Config) *SSTableManager {
 	return manager
 }
 
+// takes sstable names from manifest and loads them
 func (sm *SSTableManager) LoadExistingSSTables() error {
-	files, err := os.ReadDir(sm.dataDir)
-	if err != nil {
-		return err
-	}
-	sstableFiles := make(map[string]bool)
-	for _, file := range files {
-		if !file.IsDir() {
-			name := file.Name()
-			// Single-file: 000000.sst
-			if filepath.Ext(name) == ".sst" && !strings.Contains(strings.TrimSuffix(name, ".sst"), ".") {
-				sstableFiles[filepath.Join(sm.dataDir, name)] = true
-			}
-			// Multi-file: 000000.sst.data -> add 000000.sst to list
-			if strings.HasSuffix(name, ".sst.data") {
-				basePath := filepath.Join(sm.dataDir, strings.TrimSuffix(name, ".data"))
-				sstableFiles[basePath] = true
-			}
-		}
-	}
-	sortedFiles := make([]string, 0, len(sstableFiles))
-	for file := range sstableFiles {
-		sortedFiles = append(sortedFiles, file)
-	}
-	sort.Strings(sortedFiles)
-	for _, filePath := range sortedFiles {
-		reader, err := NewSSTableReader(filePath, sm.config)
+	_, err := os.Stat(sm.dataDir)
+	if os.IsNotExist(err) {
+		err := block.EnsureDir(sm.dataDir)
 		if err != nil {
 			return err
 		}
-		sm.sstables = append(sm.sstables, reader)
-		var id uint64
-		fmt.Sscanf(filepath.Base(filePath), "%d.sst", &id)
-		if id >= sm.nextSSTableID {
-			sm.nextSSTableID = id + 1
+	}
+	keys := make([]int, 0, len(sm.manifest.Layers))
+	for k := range sm.manifest.Layers {
+		keys = append(keys, k)
+	}
+	sort.Ints(keys)
+
+	for _, i := range keys {
+		for len(sm.layers) <= i {
+			sm.layers = append(sm.layers, newLayer())
+		}
+		for _, sstManifest := range sm.manifest.Layers[i] {
+			reader, err := NewSSTableReader(sstManifest.BaseFileName, sstManifest.Format, sm.config)
+			if err != nil {
+				return err
+			}
+			sm.layers[i].sstables = append(sm.layers[i].sstables, reader)
 		}
 	}
-	fmt.Printf("Loaded %d existing SSTables\n", len(sm.sstables))
 	return nil
 }
 
+// takes memtables and flushes them to sstable
 func (sm *SSTableManager) FlushToSSTable(entries []memtable.MemtableEntry) error {
 	if len(entries) == 0 {
 		return nil
 	}
 	fmt.Printf("Flushing %d entries\n", len(entries))
 	sort.Slice(entries, func(i, j int) bool { return bytes.Compare(entries[i].Key, entries[j].Key) < 0 })
-	sstableID := sm.nextSSTableID
-	sm.nextSSTableID++
+	sstableID := sm.manifest.NextSStableId
+	sm.manifest.NextSStableId++
 	filePath := filepath.Join(sm.dataDir, fmt.Sprintf("%06d.sst", sstableID))
 	writer, err := NewSSTableWriter(filePath, sm.blockManager, sm.config, len(entries))
 	if err != nil {
@@ -105,25 +109,39 @@ func (sm *SSTableManager) FlushToSSTable(entries []memtable.MemtableEntry) error
 	if err := writer.Finalize(); err != nil {
 		return err
 	}
-	reader, err := NewSSTableReader(filePath, sm.config)
+	reader, err := NewSSTableReader(filePath, sm.config.SSTable.Format, sm.config)
 	if err != nil {
 		return err
 	}
-	sm.sstables = append(sm.sstables, reader)
+	sm.layers[0].sstables = append(sm.layers[0].sstables, reader)
+
+	sstManifest := SSTableManifest{
+		Id:           sstableID,
+		Layer:        0,
+		Format:       sm.config.SSTable.Format,
+		BaseFileName: filePath,
+	}
+	err = sm.manifest.AddSSTable(sstManifest)
+	if err != nil {
+		return err
+	}
+
 	fmt.Printf("SSTable %s created with %d entries\n", filepath.Base(filePath), len(entries))
 	return nil
 }
 
 func (sm *SSTableManager) Get(key []byte) ([]byte, bool, error) {
-	for i := len(sm.sstables) - 1; i >= 0; i-- {
-		record, err := sm.sstables[i].Get(key)
-		if err != nil {
-			return nil, false, err
+	for _, layer := range sm.layers {
+		for i := len(layer.sstables) - 1; i >= 0; i-- {
+			record, err := layer.sstables[i].Get(key)
+			if err != nil {
+				return nil, false, err
+			}
+			if record == nil {
+				continue
+			}
+			return record.Value, true, nil
 		}
-		if record == nil {
-			continue
-		}
-		return record.Value, true, nil
 	}
 	return nil, false, nil
 }

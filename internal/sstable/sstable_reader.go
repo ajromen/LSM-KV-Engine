@@ -1,7 +1,7 @@
 /*
 TODO:
 sstable needs to use sstable config
-blockManager should read index blocks too
+BlockManager should read index blocks too
 */
 
 package sstable
@@ -9,6 +9,7 @@ package sstable
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"os"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/block"
@@ -27,33 +28,20 @@ type SSTableReader struct {
 	config         *config.Config      // config for given sstable
 }
 
-// detectSSTableFormat determines if an SSTable is single-file or multi-file format
-func detectSSTableFormat(filePath string) (byte, error) {
-	// Check if multi-file format exists (look for .footer file)
-	footerFile := filePath + ".footer"
-	if _, err := os.Stat(footerFile); err == nil {
-		// .footer file exists, this is multi-file format
-		return 1, nil
-	}
-
-	// Otherwise it's single-file format
-	return 0, nil
-}
-
-// NewSSTableReader opens an SSTable file and loads all necessary segments into RAM
-func NewSSTableReader(filePath string, cfg *config.Config) (*SSTableReader, error) {
-	fileFormat, err := detectSSTableFormat(filePath)
-	if err != nil {
-		return nil, err
-	}
+// opens an SSTable file and loads all necessary segments into RAM -> needs to be fixed
+// storage tries to read while blockManager is nil
+func NewSSTableReader(filePath string, format byte, cfg *config.Config) (*SSTableReader, error) {
 	var storage SegmentStorage
-	if fileFormat == 0 {
-		// Single-file format
+	var err error
+	switch format {
+	case 0:
 		storage, err = OpenSingleFileStorage(filePath)
-	} else {
-		// Multi-file format
+	case 1:
 		storage, err = OpenMultiFileStorage(filePath)
+	default:
+		return nil, fmt.Errorf("unsupported format")
 	}
+
 	if err != nil {
 		return nil, err
 	}
@@ -78,7 +66,8 @@ func NewSSTableReader(filePath string, cfg *config.Config) (*SSTableReader, erro
 	if err := footer.Validate(); err != nil {
 		return nil, err
 	}
-	blockManager := block.NewBlockManager(int(footer.BlockSize), 100)
+	blockManager := block.NewBlockManager(int(footer.BlockSize), cfg.BlockManager.BlockCacheMaxBlocks)
+	storage.SetBlockManager(blockManager)
 	// initialize reader
 	reader := &SSTableReader{
 		storage:      storage,

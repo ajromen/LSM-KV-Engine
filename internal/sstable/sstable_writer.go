@@ -12,7 +12,7 @@ import (
 
 // SSTableWriter allows writing records into sstable
 type SSTableWriter struct {
-	storage           SegmentStorage       // low-level writing of segments -> writing should be completely fixed to work with block manager
+	storage           SegmentStorage       // low-level writing of segments
 	blockManager      *block.BlockManager  // writing and encoding data blocks
 	config            config.SSTableConfig // system SSTable configuration
 	filePath          string               // file path where sstable is written (base path if multi file format)

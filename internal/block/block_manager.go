@@ -1,6 +1,7 @@
 package block
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -169,4 +170,36 @@ func (bm *BlockManager) ReadNoBlock(f *os.File, offset uint64, size uint32) ([]b
 		return nil, err
 	}
 	return data, nil
+}
+
+func ReadJSON(filePath string, obj any) error {
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return err
+	}
+
+	if err := json.Unmarshal(data, obj); err != nil {
+		return err
+	}
+	return nil
+}
+
+func WriteJSON(filePath string, obj any) error {
+	data, err := json.MarshalIndent(obj, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	if err := os.WriteFile(filePath, data, 0644); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func EnsureDir(path string) error {
+	if err := os.MkdirAll(path, 0755); err != nil {
+		return err
+	}
+	return nil
 }

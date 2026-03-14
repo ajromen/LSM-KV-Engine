@@ -1,5 +1,11 @@
 package config
 
+import (
+	"os"
+	"path/filepath"
+	"runtime"
+)
+
 // Za sva podešavanja koja nedostaju u konfiguracionom fajlu sistem treba da dodeli
 // default vrednosti koje se navode u kodu
 const (
@@ -48,6 +54,7 @@ const (
 
 func NewDefaultConfig() *Config {
 	return &Config{
+		SavePath: getDefaultSavePath(),
 		WAL: WALConfig{
 			WALSegmentSize: DefaultWalSegmentSize,
 		},
@@ -99,4 +106,33 @@ func NewDefaultConfig() *Config {
 			BlockCacheMaxBlocks: DefaultBlockCacheMaxBlocks,
 		},
 	}
+}
+
+func getDefaultSavePath() string {
+	var path string
+	switch runtime.GOOS {
+	case "windows":
+		// C:\ProgramData\lsm-kv-engine
+		base := os.Getenv("ProgramData")
+		if base == "" {
+			base = `C:\ProgramData`
+		}
+		path = filepath.Join(base, "lsm-kv-engine")
+	case "darwin":
+		// ~/Library/Application Support/lsm-kv-engine
+		home, _ := os.UserHomeDir()
+		path = filepath.Join(home, "Library", "Application Support", "lsm-kv-engine")
+	default:
+		// ~/.local/share/lsm-kv-engine
+		if xdg := os.Getenv("XDG_DATA_HOME"); xdg != "" {
+			return filepath.Join(xdg, "lsm-kv-engine")
+		}
+		home, _ := os.UserHomeDir()
+		path = filepath.Join(home, ".local", "share", "lsm-kv-engine")
+	}
+	err := os.MkdirAll(path, 0755)
+	if err != nil {
+		panic(err)
+	}
+	return path
 }

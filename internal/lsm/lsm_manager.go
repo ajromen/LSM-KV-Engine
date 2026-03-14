@@ -1,26 +1,23 @@
-package lsm
+package compaction
 
 import (
 	"github.com/ajromen/LSM-KV-Engine/internal/config"
+	"github.com/ajromen/LSM-KV-Engine/internal/memtable"
 	"github.com/ajromen/LSM-KV-Engine/internal/sstable"
 )
 
-type LSMLayer struct {
-	Index uint
-	Table []*sstable.SSTableReader
+type Layer struct {
+	tables []sstable.SSTableReader
 }
 
-type LSMTree struct {
-	Layers []LSMLayer
-
-	CompactionType     string
-	compactionCallback func()
-	MaxLayers          int
+type LSMManager struct {
+	memtableMaganer *memtable.MemtableManager
+	sstableManager  *sstable.SSTableManager
+	strategy        CompactionStrategy
+	cfg             *config.Config
 }
 
-func NewLSMTree(cfg *config.LSMTreeConfig) LSMTree {
-	lsm := LSMTree{}
-	lsm.MaxLayers = cfg.MaxLevels
-	lsm.CompactionType = cfg.CompactionAlgorithm
-	return lsm
+func NewLSMManager(cfg *config.Config, datadir string) *LSMManager {
+	//memManager := memtable.NewMemtableManager(datadir, cfg)
+	return &LSMManager{}
 }
