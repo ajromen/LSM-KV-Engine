@@ -18,6 +18,8 @@ const (
 	CompressionZSTD   byte = 2
 )
 
+// not used
+
 /*
 ┌─────────────────────────────────────────────────────────────────────┐
 │                          DATA BLOCK                                 │
@@ -280,12 +282,15 @@ func (r *DataBlockReader) HasNext() bool {
 	return r.pos < r.dataSize
 }
 
+// DataBlockIteratorRaw iterates over a single data block at the raw level
+// exposing all records including tombstones and older versions of same key
 type DataBlockIteratorRaw struct {
 	reader  *DataBlockReader
 	current *Record
 	valid   bool
 }
 
+// NewDataBlockIteratorRaw creates a new raw iterator for a single block
 func NewDataBlockIteratorRaw(block []byte, restartInterval int, encodingType byte) (*DataBlockIteratorRaw, error) {
 	reader, err := NewDataBlockReader(block, restartInterval, encodingType)
 	if err != nil {
@@ -297,6 +302,7 @@ func NewDataBlockIteratorRaw(block []byte, restartInterval int, encodingType byt
 
 func (it *DataBlockIteratorRaw) Valid() bool { return it.valid }
 
+// SeekToFirst moves the iterator to the first record in a block by using restart array
 func (it *DataBlockIteratorRaw) SeekToFirst() {
 	if err := it.reader.SeekToRestart(0); err != nil {
 		it.valid = false
@@ -305,6 +311,7 @@ func (it *DataBlockIteratorRaw) SeekToFirst() {
 	it.readNext()
 }
 
+// SeekToLast moves the iterator to the last record in a block -> O(n) - not used
 func (it *DataBlockIteratorRaw) SeekToLast() {
 	if err := it.reader.SeekToRestart(0); err != nil {
 		it.valid = false
@@ -326,6 +333,10 @@ func (it *DataBlockIteratorRaw) SeekToLast() {
 	it.valid = true
 }
 
+// Seek positions the iterator at the first record whose key is >= target Key -> steps:
+// 1. Binary search over restart points
+// 2. Linear scan from the chosen restart point
+// 3. Stop at first record whose key is >= target.key
 func (it *DataBlockIteratorRaw) Seek(target Record) {
 	restarts := it.reader.restartArray
 	left, right, best := 0, len(restarts)-1, 0
@@ -366,6 +377,7 @@ func (it *DataBlockIteratorRaw) Seek(target Record) {
 	it.valid = false
 }
 
+// Next moves iterator forward by using readNext helper function
 func (it *DataBlockIteratorRaw) Next() {
 	if !it.valid {
 		return
@@ -373,6 +385,7 @@ func (it *DataBlockIteratorRaw) Next() {
 	it.readNext()
 }
 
+// Prev moves iterator backwards
 func (it *DataBlockIteratorRaw) Prev() {
 	if !it.valid || it.current == nil {
 		return
@@ -409,10 +422,15 @@ func (it *DataBlockIteratorRaw) Prev() {
 	it.valid = true
 }
 
+// Key and Value return current record
 func (it *DataBlockIteratorRaw) Key() Record { return *it.current }
 
 func (it *DataBlockIteratorRaw) Value() Record { return *it.current }
 
+// readNext is a helper function:
+// 1. Check whether next record exists
+// 2. Read next record and set it as current record
+// both are reader methods
 func (it *DataBlockIteratorRaw) readNext() {
 	if !it.reader.HasNext() {
 		it.valid = false
@@ -427,6 +445,9 @@ func (it *DataBlockIteratorRaw) readNext() {
 	it.valid = true
 }
 
+// DataBlockIterator iterates over single data block with filtering
+// filtering -> skipping older versions of the same key and if the newest version of key is tombstone skip that key completely
+// it uses raw data block iterator and its methods but has a special method called advance
 type DataBlockIterator struct {
 	rawIterator *DataBlockIteratorRaw
 	current     *Record
@@ -494,6 +515,9 @@ func (it *DataBlockIterator) Key() Record { return *it.current }
 
 func (it *DataBlockIterator) Value() Record { return *it.current }
 
+// advance moves the iterator to the next valid record
+// it skips over record that match the previous key or are marked as tombstones
+// prevKey: the last key returned by the iterator, used to avoid returning duplicates
 func (it *DataBlockIterator) advance(prevKey []byte) {
 	for it.rawIterator.Valid() {
 		rec := it.rawIterator.Key()
@@ -532,12 +556,17 @@ func tsEqual(a, b utils.Uint128) bool {
 	return a.Low == b.Low && a.High == b.High
 }
 
+// MergeIteratorRaw iterates over more than one data blocks at raw level
+// exposing all records including tombstones and older versions of same key
+// it uses merge structure to quickly determine the smallest entry in all raw iterators provided -> O(log n)
 type MergeIteratorRaw struct {
 	structure data_structures.MergeStructure[Record]
 	current   *Record
 	valid     bool
 }
 
+// NewMergeIteratorRaw creates a new raw merge iterator from given iterators over single data blocks
+// it builds a merge structure from those iterators and sets a first current using syncFromWinner method
 func NewMergeIteratorRaw(iters []*DataBlockIteratorRaw, mergeStructure byte) *MergeIteratorRaw {
 	if len(iters) == 0 {
 		return &MergeIteratorRaw{valid: false}
@@ -559,6 +588,7 @@ func NewMergeIteratorRaw(iters []*DataBlockIteratorRaw, mergeStructure byte) *Me
 
 func (m *MergeIteratorRaw) Valid() bool { return m.valid }
 
+// SeekToFirst moves the iterator on the record with smallest key out of all data blocks (single data block iterators positioned on first record)
 func (m *MergeIteratorRaw) SeekToFirst() {
 	for _, it := range m.structure.Iterators() {
 		it.SeekToFirst()
@@ -567,6 +597,7 @@ func (m *MergeIteratorRaw) SeekToFirst() {
 	m.syncFromWinner()
 }
 
+// SeekToLast moves the iterator on the record with largest key out of all data blocks
 func (m *MergeIteratorRaw) SeekToLast() {
 	for _, it := range m.structure.Iterators() {
 		it.SeekToLast()
@@ -575,6 +606,9 @@ func (m *MergeIteratorRaw) SeekToLast() {
 	m.syncFromWinner()
 }
 
+// Seek moves the iterator on the record whose key >= target key
+// It does that by positioning all iterators of single data blocks on the record whose key >= target key
+// Then using merge structure the record with smallest key of those is the first record whose key >= target key
 func (m *MergeIteratorRaw) Seek(target Record) {
 	for _, it := range m.structure.Iterators() {
 		it.Seek(target)
@@ -583,6 +617,8 @@ func (m *MergeIteratorRaw) Seek(target Record) {
 	m.syncFromWinner()
 }
 
+// Next moves iterator forward by taking the next merge structure winner
+// Then it advances the iterator from which winner record is chosen
 func (m *MergeIteratorRaw) Next() {
 	if !m.valid {
 		return
@@ -603,6 +639,9 @@ func (m *MergeIteratorRaw) Prev() {
 func (m *MergeIteratorRaw) Key() Record   { return *m.current }
 func (m *MergeIteratorRaw) Value() Record { return *m.current }
 
+// syncFromWinner takes a winner from a merge structure (record with smallest key out of current records in iterators)
+// sets current iterator record to that winner
+// does not advance the iterator from which winner is chosen
 func (m *MergeIteratorRaw) syncFromWinner() {
 	winner := m.structure.Winner()
 	if winner == nil || !winner.Valid() {
@@ -615,6 +654,9 @@ func (m *MergeIteratorRaw) syncFromWinner() {
 	m.valid = true
 }
 
+// MergeIterator iterates over more than one data blocks with filtering
+// filtering -> skipping older versions of the same key and if the newest version of key is tombstone skip that key completely
+// it uses raw merge iterator and its methods but has a special method called advance
 type MergeIterator struct {
 	raw     *MergeIteratorRaw
 	current *Record
