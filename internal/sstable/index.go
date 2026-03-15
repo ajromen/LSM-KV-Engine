@@ -202,10 +202,10 @@ func (block *IndexBlock) FindBlock(key []byte) int {
 			right = mid - 1
 		} else if cmp == 0 {
 			return mid
+		} else {
+			result = mid
+			left = mid + 1
 		}
-
-		result = mid
-		left = mid + 1
 	}
 	return result
 }

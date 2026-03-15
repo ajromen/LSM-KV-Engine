@@ -64,4 +64,5 @@ func (engine *Engine) Close() error {
 	if err != nil {
 		return err
 	}
+	return nil
 }

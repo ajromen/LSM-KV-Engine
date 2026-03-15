@@ -206,7 +206,11 @@ func TestSSTableMultiFileFormat(t *testing.T) {
 }
 
 func TestNewManifest_FreshDirectory(t *testing.T) {
-	manifest, err := NewManifest(os.TempDir())
+	dir, err := os.MkdirTemp("", "manifest-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := NewManifest(dir)
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
@@ -222,7 +226,10 @@ func TestNewManifest_FreshDirectory(t *testing.T) {
 }
 
 func TestNewManifest_LoadsExisting(t *testing.T) {
-	dir := os.TempDir()
+	dir, err := os.MkdirTemp("", "manifest-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	manifest, err := NewManifest(dir)
 	if err != nil {

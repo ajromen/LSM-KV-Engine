@@ -63,7 +63,7 @@ func (m *Manifest) reconstruct(fileDir string) error {
 			// Multi-file: 000000.sst.data -> add 000000.sst to list
 			if strings.HasSuffix(name, ".sst.data") {
 				basePath := filepath.Join(fileDir, strings.TrimSuffix(name, ".data"))
-				sstableFiles[basePath] = enums.FormatSingleFile
+				sstableFiles[basePath] = enums.FormatMultiFile
 			}
 		}
 	}
