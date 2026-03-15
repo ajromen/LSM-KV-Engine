@@ -1,190 +1,261 @@
 package encoders
 
 import (
-	"bytes"
 	"encoding/binary"
 	"errors"
-	"hash/fnv"
+	"os"
+	"sort"
 )
 
+// candidate represents a potential dictionary entry with frequency tracking
 type candidate struct {
+	value    []byte
 	freq     uint64
 	lastSeen uint64
-	value    []byte
 }
 
-type dictEntry struct {
-	value []byte
-	id    uint32
-}
-type AdaptiveDict struct {
-	windowSize uint64
+// AdaptiveEncoder implements frequency-based dictionary encoding
+// Only entries that reach threshold are added to dictionary
+// Candidates that are not seen within windowSize entries are automatically removed
+type AdaptiveEncoder struct {
+	bitWidth   uint16
+	keys       [][]byte
+	dictionary map[string]uint64
+	idToValue  map[uint64][]byte
+	nextId     uint64
+	candidates map[string]*candidate
 	threshold  uint64
+	windowSize uint64
 	entryCount uint64
-	nextId     uint32
-	candidates map[uint64][]*candidate
-	dict       map[uint64][]*dictEntry
-	idToValue  map[uint32][]byte
 }
 
-func NewAdaptiveDict(windowSize uint64, threshold uint64) *AdaptiveDict {
-	return &AdaptiveDict{
-		windowSize: windowSize,
-		threshold:  threshold,
-		entryCount: 0,
+// NewAdaptiveDictEncoderFrequency creates a new encoder with frequency threshold and optional window size
+func NewAdaptiveDictEncoderFrequency(threshold uint64, windowSize uint64) *AdaptiveEncoder {
+	return &AdaptiveEncoder{
+		keys:       make([][]byte, 0),
+		dictionary: make(map[string]uint64),
+		idToValue:  make(map[uint64][]byte),
+		candidates: make(map[string]*candidate),
 		nextId:     0,
-		candidates: make(map[uint64][]*candidate),
-		dict:       make(map[uint64][]*dictEntry),
-		idToValue:  make(map[uint32][]byte),
+		threshold:  threshold,
+		windowSize: windowSize,
 	}
 }
 
-func (ad *AdaptiveDict) Reset() {
-	ad.nextId = 0
-	ad.candidates = make(map[uint64][]*candidate)
-	ad.dict = make(map[uint64][]*dictEntry)
-	ad.idToValue = make(map[uint32][]byte)
-	ad.entryCount = 0
+// Keys returns all keys as strings
+func (ade *AdaptiveEncoder) Keys() []string {
+	out := make([]string, len(ade.keys))
+	for i, k := range ade.keys {
+		out[i] = string(k)
+	}
+	return out
 }
 
-func hashValue(value []byte) uint64 {
-	h := fnv.New64a()
-	h.Write(value)
-	return h.Sum64()
+// Dictionary returns a copy of the dictionary
+func (ade *AdaptiveEncoder) Dictionary() map[string]uint64 {
+	out := make(map[string]uint64, len(ade.dictionary))
+	for k, v := range ade.dictionary {
+		out[k] = v
+	}
+	return out
 }
 
-func (ad *AdaptiveDict) EncodeValue(value []byte) (valueType byte, payload []byte) {
-	ad.entryCount++
-	h := hashValue(value)
-	bucket, ok := ad.dict[h]
-	if ok {
-		for _, e := range bucket {
-			if bytes.Equal(e.value, value) {
-				return 1, binary.AppendUvarint(nil, uint64(e.id))
+// AddToDict adds a key, updates frequency, promotes to dictionary if threshold is reached
+func (ade *AdaptiveEncoder) AddToDict(key []byte) (uint64, bool) {
+	keyStr := string(key)
+	ade.entryCount++
+
+	// Remove old candidates outside window
+	if ade.windowSize > 0 {
+		for k, cand := range ade.candidates {
+			if ade.entryCount-cand.lastSeen > ade.windowSize {
+				delete(ade.candidates, k)
 			}
 		}
 	}
-	if len(value) <= 8 {
-		return 0, value
+
+	// Already in dictionary
+	if idx, ok := ade.dictionary[keyStr]; ok {
+		return idx, false
 	}
-	if ad.windowSize > 0 {
-		bucket := ad.candidates[h]
-		nb := bucket[:0]
-		for _, c := range bucket {
-			if ad.entryCount-c.lastSeen <= ad.windowSize {
-				nb = append(nb, c)
-			}
-		}
-		if len(nb) == 0 {
-			delete(ad.candidates, h)
-		} else {
-			ad.candidates[h] = nb
-		}
-	}
-	var cand *candidate
-	for _, candidate := range ad.candidates[h] {
-		if bytes.Equal(value, candidate.value) {
-			cand = candidate
-			break
-		}
-	}
-	if cand == nil {
-		cand = &candidate{
-			value:    value,
-			freq:     1,
-			lastSeen: ad.entryCount,
-		}
-		ad.candidates[h] = append(ad.candidates[h], cand)
+
+	// Update candidate frequency
+	cand, ok := ade.candidates[keyStr]
+	if !ok {
+		cand = &candidate{value: key, freq: 1, lastSeen: ade.entryCount}
+		ade.candidates[keyStr] = cand
 	} else {
 		cand.freq++
-		cand.lastSeen = ad.entryCount
+		cand.lastSeen = ade.entryCount
 	}
-	if cand.freq*uint64(len(cand.value)) >= ad.threshold {
-		id := ad.nextId
-		ad.nextId++
-		ad.idToValue[id] = cand.value
-		ad.dict[h] = append(ad.dict[h], &dictEntry{value: cand.value, id: id})
-		b := ad.candidates[h]
-		for i := range b {
-			if b[i] == cand {
-				ad.candidates[h] = append(b[:i], b[i+1:]...)
-				if len(b) == 0 {
-					delete(ad.candidates, h)
-				}
-				break
-			}
-		}
-		return 1, binary.AppendUvarint(nil, uint64(id))
+
+	// Promote to dictionary if threshold reached
+	if cand.freq >= ade.threshold {
+		idx := ade.nextId
+		ade.nextId++
+		ade.keys = append(ade.keys, key)
+		ade.dictionary[keyStr] = idx
+		ade.idToValue[idx] = key
+		delete(ade.candidates, keyStr)
+		ade.updateBitWidth()
+		return idx, true
 	}
-	return 0, value
+
+	return 0, false
 }
 
-func (ad *AdaptiveDict) DecodeValue(valueType byte, payload []byte) ([]byte, error) {
-	switch valueType {
-	case 0:
-		return payload, nil
-	case 1:
-		id, n := binary.Uvarint(payload)
+// Encode returns compact binary representation of a dictionary key
+// If key is not in dictionary, encodes it raw with high bit 0
+func (ade *AdaptiveEncoder) Encode(key []byte) []byte {
+	keyStr := string(key)
+	var out []byte
+	outSize := (ade.bitWidth + 7) / 8
+
+	if idx, ok := ade.dictionary[keyStr]; ok {
+		// Encoded case, set high bit 1
+		out = make([]byte, outSize)
+		for i := 0; i < int(outSize); i++ {
+			out[i] = byte(idx >> uint(8*i))
+		}
+		extraBits := uint8(outSize*8 - ade.bitWidth)
+		if extraBits > 0 {
+			out[outSize-1] &= (1 << (8 - extraBits)) - 1
+		}
+		out = append([]byte{1}, out...) // high bit = 1
+	} else {
+		// Raw value, prefix with 0
+		out = append([]byte{0}, key...)
+	}
+	return out
+}
+
+// Decode returns original key from encoded bytes
+func (ade *AdaptiveEncoder) Decode(encoded []byte) ([]byte, error) {
+	if len(encoded) == 0 {
+		return nil, errors.New("empty encoded data")
+	}
+	if encoded[0] == 0 {
+		// Raw value
+		return encoded[1:], nil
+	}
+
+	// Encoded dictionary value
+	outSize := (ade.bitWidth + 7) / 8
+	if len(encoded) < int(outSize)+1 {
+		return nil, errors.New("encoded too short")
+	}
+	idx := uint64(0)
+	for i := 0; i < int(outSize); i++ {
+		idx |= uint64(encoded[i+1]) << (8 * i)
+	}
+	extraBits := uint8(uint16(outSize*8) - ade.bitWidth)
+	if extraBits > 0 {
+		idx &= 1<<ade.bitWidth - 1
+	}
+	if idx >= uint64(len(ade.keys)) {
+		panic("decoded index out of range")
+	}
+	return ade.keys[idx], nil
+}
+
+// BuildDictionary builds dictionary from a slice of keys using frequency
+func (ade *AdaptiveEncoder) BuildDictionary(keys [][]byte) {
+	for _, k := range keys {
+		ade.AddToDict(k)
+	}
+	// Sort keys for deterministic encoding
+	sort.SliceStable(ade.keys, func(i, j int) bool {
+		return string(ade.keys[i]) < string(ade.keys[j])
+	})
+	// Rebuild dictionary indices
+	for idx, k := range ade.keys {
+		ade.dictionary[string(k)] = uint64(idx)
+		ade.idToValue[uint64(idx)] = k
+	}
+	ade.updateBitWidth()
+}
+
+// SaveDict serializes dictionary
+func (ade *AdaptiveEncoder) SaveDict() []byte {
+	buf := make([]byte, 0, 2+len(ade.keys)*10)
+	bwBytes := make([]byte, 2)
+	binary.LittleEndian.PutUint16(bwBytes, ade.bitWidth)
+	buf = append(buf, bwBytes...)
+	for idx, k := range ade.keys {
+		keyLen := make([]byte, binary.MaxVarintLen64)
+		n := binary.PutUvarint(keyLen, uint64(len(k)))
+		buf = append(buf, keyLen[:n]...)
+		buf = append(buf, k...)
+		idxBytes := make([]byte, binary.MaxVarintLen64)
+		n = binary.PutUvarint(idxBytes, uint64(idx))
+		buf = append(buf, idxBytes[:n]...)
+	}
+	return buf
+}
+
+// ReadDictionary loads dictionary from byte slice
+func (ade *AdaptiveEncoder) ReadDictionary(data []byte) error {
+	ade.keys = ade.keys[:0]
+	ade.dictionary = make(map[string]uint64)
+	ade.idToValue = make(map[uint64][]byte)
+	if len(data) == 0 {
+		return nil
+	}
+	pos := 0
+	ade.bitWidth = binary.LittleEndian.Uint16(data[pos : pos+2])
+	pos += 2
+	for pos < len(data) {
+		keyLen, n := binary.Uvarint(data[pos:])
 		if n <= 0 {
-			return nil, errors.New("invalid payload")
+			return errors.New("invalid key length")
 		}
-		v, ok := ad.idToValue[uint32(id)]
-		if !ok {
-			return nil, errors.New("invalid id")
+		pos += n
+		key := data[pos : pos+int(keyLen)]
+		pos += int(keyLen)
+		idx, n := binary.Uvarint(data[pos:])
+		if n <= 0 {
+			return errors.New("invalid index")
 		}
-		return v, nil
-	default:
-		return nil, errors.New("invalid type")
-	}
-}
-
-func (ad *AdaptiveDict) WriteDictionary() ([]byte, error) {
-	count := uint32(len(ad.idToValue))
-	var res []byte
-	temp := make([]byte, 4)
-	binary.LittleEndian.PutUint32(temp, count)
-	res = append(res, temp...)
-	for id := uint32(0); id < count; id++ {
-		v, ok := ad.idToValue[id]
-		if !ok {
-			return nil, errors.New("dictionary hole detected")
+		pos += n
+		ade.keys = append(ade.keys, key)
+		ade.dictionary[string(key)] = idx
+		ade.idToValue[idx] = key
+		if idx >= ade.nextId {
+			ade.nextId = idx + 1
 		}
-		binary.LittleEndian.PutUint32(temp, uint32(len(v)))
-		res = append(res, temp...)
-		res = append(res, v...)
-	}
-	return res, nil
-}
-
-func (ad *AdaptiveDict) ReadDictionary(data []byte) error {
-	ad.candidates = make(map[uint64][]*candidate)
-	ad.dict = make(map[uint64][]*dictEntry)
-	ad.idToValue = make(map[uint32][]byte)
-	ad.nextId = 0
-	if len(data) < 4 {
-		return errors.New("data too short")
-	}
-	offset := 0
-	count := binary.LittleEndian.Uint32(data[offset : offset+4])
-	offset += 4
-	for i := uint32(0); i < count; i++ {
-		if len(data) < offset+4 {
-			return errors.New("unexpected end of data")
-		}
-		sz := binary.LittleEndian.Uint32(data[offset : offset+4])
-		offset += 4
-		if len(data) < offset+int(sz) {
-			return errors.New("data corrupted")
-		}
-		buf := data[offset : offset+int(sz)]
-		offset += int(sz)
-		h := hashValue(buf)
-		ad.idToValue[i] = buf
-		ad.dict[h] = append(ad.dict[h], &dictEntry{
-			value: buf,
-			id:    i,
-		})
-		ad.nextId = i + 1
 	}
 	return nil
+}
+
+// updateBitWidth calculates minimal bits needed
+func (ade *AdaptiveEncoder) updateBitWidth() {
+	if len(ade.keys) == 0 {
+		ade.bitWidth = 0
+		return
+	}
+	bw := 0
+	maxIdx := len(ade.keys) - 1
+	for maxi := maxIdx; maxi > 0; maxi >>= 1 {
+		bw++
+	}
+	ade.bitWidth = uint16(bw)
+}
+
+// WriteToFile writes dictionary to file
+func (ade *AdaptiveEncoder) WriteToFile(f *os.File, offset int64) error {
+	data := ade.SaveDict()
+	if _, err := f.Seek(offset, 0); err != nil {
+		return err
+	}
+	_, err := f.Write(data)
+	return err
+}
+
+// ReadFromFile reads dictionary from file
+func (ade *AdaptiveEncoder) ReadFromFile(f *os.File, offset int64, size int) error {
+	data := make([]byte, size)
+	if _, err := f.ReadAt(data, offset); err != nil {
+		return err
+	}
+	return ade.ReadDictionary(data)
 }

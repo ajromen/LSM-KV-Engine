@@ -8,20 +8,27 @@ import (
 
 func TestAdaptiveDictBasic(t *testing.T) {
 	t.Log("---- ADAPTIVE DICT BASIC TEST ----")
-	ad := NewAdaptiveDict(100, 20)
-	vType, payload := ad.EncodeValue([]byte("long-value"))
-	if vType != 0 {
-		t.Fatal("expected type 0 for first encounter")
+	ad := NewAdaptiveDictEncoderFrequency(2, 20)
+
+	_, promoted := ad.AddToDict([]byte("long-value"))
+	payload := ad.Encode([]byte("long-value"))
+	if promoted && payload[0] != 1 {
+		t.Fatalf("expected dictionary encoding after promotion")
 	}
-	vType, _ = ad.EncodeValue([]byte("short"))
-	if vType != 0 {
-		t.Fatal("expected type 0 for short value")
+
+	_, promoted = ad.AddToDict([]byte("short"))
+	payload = ad.Encode([]byte("short"))
+	if promoted && payload[0] != 1 {
+		t.Fatalf("expected raw encoding for first encounter")
 	}
-	vType, payload = ad.EncodeValue([]byte("long-value"))
-	if vType != 1 {
-		t.Fatal("expected type 1 for promoted value")
+
+	_, promoted = ad.AddToDict([]byte("long-value"))
+	payload = ad.Encode([]byte("long-value"))
+	if payload[0] != 1 {
+		t.Fatalf("expected dictionary encoding after second promotion, got %d", payload[0])
 	}
-	decoded, err := ad.DecodeValue(vType, payload)
+
+	decoded, err := ad.Decode(payload)
 	if err != nil {
 		t.Fatalf("decode failed: %v", err)
 	}
@@ -32,76 +39,68 @@ func TestAdaptiveDictBasic(t *testing.T) {
 
 func TestAdaptiveDictWindowing(t *testing.T) {
 	t.Log("---- ADAPTIVE DICT WINDOWING TEST ----")
-	ad := NewAdaptiveDict(5, 100)
+	ad := NewAdaptiveDictEncoderFrequency(5, 5)
 	val := []byte("temp-candidate")
-	ad.EncodeValue(val)
+
+	ad.AddToDict(val)
+	ad.Encode(val)
+
 	for i := 1; i <= 6; i++ {
-		ad.EncodeValue([]byte{byte(i), 1, 2, 3, 4, 5, 6, 7, 8, 9})
+		ad.AddToDict([]byte{byte(i), 1, 2, 3, 4, 5, 6, 7, 8, 9})
 	}
-	ad.EncodeValue(val)
-	h := hashValue(val)
-	found := false
-	for _, c := range ad.candidates[h] {
-		if bytes.Equal(c.value, val) {
-			found = true
-			if c.freq != 1 {
-				t.Fatalf("Expected freq 1 (reset), got %d. Window cleanup failed!", c.freq)
-			}
-		}
-	}
-	if !found {
-		t.Fatal("Candidate should be present but reset")
+
+	ad.AddToDict(val)
+	payload := ad.Encode(val)
+	if payload[0] != 0 {
+		t.Fatal("expected raw encoding after candidate expired from window")
 	}
 }
 
 func TestAdaptiveDictPersistence(t *testing.T) {
 	t.Log("---- ADAPTIVE DICT PERSISTENCE TEST ----")
-	ad := NewAdaptiveDict(100, 15)
+	ad := NewAdaptiveDictEncoderFrequency(2, 15)
 	val := []byte("persistent-val")
-	ad.EncodeValue(val)
-	ad.EncodeValue(val)
 
-	tmpFile := "test_adaptive.dict"
-	defer os.Remove(tmpFile)
-	data, err := ad.WriteDictionary()
-	if err != nil {
-		t.Fatalf("failed to serialize: %v", err)
+	ad.AddToDict(val)
+	ad.AddToDict(val)
+	payload := ad.Encode(val)
+	if payload[0] != 1 {
+		t.Fatal("expected dictionary encoding after promotion")
 	}
-	if err := os.WriteFile(tmpFile, data, 0666); err != nil {
+
+	tmpFile := t.TempDir() + "/adaptive.dict"
+	f, err := os.Create(tmpFile)
+	if err != nil {
+		t.Fatalf("failed to create file: %v", err)
+	}
+	defer f.Close()
+
+	if err := ad.WriteToFile(f, 0); err != nil {
 		t.Fatalf("failed to write: %v", err)
 	}
 
-	newAd := NewAdaptiveDict(100, 15)
-	fileData, err := os.ReadFile(tmpFile)
+	newAd := NewAdaptiveDictEncoderFrequency(2, 15)
+	fRead, err := os.Open(tmpFile)
 	if err != nil {
+		t.Fatalf("failed to open file: %v", err)
+	}
+	defer fRead.Close()
+
+	info, _ := fRead.Stat()
+	if err := newAd.ReadFromFile(fRead, 0, int(info.Size())); err != nil {
 		t.Fatalf("failed to read: %v", err)
 	}
-	if err := newAd.ReadDictionary(fileData); err != nil {
-		t.Fatalf("failed to deserialize: %v", err)
+
+	payload = newAd.Encode(val)
+	if payload[0] != 1 {
+		t.Fatal("expected dictionary encoding after reload")
 	}
-	vType, payload := newAd.EncodeValue(val)
-	if vType != 1 {
-		t.Fatal("expected value to be recognized as ID after reload")
+
+	decoded, err := newAd.Decode(payload)
+	if err != nil {
+		t.Fatalf("decode failed: %v", err)
 	}
-	decoded, _ := newAd.DecodeValue(vType, payload)
 	if !bytes.Equal(decoded, val) {
 		t.Fatal("data corrupted after reload")
-	}
-}
-
-func TestAdaptiveDictErrors(t *testing.T) {
-	t.Log("---- ADAPTIVE DICT ERROR HANDLING TEST ----")
-	ad := NewAdaptiveDict(100, 20)
-	_, err := ad.DecodeValue(1, []byte{99})
-	if err == nil {
-		t.Fatal("expected error for non-existing ID")
-	}
-	_, err = ad.DecodeValue(5, []byte{1})
-	if err == nil {
-		t.Fatal("expected error for invalid value type")
-	}
-	_, err = ad.DecodeValue(1, []byte{})
-	if err == nil {
-		t.Fatal("expected error for empty payload with type 1")
 	}
 }

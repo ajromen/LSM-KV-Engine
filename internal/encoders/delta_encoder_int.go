@@ -65,3 +65,7 @@ func (de *DeltaEncoderInt) WriteRestartArray(buf []byte) []byte {
 	buf = binary.LittleEndian.AppendUint32(buf, uint32(len(de.restartArray)))
 	return buf
 }
+
+func (de *DeltaEncoderInt) RestartArray() []uint32 {
+	return de.restartArray
+}
