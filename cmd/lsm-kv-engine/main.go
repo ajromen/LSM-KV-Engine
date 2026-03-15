@@ -52,8 +52,12 @@ func RunCli(engine *core.Engine) {
 		case "get":
 			handleGet(engine, parts)
 		case "exit", "quit":
-			engine.Close()
-			return
+			err := engine.Close()
+			if err != nil {
+				fmt.Println("Closing error: ", err)
+				os.Exit(1)
+			}
+			os.Exit(0)
 		case "help":
 			fmt.Println(helpText)
 		default:

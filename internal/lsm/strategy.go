@@ -1,4 +1,4 @@
-package compaction
+package lsm
 
 import "github.com/ajromen/LSM-KV-Engine/internal/sstable"
 

@@ -6,14 +6,13 @@ import (
 
 	"github.com/ajromen/LSM-KV-Engine/internal/cli"
 	"github.com/ajromen/LSM-KV-Engine/internal/config"
-	"github.com/ajromen/LSM-KV-Engine/internal/memtable"
-	"github.com/ajromen/LSM-KV-Engine/internal/sstable"
+	"github.com/ajromen/LSM-KV-Engine/internal/lsm"
 )
 
 type Engine struct {
-	config          *config.Config
-	memtableManager *memtable.MemtableManager
-	sstableManager  *sstable.SSTableManager
+	config *config.Config
+	lsm    *lsm.LSM
+	//wal
 }
 
 func currentTimestamp() uint64 {
@@ -30,48 +29,39 @@ func NewEngine(flags *cli.FLags) (*Engine, error) {
 	if err := os.MkdirAll(dataDir, 0755); err != nil {
 		return nil, err
 	}
-	sstableManager := sstable.NewSSTableManager(dataDir, cfg)
-	factory := memtable.NewFactory(cfg.Memtable)
-	flushHandler := func(entries []memtable.MemtableEntry) {
-		if err := sstableManager.FlushToSSTable(entries); err != nil {
-			return
-		}
-	}
-	memManager := memtable.NewMemtableManager(3, 0, factory, flushHandler)
-	engine := &Engine{
-		config:          cfg,
-		memtableManager: memManager,
-		sstableManager:  sstableManager,
-	}
-	return engine, nil
+
+	lsmTree, err := lsm.NewLSM(cfg, dataDir)
+	engine := Engine{config: cfg, lsm: lsmTree}
+	return &engine, nil
 }
 
 func (engine *Engine) Put(key []byte, value []byte) error {
-	ts := currentTimestamp()
-	engine.memtableManager.Put(key, value, ts, false)
+	//wal
+	err := engine.lsm.Put(key, value)
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
 func (engine *Engine) Get(key []byte) ([]byte, bool, error) {
-	entry, found := engine.memtableManager.Get(key)
-	if found {
-		return entry, true, nil
-	}
-	entry, found, err := engine.sstableManager.Get(key)
-	if err != nil {
-		return nil, false, err
-	}
-	if found {
-		return entry, true, nil
-	}
-	return nil, false, nil
+	value, found, err := engine.lsm.Get(key)
+	return value, found, err
 }
 
 func (engine *Engine) Delete(key []byte) error {
-	ts := currentTimestamp()
-	engine.memtableManager.Put(key, nil, ts, true)
+	// wal
+	err := engine.lsm.Delete(key)
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
-func (engine *Engine) Close() {
+func (engine *Engine) Close() error {
+	//wal finish write
+	err := engine.lsm.Finish()
+	if err != nil {
+		return err
+	}
 }
