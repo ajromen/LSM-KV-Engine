@@ -6,6 +6,7 @@ import (
 
 	"github.com/ajromen/LSM-KV-Engine/internal/block"
 	"github.com/ajromen/LSM-KV-Engine/internal/config"
+	"github.com/ajromen/LSM-KV-Engine/internal/enums"
 	"github.com/ajromen/LSM-KV-Engine/internal/probabilistics"
 	"github.com/ajromen/LSM-KV-Engine/internal/utils"
 )
@@ -140,7 +141,7 @@ func (sw *SSTableWriter) flushDataBlock() error {
 	}
 
 	// step 2
-	_, _, err = sw.storage.WriteSegment(config.SegmentData, blockData)
+	_, _, err = sw.storage.WriteSegment(enums.SegmentData, blockData)
 	if err != nil {
 		return err
 	}
@@ -172,43 +173,43 @@ func (sw *SSTableWriter) flushDataBlock() error {
 // 6. Write summary segment on disk
 // 7. Write metadata (merkle tree) segment on disk
 // 8. Write footer and sync storage
-func (w *SSTableWriter) Finalize() error {
+func (sw *SSTableWriter) Finalize() error {
 	// add remaining unfinished index block
 	// step 1
-	if w.dataBlockBuilder.RecordCount() > 0 {
-		if err := w.flushDataBlock(); err != nil {
+	if sw.dataBlockBuilder.RecordCount() > 0 {
+		if err := sw.flushDataBlock(); err != nil {
 			return err
 		}
 	}
-	if len(w.currentIndexBlock.Entries) > 0 {
-		w.indexSegment.AddBlock(w.currentIndexBlock)
+	if len(sw.currentIndexBlock.Entries) > 0 {
+		sw.indexSegment.AddBlock(sw.currentIndexBlock)
 	}
 
 	// step 2
-	if err := w.merkleTree.Build(); err != nil {
+	if err := sw.merkleTree.Build(); err != nil {
 		return err
 	}
 
 	// step 3
-	w.footer.NumDataBlocks = w.currentBlockIndex
-	w.footer.TotalRecords = w.recordCount
-	w.footer.MinTimeStamp = w.minTimestamp
-	w.footer.MaxTimeStamp = w.maxTimestamp
-	w.footer.MinKeyLength = w.minKeyLength
-	w.footer.MaxKeyLength = w.maxKeyLength
-	w.footer.Format = w.config.Format
+	sw.footer.NumDataBlocks = sw.currentBlockIndex
+	sw.footer.TotalRecords = sw.recordCount
+	sw.footer.MinTimeStamp = sw.minTimestamp
+	sw.footer.MaxTimeStamp = sw.maxTimestamp
+	sw.footer.MinKeyLength = sw.minKeyLength
+	sw.footer.MaxKeyLength = sw.maxKeyLength
+	sw.footer.Format = sw.config.Format
 
 	// step 4
-	if w.filterSegment != nil {
-		filterData, err := w.filterSegment.Encode()
+	if sw.filterSegment != nil {
+		filterData, err := sw.filterSegment.Encode()
 		if err != nil {
 			return err
 		}
-		filterOffset, filterSize, err := w.storage.WriteSegment(config.SegmentFilter, filterData)
+		filterOffset, filterSize, err := sw.storage.WriteSegment(enums.SegmentFilter, filterData)
 		if err != nil {
 			return err
 		}
-		w.footer.FilterHandler = SegmentHandler{
+		sw.footer.FilterHandler = SegmentHandler{
 			Offset: filterOffset,
 			Size:   filterSize,
 		}
@@ -217,14 +218,14 @@ func (w *SSTableWriter) Finalize() error {
 	// step 5
 	var indexOffsets []uint64
 	// step 5 - write index blocks to disk and compute proper footer offsets
-	if len(w.indexSegment.Blocks) > 0 {
-		indexOffsets = make([]uint64, len(w.indexSegment.Blocks))
+	if len(sw.indexSegment.Blocks) > 0 {
+		indexOffsets = make([]uint64, len(sw.indexSegment.Blocks))
 		var firstOffset uint64
 		var lastOffsetPlusSize uint64
 
-		for i, indexBlock := range w.indexSegment.Blocks {
+		for i, indexBlock := range sw.indexSegment.Blocks {
 			blockData := indexBlock.EncodeIndexBlock(config.DefaultIndexBlockSize)
-			offset, size, err := w.storage.WriteSegment(config.SegmentIndex, blockData)
+			offset, size, err := sw.storage.WriteSegment(enums.SegmentIndex, blockData)
 			if err != nil {
 				return err
 			}
@@ -236,55 +237,55 @@ func (w *SSTableWriter) Finalize() error {
 			lastOffsetPlusSize = offset + uint64(size)
 		}
 
-		w.footer.IndexHandler.Offset = firstOffset
-		w.footer.IndexHandler.Size = uint32(lastOffsetPlusSize - firstOffset)
+		sw.footer.IndexHandler.Offset = firstOffset
+		sw.footer.IndexHandler.Size = uint32(lastOffsetPlusSize - firstOffset)
 	} else {
-		w.footer.IndexHandler.Offset = 0
-		w.footer.IndexHandler.Size = 0
+		sw.footer.IndexHandler.Offset = 0
+		sw.footer.IndexHandler.Size = 0
 		indexOffsets = []uint64{}
 	}
 
 	// step 6
 	if len(indexOffsets) > 0 {
-		w.summarySegment = BuildSummaryFromIndex(indexOffsets, w.indexSegment.Blocks, 1)
-		summaryData := w.summarySegment.Encode()
-		summaryOffset, summarySize, err := w.storage.WriteSegment(config.SegmentSummary, summaryData)
+		sw.summarySegment = BuildSummaryFromIndex(indexOffsets, sw.indexSegment.Blocks, 1)
+		summaryData := sw.summarySegment.Encode()
+		summaryOffset, summarySize, err := sw.storage.WriteSegment(enums.SegmentSummary, summaryData)
 		if err != nil {
 			return err
 		}
-		w.footer.SummaryHandler = SegmentHandler{
+		sw.footer.SummaryHandler = SegmentHandler{
 			Offset: summaryOffset,
 			Size:   summarySize,
 		}
 	} else {
-		w.summarySegment = NewSummarySegment(1)
-		w.footer.SummaryHandler = SegmentHandler{
+		sw.summarySegment = NewSummarySegment(1)
+		sw.footer.SummaryHandler = SegmentHandler{
 			Offset: 0,
 			Size:   0,
 		}
 	}
 
 	// step 7
-	metadataData := w.merkleTree.Encode()
-	metadataOffset, metadataSize, err := w.storage.WriteSegment(config.SegmentMetadata, metadataData)
+	metadataData := sw.merkleTree.Encode()
+	metadataOffset, metadataSize, err := sw.storage.WriteSegment(enums.SegmentMetadata, metadataData)
 	if err != nil {
 		return err
 	}
-	w.footer.MetaDataHandler = SegmentHandler{
+	sw.footer.MetaDataHandler = SegmentHandler{
 		Offset: metadataOffset,
 		Size:   metadataSize,
 	}
 
 	// step 8
-	if err := w.footer.WriteToStorage(w.storage); err != nil {
+	if err := sw.footer.WriteToStorage(sw.storage); err != nil {
 		return err
 	}
-	if err := w.storage.Sync(); err != nil {
+	if err := sw.storage.Sync(); err != nil {
 		return err
 	}
-	return w.storage.Close()
+	return sw.storage.Close()
 }
 
-func (w *SSTableWriter) Close() error {
-	return w.storage.Close()
+func (sw *SSTableWriter) Close() error {
+	return sw.storage.Close()
 }

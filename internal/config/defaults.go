@@ -4,20 +4,12 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+
+	"github.com/ajromen/LSM-KV-Engine/internal/enums"
 )
 
 // Za sva podešavanja koja nedostaju u konfiguracionom fajlu sistem treba da dodeli
 // default vrednosti koje se navode u kodu
-const (
-	CompressionNone   byte = 0
-	CompressionSnappy byte = 1
-	CompressionZSTD   byte = 2
-)
-
-const (
-	FormatSingleFile byte = 0
-	FormatMultiFile  byte = 1
-)
 
 // Engine defaults
 const (
@@ -25,7 +17,7 @@ const (
 	DefaultWalSegmentSize = 1 * 1024 * 1024
 
 	//memtable
-	MemtableType                = "hashmap"
+	MemtableType                = enums.HashMapMemTable
 	DefaultMemtableMaxEntries   = 1000
 	DefaultMemtableMaxSizeBytes = 1 << 20
 	DefaultMemtableInstances    = 5
@@ -35,7 +27,7 @@ const (
 	//SSTable
 	DefaultSSTableBlockSize           = 160
 	DefaultSSTableRestartInterval     = 3
-	DefaultSSTableCompression         = CompressionNone
+	DefaultSSTableCompression         = enums.CompressionNone
 	DefaultSSTableMinBlockUtilization = 0.8
 	DefaultIndexBlockSize             = 160
 
@@ -49,7 +41,7 @@ const (
 
 	//LSM
 	DefaultLSMMaxLayers           = 4
-	DefaultLSMCompactionAlgorithm = "size-tiered"
+	DefaultLSMCompactionAlgorithm = enums.SizeTieredCompaction
 )
 
 func NewDefaultConfig() *Config {
@@ -71,7 +63,7 @@ func NewDefaultConfig() *Config {
 			},
 		},
 		SSTable: SSTableConfig{
-			Format: FormatSingleFile,
+			Format: enums.FormatSingleFile,
 			DataSegment: DataSegmentConfig{
 				BlockSize:           DefaultSSTableBlockSize,
 				RestartInterval:     DefaultSSTableRestartInterval,

@@ -14,6 +14,7 @@ import (
 
 	"github.com/ajromen/LSM-KV-Engine/internal/block"
 	"github.com/ajromen/LSM-KV-Engine/internal/config"
+	"github.com/ajromen/LSM-KV-Engine/internal/enums"
 )
 
 // SSTableReader allows reading an SSTable file, accesing singular records and validating data integrity
@@ -30,13 +31,13 @@ type SSTableReader struct {
 
 // opens an SSTable file and loads all necessary segments into RAM -> needs to be fixed
 // storage tries to read while blockManager is nil
-func NewSSTableReader(filePath string, format byte, cfg *config.Config) (*SSTableReader, error) {
+func NewSSTableReader(filePath string, format enums.SSTableFormat, cfg *config.Config) (*SSTableReader, error) {
 	var storage SegmentStorage
 	var err error
 	switch format {
-	case 0:
+	case enums.FormatSingleFile:
 		storage, err = OpenSingleFileStorage(filePath)
-	case 1:
+	case enums.FormatMultiFile:
 		storage, err = OpenMultiFileStorage(filePath)
 	default:
 		return nil, fmt.Errorf("unsupported format")
@@ -57,7 +58,7 @@ func NewSSTableReader(filePath string, format byte, cfg *config.Config) (*SSTabl
 		offset = 0
 	}
 	// read and validate footer
-	footerData, err := storage.ReadSegment(config.SegmentFooter, offset, FooterSize)
+	footerData, err := storage.ReadSegment(enums.SegmentFooter, offset, FooterSize)
 	if err != nil {
 		return nil, err
 	}
@@ -94,7 +95,7 @@ func NewSSTableReader(filePath string, format byte, cfg *config.Config) (*SSTabl
 
 // loadSummary reads and decodes summary segment, which maps key ranges into index blocks
 func (r *SSTableReader) loadSummary() error {
-	data, err := r.storage.ReadSegment(config.SegmentSummary, r.footer.SummaryHandler.Offset, r.footer.SummaryHandler.Size)
+	data, err := r.storage.ReadSegment(enums.SegmentSummary, r.footer.SummaryHandler.Offset, r.footer.SummaryHandler.Size)
 	if err != nil {
 		return err
 	}
@@ -111,7 +112,7 @@ func (r *SSTableReader) loadFilter() error {
 	if r.footer.FilterHandler.Size == 0 {
 		return errors.New("no filter segment")
 	}
-	data, err := r.storage.ReadSegment(config.SegmentFilter, r.footer.FilterHandler.Offset, r.footer.FilterHandler.Size)
+	data, err := r.storage.ReadSegment(enums.SegmentFilter, r.footer.FilterHandler.Offset, r.footer.FilterHandler.Size)
 	if err != nil {
 		return err
 	}
@@ -125,7 +126,7 @@ func (r *SSTableReader) loadFilter() error {
 
 // loadMerkleTree reads and decodes the Merkle tree for data integrity verification
 func (r *SSTableReader) loadMerkleTree() error {
-	data, err := r.storage.ReadSegment(config.SegmentMetadata, r.footer.MetaDataHandler.Offset, r.footer.MetaDataHandler.Size)
+	data, err := r.storage.ReadSegment(enums.SegmentMetadata, r.footer.MetaDataHandler.Offset, r.footer.MetaDataHandler.Size)
 	if err != nil {
 		return err
 	}
@@ -146,7 +147,7 @@ func (r *SSTableReader) loadIndexBlock(blockNumber int) (*IndexBlock, error) {
 	offset := r.footer.IndexHandler.Offset +
 		uint64(blockNumber)*uint64(indexBlockSize)
 	data, err := r.storage.ReadSegment(
-		config.SegmentIndex,
+		enums.SegmentIndex,
 		offset,
 		uint32(indexBlockSize),
 	)

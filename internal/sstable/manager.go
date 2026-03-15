@@ -25,7 +25,7 @@ func newLayer() *Layer {
 
 type SSTableManager struct {
 	config       *config.Config
-	layers       []*Layer
+	Layers       []*Layer
 	blockManager *block.BlockManager
 	manifest     *Manifest
 	dataDir      string
@@ -35,9 +35,9 @@ func NewSSTableManager(dataDir string, cfg *config.Config) *SSTableManager {
 	manager := &SSTableManager{
 		config:  cfg,
 		dataDir: dataDir,
-		layers:  make([]*Layer, 0),
+		Layers:  make([]*Layer, 0),
 	}
-	manager.layers = append(manager.layers, newLayer())
+	manager.Layers = append(manager.Layers, newLayer())
 	blockSize := cfg.SSTable.DataSegment.BlockSize
 	manifest, err := NewManifest(dataDir)
 	if err != nil {
@@ -67,15 +67,15 @@ func (sm *SSTableManager) LoadExistingSSTables() error {
 	sort.Ints(keys)
 
 	for _, i := range keys {
-		for len(sm.layers) <= i {
-			sm.layers = append(sm.layers, newLayer())
+		for len(sm.Layers) <= i {
+			sm.Layers = append(sm.Layers, newLayer())
 		}
 		for _, sstManifest := range sm.manifest.Layers[i] {
 			reader, err := NewSSTableReader(sstManifest.BaseFileName, sstManifest.Format, sm.config)
 			if err != nil {
 				return err
 			}
-			sm.layers[i].sstables = append(sm.layers[i].sstables, reader)
+			sm.Layers[i].sstables = append(sm.Layers[i].sstables, reader)
 		}
 	}
 	return nil
@@ -113,7 +113,7 @@ func (sm *SSTableManager) FlushToSSTable(entries []memtable.MemtableEntry) error
 	if err != nil {
 		return err
 	}
-	sm.layers[0].sstables = append(sm.layers[0].sstables, reader)
+	sm.Layers[0].sstables = append(sm.Layers[0].sstables, reader)
 
 	sstManifest := SSTableManifest{
 		Id:           sstableID,
@@ -131,7 +131,7 @@ func (sm *SSTableManager) FlushToSSTable(entries []memtable.MemtableEntry) error
 }
 
 func (sm *SSTableManager) Get(key []byte) ([]byte, bool, error) {
-	for _, layer := range sm.layers {
+	for _, layer := range sm.Layers {
 		for i := len(layer.sstables) - 1; i >= 0; i-- {
 			record, err := layer.sstables[i].Get(key)
 			if err != nil {

@@ -9,6 +9,7 @@ import (
 	"github.com/ajromen/LSM-KV-Engine/internal/block"
 	"github.com/ajromen/LSM-KV-Engine/internal/config"
 	"github.com/ajromen/LSM-KV-Engine/internal/data_structures"
+	"github.com/ajromen/LSM-KV-Engine/internal/enums"
 	"github.com/ajromen/LSM-KV-Engine/internal/utils"
 )
 
@@ -21,6 +22,7 @@ func createTestRecord(key string, value string, timestamp uint64, tombstone bool
 	}
 }
 
+//goland:noinspection DuplicatedCode,DuplicatedCode,DuplicatedCode
 func TestSSTableWriterBasic(t *testing.T) {
 	tempFile := filepath.Join("test_sstable_basic.sst")
 	defer os.Remove(tempFile)
@@ -73,18 +75,18 @@ func TestSSTableWriterBasic(t *testing.T) {
 	fmt.Println("METADATA OFFSET:", reader.footer.MetaDataHandler.Offset)
 	fmt.Println("METADATA SIZE:", reader.footer.MetaDataHandler.Size)
 	fmt.Println("NUMBER OF BLOCKS: ", reader.footer.NumDataBlocks)
-	summary_f, _ := os.Open(tempFile)
-	defer summary_f.Close()
+	summaryF, _ := os.Open(tempFile)
+	defer summaryF.Close()
 	buf := make([]byte, reader.footer.SummaryHandler.Size)
-	_, err = summary_f.ReadAt(buf, int64(reader.footer.SummaryHandler.Offset))
+	_, err = summaryF.ReadAt(buf, int64(reader.footer.SummaryHandler.Offset))
 	if err != nil {
 		t.Fatalf("ReadAt failed: %v", err)
 	}
 	fmt.Println("SUMMARY RAW BYTES:", buf)
-	index_f, _ := os.Open(tempFile)
-	defer summary_f.Close()
+	indexF, _ := os.Open(tempFile)
+	defer summaryF.Close()
 	buf = make([]byte, reader.footer.IndexHandler.Size)
-	_, err = index_f.ReadAt(buf, int64(reader.footer.IndexHandler.Offset))
+	_, err = indexF.ReadAt(buf, int64(reader.footer.IndexHandler.Offset))
 	if err != nil {
 		t.Fatalf("ReadAt failed: %v", err)
 	}
@@ -105,6 +107,7 @@ func TestSSTableWriterBasic(t *testing.T) {
 	}
 }
 
+//goland:noinspection DuplicatedCode,DuplicatedCode,DuplicatedCode
 func TestSSTableMultiFileFormat(t *testing.T) {
 	tempFile := filepath.Join(os.TempDir(), "test_sstable_multifile.sst")
 	defer os.Remove(tempFile + ".data")
@@ -170,18 +173,18 @@ func TestSSTableMultiFileFormat(t *testing.T) {
 	fmt.Println("METADATA OFFSET:", reader.footer.MetaDataHandler.Offset)
 	fmt.Println("METADATA SIZE:", reader.footer.MetaDataHandler.Size)
 	fmt.Println("NUMBER OF BLOCKS: ", reader.footer.NumDataBlocks)
-	summary_f, _ := os.Open(tempFile + ".summary")
-	defer summary_f.Close()
+	summaryF, _ := os.Open(tempFile + ".summary")
+	defer summaryF.Close()
 	buf := make([]byte, reader.footer.SummaryHandler.Size)
-	_, err = summary_f.ReadAt(buf, int64(reader.footer.SummaryHandler.Offset))
+	_, err = summaryF.ReadAt(buf, int64(reader.footer.SummaryHandler.Offset))
 	if err != nil {
 		t.Fatalf("ReadAt failed: %v", err)
 	}
 	fmt.Println("SUMMARY RAW BYTES:", buf)
-	index_f, _ := os.Open(tempFile + ".index")
-	defer summary_f.Close()
+	indexF, _ := os.Open(tempFile + ".index")
+	defer summaryF.Close()
 	buf = make([]byte, reader.footer.IndexHandler.Size)
-	_, err = index_f.ReadAt(buf, int64(reader.footer.IndexHandler.Offset))
+	_, err = indexF.ReadAt(buf, int64(reader.footer.IndexHandler.Offset))
 	if err != nil {
 		t.Fatalf("ReadAt failed: %v", err)
 	}
@@ -202,6 +205,52 @@ func TestSSTableMultiFileFormat(t *testing.T) {
 	}
 }
 
+func TestNewManifest_FreshDirectory(t *testing.T) {
+	manifest, err := NewManifest(os.TempDir())
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if manifest == nil {
+		t.Fatal("expected manifest, got nil")
+	}
+	if manifest.NextSStableId != 0 {
+		t.Errorf("expected NextSStableId=0, got %d", manifest.NextSStableId)
+	}
+	if len(manifest.Layers) != 0 {
+		t.Errorf("expected empty Layers, got %d", len(manifest.Layers))
+	}
+}
+
+func TestNewManifest_LoadsExisting(t *testing.T) {
+	dir := os.TempDir()
+
+	manifest, err := NewManifest(dir)
+	if err != nil {
+		t.Fatalf("setup failed: %v", err)
+	}
+	manifest.AddSSTable(SSTableManifest{
+		Id:           0,
+		BaseFileName: "000000.sst",
+		Format:       enums.FormatSingleFile,
+		Layer:        0,
+	})
+
+	loaded, err := NewManifest(dir)
+	if err != nil {
+		t.Fatalf("expected no error on reload, got: %v", err)
+	}
+	if loaded.NextSStableId != manifest.NextSStableId {
+		t.Errorf("expected NextSStableId=%d, got %d", manifest.NextSStableId, loaded.NextSStableId)
+	}
+	if len(loaded.Layers[0]) != 1 {
+		t.Errorf("expected 1 sstable in layer 0, got %d", len(loaded.Layers[0]))
+	}
+	if loaded.Layers[0][0].BaseFileName != "000000.sst" {
+		t.Errorf("expected BaseFileName=000000.sst, got %s", loaded.Layers[0][0].BaseFileName)
+	}
+}
+
+//goland:noinspection DuplicatedCode
 func TestSSTableIteratorRaw(t *testing.T) {
 	tempFile := filepath.Join("test_sstable_basic.sst")
 	defer os.Remove(tempFile)
@@ -253,6 +302,7 @@ func TestSSTableIteratorRaw(t *testing.T) {
 	}
 }
 
+//goland:noinspection DuplicatedCode
 func TestSSTableIterator(t *testing.T) {
 	tempFile := filepath.Join("test_sstable_basic.sst")
 	defer os.Remove(tempFile)
@@ -366,6 +416,7 @@ func TestSSTableMergeIteratorRaw(t *testing.T) {
 	}
 }
 
+//goland:noinspection DuplicatedCode
 func TestSSTableMergeIteratorRawWithDuplicates(t *testing.T) {
 	tempFile1 := "test_merge_dup_1.sst"
 	tempFile2 := "test_merge_dup_2.sst"
@@ -442,6 +493,7 @@ func TestSSTableMergeIteratorRawWithDuplicates(t *testing.T) {
 	}
 }
 
+//goland:noinspection DuplicatedCode
 func TestSSTableMergeIteratorWithTombstones(t *testing.T) {
 	tempFile1 := "test_merge_tomb_1.sst"
 	tempFile2 := "test_merge_tomb_2.sst"

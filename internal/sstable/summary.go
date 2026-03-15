@@ -185,10 +185,10 @@ func (s *SummarySegment) FindIndexBlockNumber(key []byte) int {
 			right = mid - 1
 		} else if cmp == 0 {
 			return mid * int(s.SamplingDegree)
-		} else {
-			result = mid
-			left = mid + 1
 		}
+
+		result = mid
+		left = mid + 1
 	}
 
 	if result == -1 {

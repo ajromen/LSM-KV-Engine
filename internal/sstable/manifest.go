@@ -9,21 +9,22 @@ import (
 	"strings"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/block"
+	"github.com/ajromen/LSM-KV-Engine/internal/enums"
 )
 
 const ManifestFileName = "MANIFEST.json"
 
 type SSTableManifest struct {
-	Id           uint64 `json:"id"`
-	BaseFileName string `json:"base_file_name"`
-	Format       byte   `json:"is_multi"`
-	Layer        uint64 `json:"layer"`
+	Id           uint64              `json:"id"`
+	BaseFileName string              `json:"base_file_name"`
+	Format       enums.SSTableFormat `json:"is_multi"`
+	Layer        uint64              `json:"layer"`
 }
 
 type Manifest struct {
 	FileDir       string                    `json:"file_dir"`
 	NextSStableId uint64                    `json:"next_stable_id"`
-	Layers        map[int][]SSTableManifest `json:"layers"`
+	Layers        map[int][]SSTableManifest `json:"Layers"`
 }
 
 func NewManifest(fileDir string) (*Manifest, error) {
@@ -51,18 +52,18 @@ func (m *Manifest) reconstruct(fileDir string) error {
 	if err != nil {
 		return err
 	}
-	sstableFiles := make(map[string]byte)
+	sstableFiles := make(map[string]enums.SSTableFormat)
 	for _, file := range files {
 		if !file.IsDir() {
 			name := file.Name()
 			// Single-file: 000000.sst
 			if filepath.Ext(name) == ".sst" && !strings.Contains(strings.TrimSuffix(name, ".sst"), ".") {
-				sstableFiles[filepath.Join(fileDir, name)] = 0
+				sstableFiles[filepath.Join(fileDir, name)] = enums.FormatSingleFile
 			}
 			// Multi-file: 000000.sst.data -> add 000000.sst to list
 			if strings.HasSuffix(name, ".sst.data") {
 				basePath := filepath.Join(fileDir, strings.TrimSuffix(name, ".data"))
-				sstableFiles[basePath] = 1
+				sstableFiles[basePath] = enums.FormatSingleFile
 			}
 		}
 	}

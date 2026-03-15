@@ -42,25 +42,25 @@ func NewBTree[T any](t int, cmp Comparator[T]) *BTree[T] {
 	}
 }
 
-func (node *BTreeNode[T]) lowerBound(target T, cmp Comparator[T]) (T, bool) {
+func (btn *BTreeNode[T]) lowerBound(target T, cmp Comparator[T]) (T, bool) {
 	i := 0
-	for i < len(node.nodeData) && cmp(node.nodeData[i], target) < 0 {
+	for i < len(btn.nodeData) && cmp(btn.nodeData[i], target) < 0 {
 		i++
 	}
-	if node.leaf {
-		if i < len(node.nodeData) {
-			return node.nodeData[i], true
+	if btn.leaf {
+		if i < len(btn.nodeData) {
+			return btn.nodeData[i], true
 		}
 		var zero T
 		return zero, false
 	}
-	if i < len(node.children) {
-		if val, found := node.children[i].lowerBound(target, cmp); found {
+	if i < len(btn.children) {
+		if val, found := btn.children[i].lowerBound(target, cmp); found {
 			return val, true
 		}
 	}
-	if i < len(node.nodeData) {
-		return node.nodeData[i], true
+	if i < len(btn.nodeData) {
+		return btn.nodeData[i], true
 	}
 	var zero T
 	return zero, false
@@ -74,25 +74,25 @@ func (bt *BTree[T]) LowerBound(target T) (T, bool) {
 	return bt.root.lowerBound(target, bt.cmp)
 }
 
-func (node *BTreeNode[T]) upperBound(target T, cmp Comparator[T]) (T, bool) {
+func (btn *BTreeNode[T]) upperBound(target T, cmp Comparator[T]) (T, bool) {
 	i := 0
-	for i < len(node.nodeData) && cmp(node.nodeData[i], target) <= 0 {
+	for i < len(btn.nodeData) && cmp(btn.nodeData[i], target) <= 0 {
 		i++
 	}
-	if node.leaf {
-		if i < len(node.nodeData) {
-			return node.nodeData[i], true
+	if btn.leaf {
+		if i < len(btn.nodeData) {
+			return btn.nodeData[i], true
 		}
 		var zero T
 		return zero, false
 	}
-	if i < len(node.children) {
-		if val, found := node.children[i].upperBound(target, cmp); found {
+	if i < len(btn.children) {
+		if val, found := btn.children[i].upperBound(target, cmp); found {
 			return val, true
 		}
 	}
-	if i < len(node.nodeData) {
-		return node.nodeData[i], true
+	if i < len(btn.nodeData) {
+		return btn.nodeData[i], true
 	}
 	var zero T
 	return zero, false
@@ -185,56 +185,56 @@ func (bt *BTree[T]) Insert(val T) {
 	bt.size++
 }
 
-func (node *BTreeNode[T]) delete(key T, t int, cmp Comparator[T]) bool {
+func (btn *BTreeNode[T]) delete(key T, t int, cmp Comparator[T]) bool {
 	i := 0
-	for i < len(node.nodeData) && cmp(key, node.nodeData[i]) > 0 {
+	for i < len(btn.nodeData) && cmp(key, btn.nodeData[i]) > 0 {
 		i++
 	}
-	if i < len(node.nodeData) && cmp(key, node.nodeData[i]) == 0 {
-		if node.leaf {
-			node.nodeData = append(node.nodeData[:i], node.nodeData[i+1:]...)
+	if i < len(btn.nodeData) && cmp(key, btn.nodeData[i]) == 0 {
+		if btn.leaf {
+			btn.nodeData = append(btn.nodeData[:i], btn.nodeData[i+1:]...)
 			return true
 		}
-		leftChild := node.children[i]
-		rightChild := node.children[i+1]
+		leftChild := btn.children[i]
+		rightChild := btn.children[i+1]
 		if len(leftChild.nodeData) >= t {
 			pred := leftChild.getMax()
-			node.nodeData[i] = pred
+			btn.nodeData[i] = pred
 			return leftChild.delete(pred, t, cmp)
 		}
 		if len(rightChild.nodeData) >= t {
 			succ := rightChild.getMin()
-			node.nodeData[i] = succ
+			btn.nodeData[i] = succ
 			return rightChild.delete(succ, t, cmp)
 		}
-		node.merge(i)
+		btn.merge(i)
 		return leftChild.delete(key, t, cmp)
 	}
 
-	if node.leaf {
+	if btn.leaf {
 		return false
 	}
 
-	child := node.children[i]
+	child := btn.children[i]
 	if len(child.nodeData) < t {
-		node.fill(i, t)
+		btn.fill(i, t)
 	}
-	if i > len(node.nodeData) {
-		return node.children[i-1].delete(key, t, cmp)
+	if i > len(btn.nodeData) {
+		return btn.children[i-1].delete(key, t, cmp)
 	}
-	return node.children[i].delete(key, t, cmp)
+	return btn.children[i].delete(key, t, cmp)
 }
 
-func (node *BTreeNode[T]) getMin() T {
-	current := node
+func (btn *BTreeNode[T]) getMin() T {
+	current := btn
 	for !current.leaf {
 		current = current.children[0]
 	}
 	return current.nodeData[0]
 }
 
-func (node *BTreeNode[T]) getMax() T {
-	current := node
+func (btn *BTreeNode[T]) getMax() T {
+	current := btn
 	for !current.leaf {
 		current = current.children[len(current.children)-1]
 	}
@@ -246,26 +246,26 @@ func (bt *BTree[T]) MarkDeleted(val T, setDeleted func(*T)) {
 	bt.Insert(val)
 }
 
-func (node *BTreeNode[T]) fill(i int, t int) {
-	if i > 0 && len(node.children[i-1].nodeData) >= t {
-		node.borrowFromPrev(i)
-	} else if i < len(node.children)-1 && len(node.children[i+1].nodeData) >= t {
-		node.borrowFromNext(i)
+func (btn *BTreeNode[T]) fill(i int, t int) {
+	if i > 0 && len(btn.children[i-1].nodeData) >= t {
+		btn.borrowFromPrev(i)
+	} else if i < len(btn.children)-1 && len(btn.children[i+1].nodeData) >= t {
+		btn.borrowFromNext(i)
 	} else {
-		if i < len(node.children)-1 {
-			node.merge(i)
+		if i < len(btn.children)-1 {
+			btn.merge(i)
 		} else {
-			node.merge(i - 1)
+			btn.merge(i - 1)
 		}
 	}
 }
 
-func (node *BTreeNode[T]) borrowFromPrev(i int) {
-	child := node.children[i]
-	sibling := node.children[i-1]
+func (btn *BTreeNode[T]) borrowFromPrev(i int) {
+	child := btn.children[i]
+	sibling := btn.children[i-1]
 
-	child.nodeData = append([]T{node.nodeData[i-1]}, child.nodeData...)
-	node.nodeData[i-1] = sibling.nodeData[len(sibling.nodeData)-1]
+	child.nodeData = append([]T{btn.nodeData[i-1]}, child.nodeData...)
+	btn.nodeData[i-1] = sibling.nodeData[len(sibling.nodeData)-1]
 	sibling.nodeData = sibling.nodeData[:len(sibling.nodeData)-1]
 
 	if !child.leaf {
@@ -274,12 +274,12 @@ func (node *BTreeNode[T]) borrowFromPrev(i int) {
 	}
 }
 
-func (node *BTreeNode[T]) borrowFromNext(i int) {
-	child := node.children[i]
-	sibling := node.children[i+1]
+func (btn *BTreeNode[T]) borrowFromNext(i int) {
+	child := btn.children[i]
+	sibling := btn.children[i+1]
 
-	child.nodeData = append(child.nodeData, node.nodeData[i])
-	node.nodeData[i] = sibling.nodeData[0]
+	child.nodeData = append(child.nodeData, btn.nodeData[i])
+	btn.nodeData[i] = sibling.nodeData[0]
 	sibling.nodeData = sibling.nodeData[1:]
 
 	if !child.leaf {
@@ -288,16 +288,16 @@ func (node *BTreeNode[T]) borrowFromNext(i int) {
 	}
 }
 
-func (node *BTreeNode[T]) merge(i int) {
-	child := node.children[i]
-	sibling := node.children[i+1]
-	child.nodeData = append(child.nodeData, node.nodeData[i])
+func (btn *BTreeNode[T]) merge(i int) {
+	child := btn.children[i]
+	sibling := btn.children[i+1]
+	child.nodeData = append(child.nodeData, btn.nodeData[i])
 	child.nodeData = append(child.nodeData, sibling.nodeData...)
 	if !child.leaf {
 		child.children = append(child.children, sibling.children...)
 	}
-	node.nodeData = append(node.nodeData[:i], node.nodeData[i+1:]...)
-	node.children = append(node.children[:i+1], node.children[i+2:]...)
+	btn.nodeData = append(btn.nodeData[:i], btn.nodeData[i+1:]...)
+	btn.children = append(btn.children[:i+1], btn.children[i+2:]...)
 }
 
 func (bt *BTree[T]) EntriesInOrder() []T {

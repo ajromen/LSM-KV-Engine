@@ -58,7 +58,7 @@ The restart array allows faster binary search inside a block
 CRC32 is calculated over the entire block except the last 4 bytes (CRC itself) we take padding into the calculation too
 */
 
-// DATA BLOCK BUILDER BUILDS SSTABLE DATA BLOCK -> ENCODES KEYS USING DELTA ENCODING AND APPENDS RECORDS UNTIL THE BLOCK IS FULL
+// DataBlockBuilder  BUILDS SSTABLE DATA BLOCK -> ENCODES KEYS USING DELTA ENCODING AND APPENDS RECORDS UNTIL THE BLOCK IS FULL
 type DataBlockBuilder struct {
 	encoder         encoders.Encoder // encoder used on given data
 	data            []byte           // raw data for block
@@ -588,7 +588,7 @@ func NewMergeIteratorRaw(iters []*DataBlockIteratorRaw, mergeStructure byte) *Me
 
 func (m *MergeIteratorRaw) Valid() bool { return m.valid }
 
-// SeekToFirst moves the iterator on the record with smallest key out of all data blocks (single data block iterators positioned on first record)
+// SeekToFirst moves the iterator on the record with the smallest key out of all data blocks (single data block iterators positioned on first record)
 func (m *MergeIteratorRaw) SeekToFirst() {
 	for _, it := range m.structure.Iterators() {
 		it.SeekToFirst()
