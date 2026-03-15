@@ -2,166 +2,143 @@ package encoders
 
 import (
 	"bytes"
+	"fmt"
 	"os"
-	"path/filepath"
 	"testing"
 )
 
-func TestCompressorBasic(t *testing.T) {
-	t.Log("---- COMPRESSOR BASIC TEST ----")
-	encoder := NewDictionaryEncoder()
-	idx, AddToDicted := encoder.AddToDict([]byte("key1"))
-	if !AddToDicted || idx != 0 {
-		t.Fatalf("expected key1 at index 0")
+func TestDictEncoderBasic(t *testing.T) {
+	t.Log("---- DICT ENCODER BASIC TEST ----")
+	enc := NewDictEncoder(nil)
+	keys := [][]byte{
+		[]byte("apple"),
+		[]byte("banana"),
+		[]byte("cherry"),
 	}
-	idx2, AddToDicted := encoder.AddToDict([]byte("key2"))
-	if !AddToDicted || idx2 != 1 {
-		t.Fatalf("expected key2 at index 1")
+	for i, k := range keys {
+		idx, added := enc.AddToDict(k)
+		if !added {
+			t.Fatalf("expected key %s to be added", k)
+		}
+		if idx != uint64(i) {
+			t.Fatalf("expected index %d, got %d", i, idx)
+		}
 	}
-	idx3, AddToDicted := encoder.AddToDict([]byte("key1"))
-	if AddToDicted || idx3 != 0 {
-		t.Fatalf("expected duplicate key1 to return existing index")
+
+	// Check duplicates
+	idx, added := enc.AddToDict([]byte("apple"))
+	if added {
+		t.Fatalf("expected duplicate key not to be added")
 	}
-	key, error := encoder.GetKey(0)
-	if error != nil || bytes.Compare(key, []byte("key1")) != 0 {
-		t.Fatalf("expected key1 at index 0")
+	if idx != 0 {
+		t.Fatalf("expected index 0 for duplicate, got %d", idx)
 	}
-	_, error = encoder.GetKey(10)
-	if error == nil {
-		t.Fatalf("expected invalid index to fail")
+
+	// Encode/decode
+	for _, k := range keys {
+		encBytes := enc.Encode(k)
+		decKey := enc.Decode(encBytes)
+		if !bytes.Equal([]byte(decKey), k) {
+			t.Fatalf("expected decoded key %s, got %s", k, decKey)
+		}
 	}
 }
 
-func TestCompressorRemoveFromDict(t *testing.T) {
-	t.Log("---- COMPRESSOR RemoveFromDict TEST ----")
-	encoder := NewDictionaryEncoder()
-	encoder.AddToDict([]byte("key1"))
-	encoder.AddToDict([]byte("key2"))
-	encoder.AddToDict([]byte("key3"))
-	ok := encoder.RemoveFromDict([]byte("key2"))
-	if !ok {
-		t.Fatalf("expected key2 to be RemoveFromDictd")
+func TestDictEncoderBitWidth(t *testing.T) {
+	t.Log("---- DICT ENCODER BITWIDTH TEST ----")
+	enc := NewDictEncoder(nil)
+	for i := 0; i < 16; i++ {
+		enc.AddToDict([]byte(fmt.Sprintf("%d", i)))
 	}
-	if encoder.Size() != 2 {
-		t.Fatalf("expected size 2 after RemoveFromDict, got %d", encoder.Size())
+	bw := enc.BitWidth()
+	if bw != 4 {
+		t.Fatalf("expected bitWidth 4 for 16 keys, got %d", bw)
 	}
-	_, ok = encoder.GetIdx([]byte("key2"))
-	if ok {
-		t.Fatalf("expected key2 to be missing")
-	}
-	idx, _ := encoder.GetIdx([]byte("key3"))
-	if idx != 1 {
-		t.Fatalf("expected key3 to move to index 1")
+
+	enc.AddToDict([]byte("z"))
+	bw = enc.BitWidth()
+	if bw != 5 {
+		t.Fatalf("expected bitWidth 5 after adding 17th key, got %d", bw)
 	}
 }
 
-func TestCompressorRemoveFromDictAll(t *testing.T) {
-	t.Log("---- COMPRESSOR RemoveFromDict ALL TEST ----")
-	encoder := NewDictionaryEncoder()
-	encoder.AddToDict([]byte("a"))
-	encoder.AddToDict([]byte("b"))
-	encoder.AddToDict([]byte("c"))
-	encoder.RemoveAll()
-	if encoder.Size() != 0 {
-		t.Fatalf("expected empty dict")
+func TestDictEncoderBuildDictionary(t *testing.T) {
+	t.Log("---- DICT ENCODER BUILD DICTIONARY TEST ----")
+	enc := NewDictEncoder(nil)
+	keys := [][]byte{
+		[]byte("dog"),
+		[]byte("cat"),
+		[]byte("bird"),
 	}
-	if len(encoder.GetMapOfIdx()) != 0 {
-		t.Fatalf("expected empty index map")
+	enc.BuildDictionary(keys)
+	if enc.Size() != 3 {
+		t.Fatalf("expected size 3, got %d", enc.Size())
 	}
-}
-
-func TestCompressorSerializeDeserialize(t *testing.T) {
-	t.Log("---- COMPRESSOR SERIALIZE TEST ----")
-	encoder := NewDictionaryEncoder()
-	encoder.AddToDict([]byte("key1"))
-	encoder.AddToDict([]byte("key2"))
-	encoder.AddToDict([]byte("key3"))
-	data := encoder.Serialize()
-	encoder2, err := Deserialize(data)
-	if err != nil {
-		t.Fatalf("deserialize failed: %v", err)
-	}
-	if encoder2.Size() != 3 {
-		t.Fatalf("expected size 3 after deserialize")
-	}
-	key, error := encoder2.GetKey(1)
-	if error != nil || bytes.Compare(key, []byte("key2")) != 0 {
-		t.Fatalf("expected key2 at index 1")
+	expectedKeys := []string{"bird", "cat", "dog"} // sorted
+	for i, k := range expectedKeys {
+		if enc.Key(uint64(i)) != k {
+			t.Fatalf("expected key at index %d to be %s, got %s", i, k, enc.Key(uint64(i)))
+		}
 	}
 }
 
-func TestCompressorDeserializeCorrupt(t *testing.T) {
-	t.Log("---- COMPRESSOR CORRUPT DESERIALIZE TEST ----")
-	data := []byte{0x05, 'a', 'b'}
-	_, err := Deserialize(data)
-	if err == nil {
-		t.Fatalf("expected error on corrupt data")
+func TestDictEncoderSaveLoad(t *testing.T) {
+	t.Log("---- DICT ENCODER SAVE/LOAD TEST ----")
+	enc := NewDictEncoder(nil)
+	keys := [][]byte{
+		[]byte("red"),
+		[]byte("green"),
+		[]byte("blue"),
+	}
+	for _, k := range keys {
+		enc.AddToDict(k)
+	}
+	data := enc.SaveDict()
+
+	enc2 := NewDictEncoder(data)
+	if enc2.Size() != len(keys) {
+		t.Fatalf("expected size %d after load, got %d", len(keys), enc2.Size())
+	}
+	for _, k := range keys {
+		idx, ok := enc2.Index(string(k))
+		if !ok {
+			t.Fatalf("key %s missing after load", k)
+		}
+		if enc2.Key(idx) != string(k) {
+			t.Fatalf("key mismatch after load: expected %s, got %s", k, enc2.Key(idx))
+		}
 	}
 }
 
-func TestCompressorSaveLoad(t *testing.T) {
-	t.Log("---- COMPRESSOR FILE LOAD TEST ----")
-	dir := t.TempDir()
-	name := "dict.bin"
-	encoder := NewDictionaryEncoder()
-	encoder.AddToDict([]byte("key1"))
-	encoder.AddToDict([]byte("key2"))
-	path := filepath.Join(dir, name)
-	err := os.WriteFile(path, encoder.Serialize(), 0644)
+func TestDictEncoderFileIO(t *testing.T) {
+	t.Log("---- DICT ENCODER FILE IO TEST ----")
+	tmpFile, err := os.CreateTemp("", "dictenc_test")
 	if err != nil {
-		t.Fatalf("save failed: %v", err)
+		t.Fatalf("failed to create temp file: %v", err)
 	}
-	loaded, err := LoadFromFile(dir, name)
-	if err != nil {
-		t.Fatalf("load failed: %v", err)
-	}
-	if loaded.Size() != 2 {
-		t.Fatalf("expected loaded size 2")
-	}
-	key, error := loaded.GetKey(0)
-	if error != nil || bytes.Compare(key, []byte("key1")) != 0 {
-		t.Fatalf("expected key1 at index 0")
-	}
-}
+	defer os.Remove(tmpFile.Name())
 
-func TestCompressorAppendLast(t *testing.T) {
-	t.Log("---- COMPRESSOR APPEND LAST TEST ----")
-	dir := t.TempDir()
-	name := "append.bin"
-	path := filepath.Join(dir, name)
-	encoder := NewDictionaryEncoder()
-	encoder.AddToDict([]byte("key1"))
-	err := encoder.AppendLastToFile(dir, name)
-	if err != nil {
-		t.Fatalf("append failed: %v", err)
+	enc := NewDictEncoder(nil)
+	keys := [][]byte{
+		[]byte("one"),
+		[]byte("two"),
+		[]byte("three"),
 	}
-	encoder.AddToDict([]byte("key2"))
-	err = encoder.AppendLastToFile(dir, name)
-	if err != nil {
-		t.Fatalf("append failed: %v", err)
+	for _, k := range keys {
+		enc.AddToDict(k)
 	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read failed: %v", err)
-	}
-	loaded, err := Deserialize(data)
-	if err != nil {
-		t.Fatalf("deserialize failed: %v", err)
-	}
-	if loaded.Size() != 2 {
-		t.Fatalf("expected 2 entries after append")
-	}
-	key, _ := loaded.GetKey(1)
-	if bytes.Compare(key, []byte("key2")) != 0 {
-		t.Fatalf("expected key2 at index 1")
-	}
-}
 
-func TestCompressorAppendLastEmpty(t *testing.T) {
-	t.Log("---- COMPRESSOR APPEND EMPTY TEST ----")
-	encoder := NewDictionaryEncoder()
-	err := encoder.AppendLastToFile(t.TempDir(), "x")
-	if err == nil {
-		t.Fatalf("expected error when appending empty dict")
+	if err := enc.WriteToFile(tmpFile, 0); err != nil {
+		t.Fatalf("failed to write dictionary to file: %v", err)
+	}
+
+	size := len(enc.SaveDict())
+	enc2 := NewDictEncoder(nil)
+	if err := enc2.ReadDictFromFile(tmpFile, 0, size); err != nil {
+		t.Fatalf("failed to read dictionary from file: %v", err)
+	}
+
+	if enc2.Size() != len(keys) {
+		t.Fatalf("expected size %d, got %d", len(keys), enc2.Size())
 	}
 }
