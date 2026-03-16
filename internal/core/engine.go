@@ -60,3 +60,9 @@ func (engine *Engine) Close() error {
 	}
 	return nil
 }
+
+func (engine *Engine) ClearAll() error {
+	//wal
+	print("TODO delete everything")
+	return nil
+}

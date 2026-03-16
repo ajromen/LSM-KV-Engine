@@ -129,6 +129,5 @@ func getDefaultSavePath() string {
 	if err != nil {
 		panic(err)
 	}
-	print(path)
 	return path
 }

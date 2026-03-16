@@ -17,7 +17,8 @@ Commands:
   get <key>           Retrieve the value of a key
   del <key>           Delete a key
   help                Show this help message
-  exit | quit         Close the engine and exit`
+  clear-all			  Delete all data
+  exit | quit | q     Close the engine and exit`
 
 func main() {
 	flags := cli.ParseFlags()
@@ -51,7 +52,10 @@ func RunCli(engine *core.Engine) {
 			handleDelete(engine, parts)
 		case "get":
 			handleGet(engine, parts)
-		case "exit", "quit":
+		case "clear-all":
+			handleClear(engine, parts)
+		case "exit", "quit", "q":
+			print("Exiting...")
 			err := engine.Close()
 			if err != nil {
 				fmt.Println("Closing error: ", err)
@@ -109,4 +113,23 @@ func handleDelete(engine *core.Engine, parts []string) {
 		return
 	}
 	fmt.Println("Delete:", key, " OK")
+}
+
+func handleClear(engine *core.Engine, parts []string) {
+	if len(parts) != 1 {
+		fmt.Println("Usage: clear-all")
+	}
+	fmt.Print("DELETE ALL DATA? (yes/N): ")
+	reader := bufio.NewReader(os.Stdin)
+	answer, _ := reader.ReadString('\n')
+	answer = strings.TrimSpace(answer)
+	if answer != "yes" {
+		fmt.Println("Aborted.")
+		return
+	}
+	if err := engine.ClearAll(); err != nil {
+		fmt.Println("ClearAll:", err)
+		return
+	}
+	fmt.Println("ClearAll: OK")
 }
