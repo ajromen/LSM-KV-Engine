@@ -76,8 +76,10 @@ func (s SizeTiredCompaction) Compact(manager *sstable.SSTableManager) error {
 		if manager.Layers[i].Length() < s.MinMergeThreshold {
 			continue
 		}
-		fmt.Printf("Compacting %d SSTables at layer %d\n", len(manager.Layers[i].SSTables), i)
-		err := manager.MergeSSTables(manager.Layers[i].SSTables, i+1)
+		readers := make([]*sstable.SSTableReader, len(manager.Layers[i].SSTables))
+		copy(readers, manager.Layers[i].SSTables)
+		fmt.Printf("Compacting %d SSTables at layer %d\n", len(readers), i)
+		err := manager.MergeSSTables(readers, i+1)
 		if err != nil {
 			return err
 		}

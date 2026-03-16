@@ -59,6 +59,9 @@ func (l *LSM) Put(key []byte, value []byte) error {
 func (l *LSM) Get(key []byte) ([]byte, bool, error) {
 	entry, found := l.memtableeManager.Get(key)
 	if found {
+		if entry == nil {
+			return nil, false, nil // tombstone
+		}
 		return entry, true, nil
 	}
 	entry, found, err := l.sstableManager.Get(key)
@@ -78,6 +81,7 @@ func (l *LSM) Delete(key []byte) error {
 }
 
 func (l *LSM) Finish() error {
+	l.memtableeManager.Close()
 	return nil
 }
 
