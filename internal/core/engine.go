@@ -2,7 +2,6 @@ package core
 
 import (
 	"os"
-	"time"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/cli"
 	"github.com/ajromen/LSM-KV-Engine/internal/config"
@@ -15,17 +14,12 @@ type Engine struct {
 	//wal
 }
 
-func currentTimestamp() uint64 {
-	now := time.Now().UnixNano() // nanosekunde od 1.1.1970
-	return uint64(now)
-}
-
 func NewEngine(flags *cli.FLags) (*Engine, error) {
 	cfg, err := config.LoadConfig(flags)
 	if err != nil {
 		return nil, err
 	}
-	dataDir := "./data"
+	dataDir := cfg.SavePath
 	if err := os.MkdirAll(dataDir, 0755); err != nil {
 		return nil, err
 	}
