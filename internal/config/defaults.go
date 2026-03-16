@@ -41,9 +41,9 @@ const (
 	DefaultBlockCacheMaxBlocks = 2048
 
 	//LSM
-	DefaultLSMCompactionAlgorithm = enums.SizeTieredCompaction
+	DefaultLSMCompactionAlgorithm = enums.LeveledCompaction
 	DefaultLSMMinMergeThreshold   = 4
-	DefaultLSMLevelSizeMultiplier = 10
+	DefaultLSMLevelSizeMultiplier = 2
 )
 
 func NewDefaultConfig() *Config {

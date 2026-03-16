@@ -21,9 +21,14 @@ func NewLSM(cfg *config.Config, dataDir string) (*LSM, error) {
 	lsm.sstableManager = sstable.NewSSTableManager(dataDir, cfg)
 	switch cfg.LSMTree.CompactionAlgorithm {
 	case enums.LeveledCompaction:
-		lsm.strategy = LeveledCompaction{} //TODO LevelSizeMultiplier
+		lsm.strategy = LeveledCompaction{
+			L1MaxBytes:          int64(cfg.Memtable.MemtableMaxSizeBytes) * int64(cfg.LSMTree.LevelSizeMultiplier),
+			LevelSizeMultiplier: cfg.LSMTree.LevelSizeMultiplier,
+		}
 	case enums.SizeTieredCompaction:
-		lsm.strategy = SizeTiredCompaction{} //TODO MinMergeThreshold
+		lsm.strategy = SizeTiredCompaction{
+			MinMergeThreshold: cfg.LSMTree.MinMergeThreshold,
+		}
 	}
 
 	factory := memtable.NewFactory(cfg.Memtable)
@@ -38,7 +43,7 @@ func (l *LSM) onFlush(entries []memtable.MemtableEntry) {
 		panic(err)
 	}
 
-	// set this in a goroutine
+	// TODO set this in a goroutine
 	err = l.strategy.Compact(l.sstableManager)
 	if err != nil {
 		panic(err)

@@ -22,10 +22,11 @@ type SSTableReader struct {
 	filePath       string              // file path of given sstable file (base path if multi file format)
 	Id             int                 // SSTable segment id
 	Layer          int                 // number of the lsm layer
+	SizeBytes      int64               //file size in bytes
 	storage        SegmentStorage      // low-level reading of segments
 	blockManager   *block.BlockManager // reading and decoding data blocks
 	footer         *Footer             // footer of given sstable
-	summarySegment *SummarySegment     // summary segment (read into RAM)
+	SummarySegment *SummarySegment     // summary segment (read into RAM)
 	filterSegment  *FilterSegment      // filter segment (read into RAM)
 	merkleTree     *MerkleTree         // merkle tree - metadata segment (read into RAM)
 	config         *config.Config      // config for given sstable
@@ -49,15 +50,22 @@ func NewSSTableReader(id int, filePath string, format enums.SSTableFormat, cfg *
 		return nil, err
 	}
 	offset := uint64(0)
+	var fileSize int64
 	switch s := storage.(type) {
 	case *SingleFileStorage:
 		info, err := s.File().Stat()
 		if err != nil {
 			return nil, err
 		}
+		fileSize = info.Size()
 		offset = uint64(info.Size()) - FooterSize
 	case *MultiFileStorage:
 		offset = 0
+		info, err := s.files[enums.SegmentData].Stat()
+		if err != nil {
+			return nil, err
+		}
+		fileSize = info.Size()
 	}
 	// read and validate footer
 	footerData, err := storage.ReadSegment(enums.SegmentFooter, offset, FooterSize)
@@ -80,6 +88,7 @@ func NewSSTableReader(id int, filePath string, format enums.SSTableFormat, cfg *
 		config:       cfg,
 		Layer:        layer,
 		Id:           id,
+		SizeBytes:    fileSize,
 	}
 	// load summary into RAM
 	if err := reader.loadSummary(); err != nil {
@@ -107,7 +116,7 @@ func (r *SSTableReader) loadSummary() error {
 	if err != nil {
 		return err
 	}
-	r.summarySegment = summary
+	r.SummarySegment = summary
 	return nil
 }
 
@@ -182,7 +191,7 @@ func (r *SSTableReader) Get(key []byte) (*Record, error) {
 	}
 
 	// step 2
-	indexBlockNum := r.summarySegment.FindIndexBlockNumber(key)
+	indexBlockNum := r.SummarySegment.FindIndexBlockNumber(key)
 	if indexBlockNum < 0 {
 		return nil, nil
 	}

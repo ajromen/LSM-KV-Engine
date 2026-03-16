@@ -96,8 +96,8 @@ func TestSSTableWriterBasic(t *testing.T) {
 	fmt.Println()
 	fmt.Println([]byte("key001"))
 	fmt.Println("INDEX ENTRIES", indexSegment.Entries)
-	fmt.Println("SUMMARY ENTRIES", reader.summarySegment.Entries)
-	fmt.Println("INDEX BLOCK OFFSET", reader.summarySegment.Entries[0].IndexBlockOffset)
+	fmt.Println("SUMMARY ENTRIES", reader.SummarySegment.Entries)
+	fmt.Println("INDEX BLOCK OFFSET", reader.SummarySegment.Entries[0].IndexBlockOffset)
 	record, err := reader.Get([]byte("key001"))
 	if err != nil {
 		t.Fatalf("ReadAt failed: %v", err)
@@ -194,8 +194,8 @@ func TestSSTableMultiFileFormat(t *testing.T) {
 	fmt.Println()
 	fmt.Println([]byte("key001"))
 	fmt.Println("INDEX ENTRIES", indexSegment.Entries)
-	fmt.Println("SUMMARY ENTRIES", reader.summarySegment.Entries)
-	fmt.Println("INDEX BLOCK OFFSET", reader.summarySegment.Entries[0].IndexBlockOffset)
+	fmt.Println("SUMMARY ENTRIES", reader.SummarySegment.Entries)
+	fmt.Println("INDEX BLOCK OFFSET", reader.SummarySegment.Entries[0].IndexBlockOffset)
 	record, err := reader.Get([]byte("key009"))
 	if err != nil {
 		t.Fatalf("ReadAt failed: %v", err)

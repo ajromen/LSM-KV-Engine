@@ -16,11 +16,18 @@ import (
 
 type Layer struct {
 	SSTables []*SSTableReader
-	// optional add hotness
 }
 
 func (l *Layer) Length() int {
 	return len(l.SSTables)
+}
+
+func (l *Layer) GetSize() int64 {
+	var size int64
+	for _, reader := range l.SSTables {
+		size += reader.SizeBytes
+	}
+	return size
 }
 
 func newLayer() *Layer {
@@ -146,13 +153,16 @@ func (sm *SSTableManager) Get(key []byte) ([]byte, bool, error) {
 			if record == nil {
 				continue
 			}
+			if record.Tombstone {
+				return nil, false, nil
+			}
 			return record.Value, true, nil
 		}
 	}
 	return nil, false, nil
 }
 
-// deletes at specified layer/index
+// DeleteSSTable deletes at specified layer/index
 func (sm *SSTableManager) DeleteSSTable(layer, id int) error {
 	readers := sm.Layers[layer].SSTables
 	for i, reader := range readers {
@@ -176,7 +186,7 @@ func (sm *SSTableManager) DeleteSSTable(layer, id int) error {
 // 3. open new reader and add to manager
 // 4. update manifest
 // 5. delete old sstables
-func (sm *SSTableManager) MergeSSTables(readers []*SSTableReader, toLayer uint64) error {
+func (sm *SSTableManager) MergeSSTables(readers []*SSTableReader, toLayer int) error {
 	// 1. create new sstable
 	sstableID := sm.manifest.NextSStableId
 	sm.manifest.IncrementId()
@@ -210,11 +220,11 @@ func (sm *SSTableManager) MergeSSTables(readers []*SSTableReader, toLayer uint64
 	}
 
 	// 3. open new reader and add to manager
-	reader, err := NewSSTableReader(sstableID, filePath, sm.config.SSTable.Format, sm.config, int(toLayer))
+	reader, err := NewSSTableReader(sstableID, filePath, sm.config.SSTable.Format, sm.config, toLayer)
 	if err != nil {
 		return err
 	}
-	for len(sm.Layers) <= int(toLayer) {
+	for len(sm.Layers) <= toLayer {
 		sm.Layers = append(sm.Layers, newLayer())
 	}
 	sm.Layers[toLayer].SSTables = append(sm.Layers[toLayer].SSTables, reader)
@@ -222,7 +232,7 @@ func (sm *SSTableManager) MergeSSTables(readers []*SSTableReader, toLayer uint64
 	// 4. update manifest
 	sstManifest := SSTableManifest{
 		Id:           sstableID,
-		Layer:        toLayer,
+		Layer:        uint64(toLayer),
 		Format:       sm.config.SSTable.Format,
 		BaseFileName: filePath,
 	}
@@ -232,12 +242,41 @@ func (sm *SSTableManager) MergeSSTables(readers []*SSTableReader, toLayer uint64
 	}
 
 	// 5. delete old sstables
-	for _, reader := range readers {
-		err := sm.DeleteSSTable(reader.Layer, reader.Id)
-		if err != nil {
+	toDelete := make([]struct{ layer, id int }, len(readers))
+	for i, reader := range readers {
+		toDelete[i] = struct{ layer, id int }{reader.Layer, reader.Id}
+	}
+	for _, d := range toDelete {
+		if err := sm.DeleteSSTable(d.layer, d.id); err != nil {
 			return err
 		}
 	}
 
+	return nil
+}
+
+// MoveSSTable moves sstable from one layer to another
+func (sm *SSTableManager) MoveSSTable(current *SSTableReader, toLayer int) error {
+	fromLayer := current.Layer
+
+	readers := sm.Layers[fromLayer].SSTables
+	for i, r := range readers {
+		if r.Id == current.Id {
+			sm.Layers[fromLayer].SSTables = append(readers[:i], readers[i+1:]...)
+			break
+		}
+	}
+	for len(sm.Layers) <= toLayer {
+		sm.Layers = append(sm.Layers, newLayer())
+	}
+
+	current.Layer = toLayer
+	sm.Layers[toLayer].SSTables = append(sm.Layers[toLayer].SSTables, current)
+
+	err := sm.manifest.MoveSSTable(current.Id, fromLayer, toLayer)
+	if err != nil {
+		return err
+	}
+	//TODO update footer
 	return nil
 }

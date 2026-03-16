@@ -108,6 +108,20 @@ func (m *Manifest) Save() error {
 	return nil
 }
 
+func (m *Manifest) MoveSSTable(id, fromLayer, toLayer int) error {
+	layer := m.Layers[fromLayer]
+	var sstable SSTableManifest
+	for i, sst := range layer {
+		if sst.Id == id {
+			sstable = sst
+			m.Layers[fromLayer] = append(layer[:i], layer[i+1:]...)
+			break
+		}
+	}
+	m.Layers[toLayer] = append(m.Layers[toLayer], sstable)
+	return m.Save()
+}
+
 func (m *Manifest) AddSSTable(sstManifest SSTableManifest) error {
 	layer := int(sstManifest.Layer)
 	m.Layers[layer] = append(m.Layers[layer], sstManifest)
