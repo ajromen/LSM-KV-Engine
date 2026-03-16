@@ -1,6 +1,7 @@
 package core
 
 import (
+	"fmt"
 	"os"
 	"time"
 
@@ -74,4 +75,31 @@ func (engine *Engine) Delete(key []byte) error {
 }
 
 func (engine *Engine) Close() {
+}
+
+func (engine *Engine) DataRaw() {
+	dataF, err := os.Open("data/000001.sst.data")
+	if err != nil {
+		fmt.Println("open error:", err)
+		return
+	}
+	defer dataF.Close()
+
+	stats, err := dataF.Stat()
+	if err != nil {
+		fmt.Println("stat error:", err)
+		return
+	}
+
+	buf := make([]byte, int(stats.Size()))
+
+	n, err := dataF.ReadAt(buf, 0)
+	if err != nil {
+		fmt.Println("read error:", err)
+		return
+	}
+
+	buf = buf[:n]
+
+	fmt.Println("Data bytes:", buf)
 }

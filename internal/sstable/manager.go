@@ -140,6 +140,9 @@ func (sm *SSTableManager) Get(key []byte) ([]byte, bool, error) {
 			if record == nil {
 				continue
 			}
+			if record.Tombstone == true {
+				return nil, false, nil
+			}
 			return record.Value, true, nil
 		}
 	}

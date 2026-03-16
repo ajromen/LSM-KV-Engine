@@ -65,6 +65,7 @@ type DataBlockBuilder struct {
 	restartInterval int              // number of keys between delta restart points
 	recordCount     int              // number of records added to block
 	firstKey        []byte           // first key in the block (for index)
+	tombstoneBits   *BitSet          // bitmap for tombstones
 }
 
 func NewDataBlockBuilder(t byte, restartInterval, blockSize int) *DataBlockBuilder {
@@ -72,6 +73,7 @@ func NewDataBlockBuilder(t byte, restartInterval, blockSize int) *DataBlockBuild
 		encoder:         encoders.NewEncoder(t, restartInterval),
 		data:            make([]byte, 0, blockSize),
 		restartInterval: restartInterval,
+		tombstoneBits:   NewBitSet(0),
 	}
 }
 
@@ -88,7 +90,8 @@ func (builder *DataBlockBuilder) AddRecord(record Record) bool {
 		builder.firstKey = append([]byte(nil), record.Key...)
 	}
 	estimatedSize := len(record.Key)*2 + len(record.Value) + 32
-	reserved := 12 + (builder.recordCount/builder.restartInterval+1)*4
+	bitmapSize := (builder.recordCount / 8) + 1
+	reserved := 12 + (builder.recordCount/builder.restartInterval+1)*4 + bitmapSize
 
 	if len(builder.data)+estimatedSize+reserved > cap(builder.data) && builder.recordCount > 0 {
 		return false
@@ -96,9 +99,7 @@ func (builder *DataBlockBuilder) AddRecord(record Record) bool {
 	keyOffset := uint32(len(builder.data))
 	builder.data = AppendUvarint128ToSlice2(builder.data, record.Timestamp)
 	if record.Tombstone {
-		builder.data = append(builder.data, 1)
-	} else {
-		builder.data = append(builder.data, 0)
+		builder.tombstoneBits.Set(builder.recordCount)
 	}
 	builder.data = builder.encoder.Encode(record.Key, keyOffset, builder.data)
 	builder.data = utils.AppendUvarint(builder.data, uint64(len(record.Value)))
@@ -116,10 +117,12 @@ func (builder *DataBlockBuilder) Finish(blockSize int) ([]byte, error) {
 	data := builder.data
 	restarts := builder.encoder.RestartArray()
 	restartCount := uint32(len(restarts))
+	bitmapData := builder.tombstoneBits.Encode()
+	bitmapSize := uint16(len(bitmapData))
 	block := make([]byte, blockSize)
 	pos := 0
 	// check if everything fits into the block
-	if len(data)+int(restartCount)*4+4+4+4 > blockSize {
+	if len(data)+int(restartCount)*4+4+4+4+int(bitmapSize)+4 > blockSize {
 		return nil, errors.New("data for block too large")
 	}
 	// copy encoded data
@@ -130,15 +133,22 @@ func (builder *DataBlockBuilder) Finish(blockSize int) ([]byte, error) {
 		binary.LittleEndian.PutUint32(block[pos:], restart)
 		pos += 4
 	}
+	crcPos := blockSize - 4
+	bitmapSizePos := crcPos - 2
+	bitmapPos := bitmapSizePos - int(bitmapSize)
+	restartCountPos := bitmapPos - 4
+	dataSizePos := restartCountPos - 4
 	// append data size
-	binary.LittleEndian.PutUint32(block[blockSize-12:], uint32(len(data)))
-	pos += 4
+	binary.LittleEndian.PutUint32(block[dataSizePos:], uint32(len(data)))
 	// append restart count
-	binary.LittleEndian.PutUint32(block[blockSize-8:], restartCount)
-	pos += 4
+	binary.LittleEndian.PutUint32(block[restartCountPos:], restartCount)
+	// append bitmap
+	copy(block[bitmapPos:], bitmapData)
+	// append bitmap size
+	binary.LittleEndian.PutUint16(block[bitmapSizePos:], uint16(bitmapSize))
 	// append CRC
-	crc := crc32.ChecksumIEEE(block[:blockSize-4])
-	binary.LittleEndian.PutUint32(block[blockSize-4:], crc)
+	crc := crc32.ChecksumIEEE(block[:crcPos])
+	binary.LittleEndian.PutUint32(block[crcPos:], crc)
 	return block, nil
 }
 
@@ -149,6 +159,7 @@ func (builder *DataBlockBuilder) Reset() {
 	builder.encoder.Reset()
 	builder.recordCount = 0
 	builder.firstKey = nil
+	builder.tombstoneBits = NewBitSet(0)
 }
 
 func (builder *DataBlockBuilder) FirstKey() []byte {
@@ -161,11 +172,13 @@ func (builder *DataBlockBuilder) RecordCount() int {
 
 // DATA BLOCK READER READS AND DECODES RECORDS FROM A SINGLE DATA BLOCK
 type DataBlockReader struct {
-	data         []byte           // actual data in block
-	decoder      encoders.Encoder // delta encoder
-	restartArray []uint32         // restart points for binary search
-	pos          int              // current read position
-	dataSize     int              // size of the actual data
+	data          []byte           // actual data in block
+	decoder       encoders.Encoder // delta encoder
+	restartArray  []uint32         // restart points for binary search
+	pos           int              // current read position
+	dataSize      int              // size of the actual data
+	tombstoneBits *BitSet
+	recordIdx     int
 }
 
 // VERIFIES CRC AND INITIALIZES A BLOCK READER FOR GIVEN BLOCK
@@ -175,15 +188,24 @@ func NewDataBlockReader(block []byte, restartInterval int, encodingType byte) (*
 		return nil, errors.New("block too small")
 	}
 
+	//calculate positions
+	blockSize := len(block)
+	crcPos := blockSize - 4
+	bitmapSizePos := blockSize - 6
+
 	// verify CRC
-	expectedCRC := binary.LittleEndian.Uint32(block[len(block)-4:])
-	actualCRC := crc32.ChecksumIEEE(block[:len(block)-4])
+	expectedCRC := binary.LittleEndian.Uint32(block[crcPos:])
+	actualCRC := crc32.ChecksumIEEE(block[:crcPos])
 	if expectedCRC != actualCRC {
 		return nil, errors.New("CRC mismatch")
 	}
 
-	dataSize := binary.LittleEndian.Uint32(block[len(block)-12 : len(block)-8])
-	restartCount := binary.LittleEndian.Uint32(block[len(block)-8 : len(block)-4])
+	bitmapSize := binary.LittleEndian.Uint16(block[bitmapSizePos : bitmapSizePos+2])
+	bitmapPos := bitmapSizePos - int(bitmapSize)
+	restartCountPos := bitmapPos - 4
+	dataSizePos := restartCountPos - 4
+	dataSize := binary.LittleEndian.Uint32(block[dataSizePos : dataSizePos+4])
+	restartCount := binary.LittleEndian.Uint32(block[restartCountPos : restartCountPos+4])
 
 	restartArray := make([]uint32, restartCount)
 	for i := 0; i < int(restartCount); i++ {
@@ -191,12 +213,22 @@ func NewDataBlockReader(block []byte, restartInterval int, encodingType byte) (*
 		restartArray[i] = binary.LittleEndian.Uint32(block[offset : offset+4])
 	}
 
+	var tombstoneBits *BitSet
+	if bitmapSize > 0 {
+		bitmapPos := crcPos - 2 - int(bitmapSize)
+		bitmapData := block[bitmapPos:crcPos]
+		tombstoneBits = DecodeBitSet(bitmapData)
+	} else {
+		tombstoneBits = NewBitSet(0)
+	}
 	return &DataBlockReader{
-		data:         block[:dataSize],
-		decoder:      encoders.NewEncoder(encodingType, restartInterval),
-		restartArray: restartArray,
-		pos:          0,
-		dataSize:     int(dataSize),
+		data:          block[:dataSize],
+		decoder:       encoders.NewEncoder(encodingType, restartInterval),
+		restartArray:  restartArray,
+		pos:           0,
+		dataSize:      int(dataSize),
+		tombstoneBits: tombstoneBits,
+		recordIdx:     0,
 	}, nil
 }
 
@@ -229,8 +261,7 @@ func (r *DataBlockReader) ReadRecord() (*Record, error) {
 		return nil, errors.New("unexpected end")
 	}
 	// read tombstone
-	tombstone := r.data[r.pos] == 1
-	r.pos++
+	tombstone := r.tombstoneBits.Get(r.recordIdx)
 	// read key
 	key, err := r.decoder.Decode(r.data, &r.pos)
 	if err != nil {
@@ -362,8 +393,10 @@ func (it *DataBlockIteratorRaw) Seek(target Record) {
 		it.valid = false
 		return
 	}
+	it.reader.recordIdx = best * it.reader.decoder.RestartInterval()
 	for it.reader.HasNext() {
 		rec, err := it.reader.ReadRecord()
+		it.reader.recordIdx++
 		if err != nil {
 			it.valid = false
 			return

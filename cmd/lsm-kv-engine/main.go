@@ -56,6 +56,8 @@ func RunCli(engine *core.Engine) {
 			return
 		case "help":
 			fmt.Println(helpText)
+		case "dataraw":
+			dataraw(engine)
 		default:
 			fmt.Println("Unknown command: ", parts[0])
 		}
@@ -105,4 +107,8 @@ func handleDelete(engine *core.Engine, parts []string) {
 		return
 	}
 	fmt.Println("Delete:", key, " OK")
+}
+
+func dataraw(engine *core.Engine) {
+	engine.DataRaw()
 }
