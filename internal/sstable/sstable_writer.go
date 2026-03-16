@@ -35,7 +35,7 @@ type SSTableWriter struct {
 	firstRecord       bool            // whether it is first record
 }
 
-func NewSSTableWriter(filePath string, blockManager *block.BlockManager, cfg *config.Config, expectedElements int) (*SSTableWriter, error) {
+func NewSSTableWriter(filePath string, blockManager *block.BlockManager, cfg *config.Config, expectedElements uint64) (*SSTableWriter, error) {
 	storage, err := CreateStorage(filePath, cfg, blockManager)
 	if err != nil {
 		return nil, err

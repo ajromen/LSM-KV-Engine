@@ -26,11 +26,11 @@ const (
 	FormatMultiFile  SSTableFormat = 1
 )
 
-type LSMCompression byte
+type LSMCompaction byte
 
 const (
-	LeveledCompaction    LSMCompression = 0
-	SizeTieredCompaction LSMCompression = 1
+	LeveledCompaction    LSMCompaction = 0
+	SizeTieredCompaction LSMCompaction = 1
 )
 
 type MemTableType byte

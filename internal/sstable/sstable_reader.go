@@ -19,9 +19,11 @@ import (
 
 // SSTableReader allows reading an SSTable file, accesing singular records and validating data integrity
 type SSTableReader struct {
+	filePath       string              // file path of given sstable file (base path if multi file format)
+	Id             int                 // SSTable segment id
+	Layer          int                 // number of the lsm layer
 	storage        SegmentStorage      // low-level reading of segments
 	blockManager   *block.BlockManager // reading and decoding data blocks
-	filePath       string              // file path of given sstable file (base path if multi file format)
 	footer         *Footer             // footer of given sstable
 	summarySegment *SummarySegment     // summary segment (read into RAM)
 	filterSegment  *FilterSegment      // filter segment (read into RAM)
@@ -31,7 +33,7 @@ type SSTableReader struct {
 
 // opens an SSTable file and loads all necessary segments into RAM -> needs to be fixed
 // storage tries to read while blockManager is nil
-func NewSSTableReader(filePath string, format enums.SSTableFormat, cfg *config.Config) (*SSTableReader, error) {
+func NewSSTableReader(id int, filePath string, format enums.SSTableFormat, cfg *config.Config, layer int) (*SSTableReader, error) {
 	var storage SegmentStorage
 	var err error
 	switch format {
@@ -76,6 +78,8 @@ func NewSSTableReader(filePath string, format enums.SSTableFormat, cfg *config.C
 		filePath:     filePath,
 		footer:       footer,
 		config:       cfg,
+		Layer:        layer,
+		Id:           id,
 	}
 	// load summary into RAM
 	if err := reader.loadSummary(); err != nil {

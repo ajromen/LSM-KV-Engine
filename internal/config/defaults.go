@@ -14,6 +14,7 @@ import (
 // Engine defaults
 const (
 	//WAL
+
 	DefaultWalSegmentSize = 1 * 1024 * 1024
 
 	//memtable
@@ -40,8 +41,9 @@ const (
 	DefaultBlockCacheMaxBlocks = 2048
 
 	//LSM
-	DefaultLSMMaxLayers           = 4
 	DefaultLSMCompactionAlgorithm = enums.SizeTieredCompaction
+	DefaultLSMMinMergeThreshold   = 4
+	DefaultLSMLevelSizeMultiplier = 10
 )
 
 func NewDefaultConfig() *Config {
@@ -75,8 +77,9 @@ func NewDefaultConfig() *Config {
 			},
 		},
 		LSMTree: LSMTreeConfig{
-			MaxLevels:           DefaultLSMMaxLayers,
+			MinMergeThreshold:   DefaultLSMMinMergeThreshold,
 			CompactionAlgorithm: DefaultLSMCompactionAlgorithm,
+			LevelSizeMultiplier: DefaultLSMLevelSizeMultiplier,
 		},
 		SkipList: SkipListConfig{
 			MaxLevel: DefaultSkipListMaxLevel,
@@ -126,5 +129,6 @@ func getDefaultSavePath() string {
 	if err != nil {
 		panic(err)
 	}
+	print(path)
 	return path
 }

@@ -181,6 +181,8 @@ func DecodeIndexBlock(buf []byte) (*IndexBlock, error) {
 }
 
 // FindBlock PERFORMS BINARY SEARCH IN INDEX BLOCK AND RETURNS THE INDEX OF THE BLOCK IN DATA THAT MAY CONTAIN THE GIVEN KEY
+//
+//goland:noinspection GoRedundantElseInIf
 func (block *IndexBlock) FindBlock(key []byte) int {
 	if len(block.Entries) == 0 {
 		return -1

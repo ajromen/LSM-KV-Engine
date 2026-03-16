@@ -13,6 +13,7 @@ import (
 type SegmentStorage interface {
 	WriteSegment(segType enums.SegmentType, data []byte) (offset uint64, size uint32, err error)
 	ReadSegment(segType enums.SegmentType, offset uint64, size uint32) ([]byte, error)
+	Delete()
 	Close() error
 	Sync() error
 	SetBlockManager(bm *block.BlockManager)
@@ -23,6 +24,11 @@ type SingleFileStorage struct {
 	file         *os.File            // single file all segments are written into
 	offset       uint64              // current write offset in the file
 	BlockManager *block.BlockManager // block manager for writing blocks
+}
+
+func (s *SingleFileStorage) Delete() {
+	s.Close()
+	os.Remove(s.file.Name())
 }
 
 func (s *SingleFileStorage) SetBlockManager(bm *block.BlockManager) {
@@ -129,6 +135,13 @@ type MultiFileStorage struct {
 	files        map[enums.SegmentType]*os.File // open file handles per segment type
 	offsets      map[enums.SegmentType]uint64   // current write offsets per segment
 	BlockManager *block.BlockManager            // block manager for writing blocks
+}
+
+func (m *MultiFileStorage) Delete() {
+	for _, file := range m.files {
+		file.Close()
+		os.Remove(file.Name())
+	}
 }
 
 func NewMultiFileStorage(basePath string, blockManager *block.BlockManager) (*MultiFileStorage, error) {

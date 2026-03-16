@@ -300,7 +300,7 @@ func (it *SSTableIterator) Key() Record   { return *it.current }
 func (it *SSTableIterator) Value() Record { return *it.current }
 
 // SSTableMergeIteratorRaw merges multiple SSTableIteratorRaw instances using a merge structure
-// it produces records in sorted order across all sstables
+// it produces records in sorted order across all SSTables
 type SSTableMergeIteratorRaw struct {
 	structure data_structures.MergeStructure[Record]
 	current   *Record

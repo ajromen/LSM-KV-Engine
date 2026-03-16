@@ -1,23 +1,18 @@
 package lsm
 
-import "github.com/ajromen/LSM-KV-Engine/internal/sstable"
+import (
+	"github.com/ajromen/LSM-KV-Engine/internal/sstable"
+)
 
 type CompactionStrategy interface {
-	Compact(layers []*sstable.Layer) []*sstable.Layer
-	ShouldCompact(layers []*sstable.Layer) bool
+	Compact(sstables *sstable.SSTableManager) error
 }
 
 type LeveledCompaction struct {
 	LevelSizeMultiplier int
 }
 
-func (l LeveledCompaction) Compact(layers []*sstable.Layer) []*sstable.Layer {
-	//TODO implement me
-	panic("implement me")
-}
-
-func (l LeveledCompaction) ShouldCompact(layers []*sstable.Layer) bool {
-	//TODO implement me
+func (l LeveledCompaction) Compact(sstables *sstable.SSTableManager) error {
 	panic("implement me")
 }
 
@@ -25,12 +20,14 @@ type SizeTiredCompaction struct {
 	MinMergeThreshold int
 }
 
-func (s SizeTiredCompaction) Compact(layers []*sstable.Layer) []*sstable.Layer {
-	//TODO implement me
-	panic("implement me")
-}
-
-func (s SizeTiredCompaction) ShouldCompact(layers []*sstable.Layer) bool {
-	//TODO implement me
-	panic("implement me")
+func (s SizeTiredCompaction) Compact(manager *sstable.SSTableManager) error {
+	for i, layer := range manager.Layers {
+		if layer.Length() > s.MinMergeThreshold {
+			err := manager.MergeSSTables(layer.SSTables, uint64(i+1))
+			if err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }

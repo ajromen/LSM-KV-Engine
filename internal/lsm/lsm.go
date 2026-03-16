@@ -20,10 +20,10 @@ func NewLSM(cfg *config.Config, dataDir string) (*LSM, error) {
 	lsm := LSM{cfg: cfg}
 	lsm.sstableManager = sstable.NewSSTableManager(dataDir, cfg)
 	switch cfg.LSMTree.CompactionAlgorithm {
-	case enums.SizeTieredCompaction:
-		lsm.strategy = LeveledCompaction{} //TODO LevelSizeMultiplier
 	case enums.LeveledCompaction:
-		lsm.strategy = SizeTiredCompaction{} //TODO MinMergeTreshold
+		lsm.strategy = LeveledCompaction{} //TODO LevelSizeMultiplier
+	case enums.SizeTieredCompaction:
+		lsm.strategy = SizeTiredCompaction{} //TODO MinMergeThreshold
 	}
 
 	factory := memtable.NewFactory(cfg.Memtable)
@@ -33,11 +33,15 @@ func NewLSM(cfg *config.Config, dataDir string) (*LSM, error) {
 }
 
 func (l *LSM) onFlush(entries []memtable.MemtableEntry) {
-	l.sstableManager.FlushToSSTable(entries)
+	err := l.sstableManager.FlushToSSTable(entries)
+	if err != nil {
+		panic(err)
+	}
 
 	// set this in a goroutine
-	if l.strategy.ShouldCompact(l.sstableManager.Layers) {
-		l.strategy.Compact(l.sstableManager.Layers)
+	err = l.strategy.Compact(l.sstableManager)
+	if err != nil {
+		panic(err)
 	}
 }
 
@@ -73,6 +77,6 @@ func (l *LSM) Finish() error {
 }
 
 func currentTimestamp() uint64 {
-	now := time.Now().UnixNano() // nanosekunde od 1.1.1970
+	now := time.Now().UnixNano()
 	return uint64(now)
 }

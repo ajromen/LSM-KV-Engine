@@ -15,7 +15,7 @@ import (
 const ManifestFileName = "MANIFEST.json"
 
 type SSTableManifest struct {
-	Id           uint64              `json:"id"`
+	Id           int                 `json:"id"`
 	BaseFileName string              `json:"base_file_name"`
 	Format       enums.SSTableFormat `json:"is_multi"`
 	Layer        uint64              `json:"layer"`
@@ -23,7 +23,7 @@ type SSTableManifest struct {
 
 type Manifest struct {
 	FileDir       string                    `json:"file_dir"`
-	NextSStableId uint64                    `json:"next_stable_id"`
+	NextSStableId int                       `json:"next_stable_id"`
 	Layers        map[int][]SSTableManifest `json:"Layers"`
 }
 
@@ -73,7 +73,7 @@ func (m *Manifest) reconstruct(fileDir string) error {
 	}
 	sort.Strings(sortedFiles)
 	for _, filePath := range sortedFiles {
-		var id uint64
+		var id int
 		_, err := fmt.Sscanf(filepath.Base(filePath), "%d.sst", &id)
 		if err != nil {
 			return err
@@ -100,7 +100,7 @@ func (m *Manifest) load() error {
 	return nil
 }
 
-func (m *Manifest) save() error {
+func (m *Manifest) Save() error {
 	err := block.WriteJSON(path.Join(m.FileDir, ManifestFileName), m)
 	if err != nil {
 		return err
@@ -111,9 +111,27 @@ func (m *Manifest) save() error {
 func (m *Manifest) AddSSTable(sstManifest SSTableManifest) error {
 	layer := int(sstManifest.Layer)
 	m.Layers[layer] = append(m.Layers[layer], sstManifest)
-	err := m.save()
+	err := m.Save()
 	if err != nil {
 		return err
 	}
 	return nil
+}
+
+func (m *Manifest) RemoveSSTable(id int, layerNumber int) error {
+	layers := m.Layers[layerNumber]
+	for i, sst := range layers {
+		if sst.Id == id {
+			m.Layers[layerNumber] = append(layers[:i], layers[i+1:]...)
+			return m.Save()
+		}
+	}
+	return fmt.Errorf("sstable %d not found in layer %d", id, layerNumber)
+}
+
+func (m *Manifest) IncrementId() {
+	m.NextSStableId++
+	if m.NextSStableId >= 10_000_000-1 {
+		m.NextSStableId = 0
+	}
 }

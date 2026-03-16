@@ -79,7 +79,7 @@ func (c *Config) applyFlags(flags *cli.FLags) error {
 	if flags.LSMCompactionAlgorithm != nil {
 		algo := strings.TrimSpace(*flags.LSMCompactionAlgorithm)
 		algo = strings.ToLower(algo)
-		var algorithm enums.LSMCompression
+		var algorithm enums.LSMCompaction
 		switch algo {
 		case "size-tiered":
 			algorithm = enums.SizeTieredCompaction
@@ -89,9 +89,6 @@ func (c *Config) applyFlags(flags *cli.FLags) error {
 			return fmt.Errorf("unknown LSM compaction algorithm: %s", algo)
 		}
 		c.LSMTree.CompactionAlgorithm = algorithm
-	}
-	if flags.LSMMaxLayers != nil {
-		c.LSMTree.MaxLevels = *flags.LSMMaxLayers
 	}
 	return nil
 }
@@ -118,10 +115,6 @@ func (c *Config) validateFields() error {
 
 	if c.BlockManager.BlockCacheMaxBlocks < 1 {
 		return fmt.Errorf("invalid block cacheMaxBlocks must be positive")
-	}
-
-	if c.LSMTree.MaxLevels <= 0 {
-		return fmt.Errorf("invalid LSM level number")
 	}
 
 	if !fileExists(c.SavePath) {

@@ -50,8 +50,9 @@ type IndexSegmentConfig struct {
 }
 
 type LSMTreeConfig struct {
-	MaxLevels           int                  `json:"lsmtree_max_levels"`
-	CompactionAlgorithm enums.LSMCompression `json:"compaction_algorithm"`
+	MinMergeThreshold   int                 `json:"min_merge_threshold"`
+	LevelSizeMultiplier int                 `json:"level_size_multiplier"`
+	CompactionAlgorithm enums.LSMCompaction `json:"compaction_algorithm"`
 }
 
 type BlockManagerConfig struct {
