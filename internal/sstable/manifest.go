@@ -24,7 +24,7 @@ type SSTableManifest struct {
 type Manifest struct {
 	FileDir       string                    `json:"file_dir"`
 	NextSStableId int                       `json:"next_stable_id"`
-	Layers        map[int][]SSTableManifest `json:"Layers"`
+	Layers        map[int][]SSTableManifest `json:"layers"`
 }
 
 func NewManifest(fileDir string) (*Manifest, error) {
