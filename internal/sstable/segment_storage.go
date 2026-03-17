@@ -190,6 +190,8 @@ func (m *MultiFileStorage) getFilePath(segType config.SegmentType) string {
 		return m.basePath + ".metadata"
 	case config.SegmentFooter:
 		return m.basePath + ".footer"
+	case config.SegmentDictionary:
+		return m.basePath + ".dictionary"
 	default:
 		return m.basePath
 	}

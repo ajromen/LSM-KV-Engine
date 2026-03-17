@@ -11,12 +11,13 @@ import (
 type SegmentType int
 
 const (
-	SegmentData     SegmentType = 0
-	SegmentFilter   SegmentType = 1
-	SegmentIndex    SegmentType = 2
-	SegmentSummary  SegmentType = 3
-	SegmentMetadata SegmentType = 4
-	SegmentFooter   SegmentType = 5
+	SegmentData       SegmentType = 0
+	SegmentFilter     SegmentType = 1
+	SegmentIndex      SegmentType = 2
+	SegmentSummary    SegmentType = 3
+	SegmentMetadata   SegmentType = 4
+	SegmentFooter     SegmentType = 5
+	SegmentDictionary SegmentType = 6
 )
 
 func LoadConfig(flags *cli.FLags) (*Config, error) {
@@ -138,7 +139,7 @@ func (c *SSTableConfig) SegmentPaths(basePath string) map[SegmentType]string {
 	if c.Format == FormatSingleFile {
 		for _, segType := range []SegmentType{
 			SegmentData, SegmentFilter, SegmentIndex,
-			SegmentSummary, SegmentMetadata, SegmentFooter,
+			SegmentSummary, SegmentMetadata, SegmentFooter, SegmentDictionary,
 		} {
 			paths[segType] = basePath
 		}
@@ -150,6 +151,7 @@ func (c *SSTableConfig) SegmentPaths(basePath string) map[SegmentType]string {
 		paths[SegmentSummary] = basePath + ".summary"
 		paths[SegmentMetadata] = basePath + ".metadata"
 		paths[SegmentFooter] = basePath + ".footer"
+		paths[SegmentDictionary] = basePath + ".dictionary"
 	}
 	return paths
 }

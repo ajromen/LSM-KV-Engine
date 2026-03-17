@@ -78,7 +78,7 @@ func (engine *Engine) Close() {
 }
 
 func (engine *Engine) DataRaw() {
-	dataF, err := os.Open("data/000001.sst.data")
+	dataF, err := os.Open("data/000000.sst.data")
 	if err != nil {
 		fmt.Println("open error:", err)
 		return
