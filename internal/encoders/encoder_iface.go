@@ -5,5 +5,4 @@ type Encoder interface {
 	Decode(buf []byte, pos *int) ([]byte, error)
 	Reset()
 	RestartArray() []uint32
-	RestartInterval() int
 }

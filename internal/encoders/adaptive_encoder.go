@@ -3,7 +3,6 @@ package encoders
 import (
 	"encoding/binary"
 	"errors"
-	"math/bits"
 	"os"
 	"sort"
 )
@@ -234,9 +233,10 @@ func (ade *AdaptiveEncoder) updateBitWidth() {
 		ade.bitWidth = 0
 		return
 	}
-	bw := bits.Len(uint(len(ade.keys) - 1))
-	if bw == 0 {
-		bw = 1
+	bw := 0
+	maxIdx := len(ade.keys) - 1
+	for maxi := maxIdx; maxi > 0; maxi >>= 1 {
+		bw++
 	}
 	ade.bitWidth = uint16(bw)
 }

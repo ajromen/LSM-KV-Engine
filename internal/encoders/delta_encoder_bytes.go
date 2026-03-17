@@ -115,7 +115,3 @@ func (de *DeltaEncoderBytes) DecodeWithMeta(data []byte, pos *int) (shared uint6
 func (de *DeltaEncoderBytes) RestartArray() []uint32 {
 	return de.restartArray
 }
-
-func (d *DeltaEncoderBytes) RestartInterval() int {
-	return d.restartInterval
-}
