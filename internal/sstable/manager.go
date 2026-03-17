@@ -15,7 +15,9 @@ import (
 )
 
 type Layer struct {
-	SSTables []*SSTableReader
+	SSTables    []*SSTableReader
+	sizeBytes   int64
+	needsUpdate bool
 }
 
 func (l *Layer) Length() int {
@@ -23,6 +25,9 @@ func (l *Layer) Length() int {
 }
 
 func (l *Layer) GetSize() int64 {
+	if !l.needsUpdate {
+		return l.sizeBytes
+	}
 	var size int64
 	for _, reader := range l.SSTables {
 		size += reader.SizeBytes
@@ -30,9 +35,20 @@ func (l *Layer) GetSize() int64 {
 	return size
 }
 
+func (l *Layer) AppendSSTable(sstable *SSTableReader) {
+	l.SSTables = append(l.SSTables, sstable)
+	l.needsUpdate = true
+}
+
+func (l *Layer) RemoveSSTable(index int) {
+	l.SSTables = append(l.SSTables[:index], l.SSTables[index+1:]...)
+}
+
 func newLayer() *Layer {
 	return &Layer{
-		SSTables: make([]*SSTableReader, 0),
+		SSTables:    make([]*SSTableReader, 0),
+		sizeBytes:   0,
+		needsUpdate: false,
 	}
 }
 
@@ -88,7 +104,7 @@ func (sm *SSTableManager) LoadExistingSSTables() error {
 			if err != nil {
 				return err
 			}
-			sm.Layers[i].SSTables = append(sm.Layers[i].SSTables, reader)
+			sm.Layers[i].AppendSSTable(reader)
 		}
 	}
 	return nil
@@ -126,7 +142,7 @@ func (sm *SSTableManager) FlushToSSTable(entries []memtable.MemtableEntry) error
 	if err != nil {
 		return err
 	}
-	sm.Layers[0].SSTables = append(sm.Layers[0].SSTables, reader)
+	sm.Layers[0].AppendSSTable(reader)
 
 	sstManifest := SSTableManifest{
 		Id:           sstableID,
@@ -168,7 +184,7 @@ func (sm *SSTableManager) DeleteSSTable(layer, id int) error {
 	for i, reader := range readers {
 		if reader.Id == id {
 			reader.storage.Delete()
-			sm.Layers[layer].SSTables = append(sm.Layers[layer].SSTables[:i], sm.Layers[layer].SSTables[i+1:]...)
+			sm.Layers[layer].RemoveSSTable(i)
 			break
 		}
 	}
@@ -227,7 +243,7 @@ func (sm *SSTableManager) MergeSSTables(readers []*SSTableReader, toLayer int) e
 	for len(sm.Layers) <= toLayer {
 		sm.Layers = append(sm.Layers, newLayer())
 	}
-	sm.Layers[toLayer].SSTables = append(sm.Layers[toLayer].SSTables, reader)
+	sm.Layers[toLayer].AppendSSTable(reader)
 
 	// 4. update manifest
 	sstManifest := SSTableManifest{
@@ -262,7 +278,7 @@ func (sm *SSTableManager) MoveSSTable(current *SSTableReader, toLayer int) error
 	readers := sm.Layers[fromLayer].SSTables
 	for i, r := range readers {
 		if r.Id == current.Id {
-			sm.Layers[fromLayer].SSTables = append(readers[:i], readers[i+1:]...)
+			sm.Layers[fromLayer].RemoveSSTable(i)
 			break
 		}
 	}
@@ -271,7 +287,7 @@ func (sm *SSTableManager) MoveSSTable(current *SSTableReader, toLayer int) error
 	}
 
 	current.Layer = toLayer
-	sm.Layers[toLayer].SSTables = append(sm.Layers[toLayer].SSTables, current)
+	sm.Layers[toLayer].AppendSSTable(current)
 
 	err := sm.manifest.MoveSSTable(current.Id, fromLayer, toLayer)
 	if err != nil {
