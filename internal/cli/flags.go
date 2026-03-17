@@ -16,7 +16,6 @@ type FLags struct {
 	SSTableFormat          *string
 	BlockCacheMaxBlocks    *int
 	LSMCompactionAlgorithm *string
-	LSMMaxLayers           *int
 }
 
 func ParseFlags() *FLags {
@@ -29,7 +28,6 @@ func ParseFlags() *FLags {
 	var sstFormatOpt OptionalString
 	var BlockCacheMaxBlocksOpt OptionalInt
 	var LSMCompactionAlgorithmOpt OptionalString
-	var LSMMaxLayersOpt OptionalInt
 
 	flagString(&configPathOpt, "config", "Path to config file")
 	flagString(&configPathOpt, "c", "Path to config file")
@@ -38,11 +36,10 @@ func ParseFlags() *FLags {
 	flagInt(&mtMaxSizeOpt, "memtable-max-size", "Max memtable size in bytes")
 	flagUint64(&mtMaxSizeKbOpt, "memtable-max-size-kb", "Max memtable size in kb")
 	flagInt(&instancesOpt, "instances", "Number of memtable instances")
-	flagString(&mtTypeOpt, "memtable-type", "hashmap, skiplist or btree")
+	flagString(&mtTypeOpt, "memtable-type", "hashmap, skiplist, btree, rbtree, avltree")
 	flagString(&sstFormatOpt, "sst-format", "sst format (single-file / multi-file)")
 	flagInt(&BlockCacheMaxBlocksOpt, "block-cache-max-blocks", "Max number of blocks in the block cache")
 	flagString(&LSMCompactionAlgorithmOpt, "lsm-compaction", "LSM compaction algorithm: size-tiered, leveled")
-	flagInt(&LSMMaxLayersOpt, "lsm-levels", "Max number of LSM levels")
 
 	flag.Parse()
 
@@ -55,7 +52,6 @@ func ParseFlags() *FLags {
 		Instances:              instancesOpt.Get(),
 		SSTableFormat:          sstFormatOpt.Get(),
 		LSMCompactionAlgorithm: LSMCompactionAlgorithmOpt.Get(),
-		LSMMaxLayers:           LSMMaxLayersOpt.Get(),
 	}
 }
 

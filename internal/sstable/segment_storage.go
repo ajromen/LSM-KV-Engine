@@ -5,13 +5,15 @@ import (
 
 	"github.com/ajromen/LSM-KV-Engine/internal/block"
 	"github.com/ajromen/LSM-KV-Engine/internal/config"
+	"github.com/ajromen/LSM-KV-Engine/internal/enums"
 )
 
 // SegmentStorage abstracts physical storage of SSTable segments.
 // It hides whether segments are stored in a single file or multiple files.
 type SegmentStorage interface {
-	WriteSegment(segType config.SegmentType, data []byte) (offset uint64, size uint32, err error)
-	ReadSegment(segType config.SegmentType, offset uint64, size uint32) ([]byte, error)
+	WriteSegment(segType enums.SegmentType, data []byte) (offset uint64, size uint32, err error)
+	ReadSegment(segType enums.SegmentType, offset uint64, size uint32) ([]byte, error)
+	Delete()
 	Close() error
 	Sync() error
 	SetBlockManager(bm *block.BlockManager)
@@ -22,6 +24,11 @@ type SingleFileStorage struct {
 	file         *os.File            // single file all segments are written into
 	offset       uint64              // current write offset in the file
 	BlockManager *block.BlockManager // block manager for writing blocks
+}
+
+func (s *SingleFileStorage) Delete() {
+	s.Close()
+	os.Remove(s.file.Name())
 }
 
 func (s *SingleFileStorage) SetBlockManager(bm *block.BlockManager) {
@@ -49,14 +56,14 @@ func OpenSingleFileStorage(filePath string) (*SingleFileStorage, error) {
 }
 
 // WriteSegment APPENDS SEGMENT TO A FILE AND RETURNS ITS OFFSET + SIZE
-func (s *SingleFileStorage) WriteSegment(segType config.SegmentType, data []byte) (uint64, uint32, error) {
-	if (segType == config.SegmentData || segType == config.SegmentIndex) && s.BlockManager != nil {
+func (s *SingleFileStorage) WriteSegment(segType enums.SegmentType, data []byte) (uint64, uint32, error) {
+	if (segType == enums.SegmentData || segType == enums.SegmentIndex) && s.BlockManager != nil {
 		blockSize := uint64(s.BlockManager.BlockSize())
 		remainder := s.offset % blockSize
 		if remainder != 0 {
 			padding := make([]byte, blockSize-remainder)
 
-			err := s.BlockManager.WriteNoBlock(s.file, s.offset, padding)
+			err := block.WriteNoBlock(s.file, s.offset, padding)
 			if err != nil {
 				return 0, 0, err
 			}
@@ -79,7 +86,7 @@ func (s *SingleFileStorage) WriteSegment(segType config.SegmentType, data []byte
 		return offset, uint32(len(data)), nil
 	}
 	offset := s.offset
-	err := s.BlockManager.WriteNoBlock(s.file, offset, data)
+	err := block.WriteNoBlock(s.file, offset, data)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -88,8 +95,8 @@ func (s *SingleFileStorage) WriteSegment(segType config.SegmentType, data []byte
 }
 
 // ReadSegment READS SEGMENT FROM A FILE (OFFSET AND SIZE ARE FORWARDED FROM FOOTER)
-func (s *SingleFileStorage) ReadSegment(segType config.SegmentType, offset uint64, size uint32) ([]byte, error) {
-	if (segType == config.SegmentData || segType == config.SegmentIndex) && s.BlockManager != nil {
+func (s *SingleFileStorage) ReadSegment(segType enums.SegmentType, offset uint64, size uint32) ([]byte, error) {
+	if (segType == enums.SegmentData || segType == enums.SegmentIndex) && s.BlockManager != nil {
 		blockSize := uint64(s.BlockManager.BlockSize())
 		blockKey := block.BlockKey{
 			FilePath: s.file.Name(),
@@ -97,7 +104,7 @@ func (s *SingleFileStorage) ReadSegment(segType config.SegmentType, offset uint6
 		}
 		return s.BlockManager.Read(blockKey)
 	}
-	data, err := s.BlockManager.ReadNoBlock(s.file, offset, size)
+	data, err := block.ReadNoBlock(s.file, offset, size)
 	if err != nil {
 		return nil, err
 	}
@@ -124,17 +131,24 @@ func (s *SingleFileStorage) File() *os.File {
 
 // MultiFileStorage STORES EACH SSTABLE SEGMENT IN A SEPARATE FILE
 type MultiFileStorage struct {
-	basePath     string                          // base path on which prefixes like .footer are added
-	files        map[config.SegmentType]*os.File // open file handles per segment type
-	offsets      map[config.SegmentType]uint64   // current write offsets per segment
-	BlockManager *block.BlockManager             // block manager for writing blocks
+	basePath     string                         // base path on which prefixes like .footer are added
+	files        map[enums.SegmentType]*os.File // open file handles per segment type
+	offsets      map[enums.SegmentType]uint64   // current write offsets per segment
+	BlockManager *block.BlockManager            // block manager for writing blocks
+}
+
+func (m *MultiFileStorage) Delete() {
+	for _, file := range m.files {
+		file.Close()
+		os.Remove(file.Name())
+	}
 }
 
 func NewMultiFileStorage(basePath string, blockManager *block.BlockManager) (*MultiFileStorage, error) {
 	return &MultiFileStorage{
 		basePath:     basePath,
-		files:        make(map[config.SegmentType]*os.File),
-		offsets:      make(map[config.SegmentType]uint64),
+		files:        make(map[enums.SegmentType]*os.File),
+		offsets:      make(map[enums.SegmentType]uint64),
 		BlockManager: blockManager,
 	}, nil
 }
@@ -142,13 +156,13 @@ func NewMultiFileStorage(basePath string, blockManager *block.BlockManager) (*Mu
 func OpenMultiFileStorage(basePath string) (*MultiFileStorage, error) {
 	return &MultiFileStorage{
 		basePath: basePath,
-		files:    make(map[config.SegmentType]*os.File),
-		offsets:  make(map[config.SegmentType]uint64),
+		files:    make(map[enums.SegmentType]*os.File),
+		offsets:  make(map[enums.SegmentType]uint64),
 	}, nil
 }
 
 // getOrCreateFile RETURNS AN OPEN FILE HANDLE FOR THE GIVEN SEGMENT TYPE
-func (m *MultiFileStorage) getOrCreateFile(segType config.SegmentType) (*os.File, error) {
+func (m *MultiFileStorage) getOrCreateFile(segType enums.SegmentType) (*os.File, error) {
 	if file, exists := m.files[segType]; exists {
 		return file, nil
 	}
@@ -163,7 +177,7 @@ func (m *MultiFileStorage) getOrCreateFile(segType config.SegmentType) (*os.File
 }
 
 // getOrOpenFile RETURNS AN OPEN FILE HANDLE FOR THE GIVEN SEGMENT TYPE IN A READ ONLY MODE -> USED FOR OPENING EXISTING SSTABLES
-func (m *MultiFileStorage) getOrOpenFile(segType config.SegmentType) (*os.File, error) {
+func (m *MultiFileStorage) getOrOpenFile(segType enums.SegmentType) (*os.File, error) {
 	if file, exists := m.files[segType]; exists {
 		return file, nil
 	}
@@ -176,19 +190,19 @@ func (m *MultiFileStorage) getOrOpenFile(segType config.SegmentType) (*os.File, 
 	return file, nil
 }
 
-func (m *MultiFileStorage) getFilePath(segType config.SegmentType) string {
+func (m *MultiFileStorage) getFilePath(segType enums.SegmentType) string {
 	switch segType {
-	case config.SegmentData:
+	case enums.SegmentData:
 		return m.basePath + ".data"
-	case config.SegmentFilter:
+	case enums.SegmentFilter:
 		return m.basePath + ".filter"
-	case config.SegmentIndex:
+	case enums.SegmentIndex:
 		return m.basePath + ".index"
-	case config.SegmentSummary:
+	case enums.SegmentSummary:
 		return m.basePath + ".summary"
-	case config.SegmentMetadata:
+	case enums.SegmentMetadata:
 		return m.basePath + ".metadata"
-	case config.SegmentFooter:
+	case enums.SegmentFooter:
 		return m.basePath + ".footer"
 	default:
 		return m.basePath
@@ -196,13 +210,13 @@ func (m *MultiFileStorage) getFilePath(segType config.SegmentType) string {
 }
 
 // WriteSegment APPENDS SEGMENT TO A FILE CORRESPONDING TO A SEGMENT TYPE AND RETURNS ITS OFFSET + SIZE WITHIN THE GIVEN FILE
-func (m *MultiFileStorage) WriteSegment(segType config.SegmentType, data []byte) (uint64, uint32, error) {
+func (m *MultiFileStorage) WriteSegment(segType enums.SegmentType, data []byte) (uint64, uint32, error) {
 	file, err := m.getOrCreateFile(segType)
 	if err != nil {
 		return 0, 0, err
 	}
 	offset := m.offsets[segType]
-	if (segType == config.SegmentData || segType == config.SegmentIndex) && m.BlockManager != nil {
+	if (segType == enums.SegmentData || segType == enums.SegmentIndex) && m.BlockManager != nil {
 		if len(data) < m.BlockManager.BlockSize() {
 			padding := make([]byte, m.BlockManager.BlockSize()-len(data))
 			data = append(data, padding...)
@@ -218,7 +232,7 @@ func (m *MultiFileStorage) WriteSegment(segType config.SegmentType, data []byte)
 		m.offsets[segType] += uint64(len(data))
 		return offset, uint32(len(data)), nil
 	}
-	err = m.BlockManager.WriteNoBlock(file, offset, data)
+	err = block.WriteNoBlock(file, offset, data)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -228,12 +242,12 @@ func (m *MultiFileStorage) WriteSegment(segType config.SegmentType, data []byte)
 }
 
 // ReadSegment READS SEGMENT FROM A FILE CORRESPONDING TO SEGMENT TYPE (OFFSET AND SIZE ARE FORWARDED FROM FOOTER)
-func (m *MultiFileStorage) ReadSegment(segType config.SegmentType, offset uint64, size uint32) ([]byte, error) {
+func (m *MultiFileStorage) ReadSegment(segType enums.SegmentType, offset uint64, size uint32) ([]byte, error) {
 	file, err := m.getOrOpenFile(segType)
 	if err != nil {
 		return nil, err
 	}
-	if (segType == config.SegmentData || segType == config.SegmentIndex) && m.BlockManager != nil {
+	if (segType == enums.SegmentData || segType == enums.SegmentIndex) && m.BlockManager != nil {
 		blockSize := uint64(m.BlockManager.BlockSize())
 		blockKey := block.BlockKey{
 			FilePath: file.Name(),
@@ -242,7 +256,7 @@ func (m *MultiFileStorage) ReadSegment(segType config.SegmentType, offset uint64
 		return m.BlockManager.Read(blockKey)
 	}
 
-	data, err := m.BlockManager.ReadNoBlock(file, offset, size)
+	data, err := block.ReadNoBlock(file, offset, size)
 	if err != nil {
 		return nil, err
 	}

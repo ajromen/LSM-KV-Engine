@@ -23,3 +23,8 @@ go.work
 .idea/
 .vscode/
 .DS_Store
+
+**/*.sst
+**/*.sst.*
+**/MANIFEST.json
+**/data/
