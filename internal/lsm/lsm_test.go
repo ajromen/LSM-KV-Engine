@@ -226,7 +226,13 @@ func TestLeveled_OverlapResolved(t *testing.T) {
 }
 
 func testPersistence(t *testing.T, compaction enums.LSMCompaction) {
-	dir, _ := os.MkdirTemp("", "lsm_persist_*")
+	dir, err := os.MkdirTemp("", "lsm_persist_*")
+	if err != nil {
+		t.Fatalf("MkdirTemp: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.RemoveAll(dir)
+	})
 
 	cfg := newConfig(compaction)
 
