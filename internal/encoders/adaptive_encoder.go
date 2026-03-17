@@ -148,7 +148,7 @@ func (ade *AdaptiveEncoder) Decode(encoded []byte) ([]byte, error) {
 	for i := 0; i < int(outSize); i++ {
 		idx |= uint64(encoded[i+1]) << (8 * i)
 	}
-	extraBits := uint8(outSize*8 - ade.bitWidth)
+	extraBits := uint8(uint16(outSize*8) - ade.bitWidth)
 	if extraBits > 0 {
 		idx &= 1<<ade.bitWidth - 1
 	}

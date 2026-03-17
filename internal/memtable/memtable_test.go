@@ -9,13 +9,12 @@ import (
 	"time"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/config"
-	"github.com/ajromen/LSM-KV-Engine/internal/enums"
 	"github.com/ajromen/LSM-KV-Engine/internal/iterator"
 )
 
-var allTypes = []enums.MemTableType{enums.BTreeMemTable, enums.SkiplistMemTable, enums.HashMapMemTable}
+var allTypes = []MemtableType{TypeBTree, TypeSkipList, TypeHashMap}
 
-func newMemtable(t *testing.T, mt enums.MemTableType, maxEntries int, maxBytes uint64, handler func([]MemtableEntry)) *MemtableManager {
+func newMemtable(t *testing.T, mt MemtableType, maxEntries int, maxBytes uint64, handler func([]MemtableEntry)) *MemtableManager {
 	t.Helper()
 	factory := NewFactory(config.NewDefaultConfig().Memtable)
 	return NewMemtableManager(5, 1, factory, handler)
@@ -84,7 +83,7 @@ func TestNewerTimestampWins(t *testing.T) {
 }
 
 func TestOlderTimestampDoesNotOverwrite(t *testing.T) {
-	allTypes = []enums.MemTableType{enums.BTreeMemTable, enums.SkiplistMemTable}
+	allTypes = []MemtableType{TypeBTree, TypeSkipList}
 	for _, mt := range allTypes {
 		mt := mt
 		t.Run(string(mt), func(t *testing.T) {
@@ -137,7 +136,7 @@ func TestDeleteHidesEntry(t *testing.T) {
 }
 
 func TestOlderTombstoneDoesNotHideNewerWrite(t *testing.T) {
-	allTypes = []enums.MemTableType{enums.BTreeMemTable, enums.SkiplistMemTable}
+	allTypes = []MemtableType{TypeBTree, TypeSkipList}
 	for _, mt := range allTypes {
 		mt := mt
 		t.Run(string(mt), func(t *testing.T) {
@@ -471,7 +470,7 @@ func TestMemtableLifecycle(t *testing.T) {
 	var flushed []MemtableEntry
 	var wg sync.WaitGroup
 	cfg := config.MemtableConfig{
-		MemtableType:         enums.SkiplistMemTable,
+		MemtableType:         "skiplist",
 		MemtableMaxSizeBytes: 1 << 20,
 		MemtableMaxEntries:   3,
 	}

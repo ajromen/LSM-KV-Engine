@@ -1,15 +1,11 @@
 package cache
 
-import (
-	"container/list"
-	"sync"
-)
+import "container/list"
 
 type LRU[K comparable, V any] struct {
 	maxElements int
 	list        *list.List
 	cache       map[K]*list.Element
-	mu          sync.Mutex
 }
 
 // entry korisnti bilo sta za key/value ako treba moze lako da se promeni
@@ -27,8 +23,6 @@ func NewLRU[K comparable, V any](maxElements int) *LRU[K, V] {
 }
 
 func (lru *LRU[K, V]) Get(key K) (V, bool) {
-	lru.mu.Lock()
-	defer lru.mu.Unlock()
 	node, ok := lru.cache[key]
 	if !ok {
 		var zero V
@@ -41,8 +35,6 @@ func (lru *LRU[K, V]) Get(key K) (V, bool) {
 }
 
 func (lru *LRU[K, V]) Put(key K, value V) {
-	lru.mu.Lock()
-	defer lru.mu.Unlock()
 	if e, ok := lru.cache[key]; ok {
 		e.Value.(*entry[K, V]).value = value
 		lru.list.MoveToFront(e)
@@ -58,8 +50,6 @@ func (lru *LRU[K, V]) Put(key K, value V) {
 }
 
 func (lru *LRU[K, V]) removeLast() {
-	lru.mu.Lock()
-	defer lru.mu.Unlock()
 	element := lru.list.Back()
 	if element == nil {
 		return

@@ -4,21 +4,28 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-
-	"github.com/ajromen/LSM-KV-Engine/internal/enums"
 )
 
 // Za sva podešavanja koja nedostaju u konfiguracionom fajlu sistem treba da dodeli
 // default vrednosti koje se navode u kodu
+const (
+	CompressionNone   byte = 0
+	CompressionSnappy byte = 1
+	CompressionZSTD   byte = 2
+)
+
+const (
+	FormatSingleFile byte = 0
+	FormatMultiFile  byte = 1
+)
 
 // Engine defaults
 const (
 	//WAL
-
 	DefaultWalSegmentSize = 1 * 1024 * 1024
 
 	//memtable
-	MemtableType                = enums.HashMapMemTable
+	MemtableType                = "hashmap"
 	DefaultMemtableMaxEntries   = 1000
 	DefaultMemtableMaxSizeBytes = 1 << 20
 	DefaultMemtableInstances    = 5
@@ -28,7 +35,7 @@ const (
 	//SSTable
 	DefaultSSTableBlockSize           = 160
 	DefaultSSTableRestartInterval     = 3
-	DefaultSSTableCompression         = enums.CompressionNone
+	DefaultSSTableCompression         = CompressionNone
 	DefaultSSTableMinBlockUtilization = 0.8
 	DefaultIndexBlockSize             = 160
 
@@ -41,9 +48,8 @@ const (
 	DefaultBlockCacheMaxBlocks = 2048
 
 	//LSM
-	DefaultLSMCompactionAlgorithm = enums.SizeTieredCompaction
-	DefaultLSMMinMergeThreshold   = 4
-	DefaultLSMLevelSizeMultiplier = 10
+	DefaultLSMMaxLayers           = 4
+	DefaultLSMCompactionAlgorithm = "size-tiered"
 )
 
 func NewDefaultConfig() *Config {
@@ -65,7 +71,7 @@ func NewDefaultConfig() *Config {
 			},
 		},
 		SSTable: SSTableConfig{
-			Format: enums.FormatSingleFile,
+			Format: FormatSingleFile,
 			DataSegment: DataSegmentConfig{
 				BlockSize:           DefaultSSTableBlockSize,
 				RestartInterval:     DefaultSSTableRestartInterval,
@@ -77,9 +83,8 @@ func NewDefaultConfig() *Config {
 			},
 		},
 		LSMTree: LSMTreeConfig{
-			MinMergeThreshold:   DefaultLSMMinMergeThreshold,
+			MaxLevels:           DefaultLSMMaxLayers,
 			CompactionAlgorithm: DefaultLSMCompactionAlgorithm,
-			LevelSizeMultiplier: DefaultLSMLevelSizeMultiplier,
 		},
 		SkipList: SkipListConfig{
 			MaxLevel: DefaultSkipListMaxLevel,

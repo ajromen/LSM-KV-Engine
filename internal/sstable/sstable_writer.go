@@ -6,7 +6,6 @@ import (
 
 	"github.com/ajromen/LSM-KV-Engine/internal/block"
 	"github.com/ajromen/LSM-KV-Engine/internal/config"
-	"github.com/ajromen/LSM-KV-Engine/internal/enums"
 	"github.com/ajromen/LSM-KV-Engine/internal/probabilistics"
 	"github.com/ajromen/LSM-KV-Engine/internal/utils"
 )
@@ -35,7 +34,7 @@ type SSTableWriter struct {
 	firstRecord       bool            // whether it is first record
 }
 
-func NewSSTableWriter(filePath string, blockManager *block.BlockManager, cfg *config.Config, expectedElements uint64) (*SSTableWriter, error) {
+func NewSSTableWriter(filePath string, blockManager *block.BlockManager, cfg *config.Config, expectedElements int) (*SSTableWriter, error) {
 	storage, err := CreateStorage(filePath, cfg, blockManager)
 	if err != nil {
 		return nil, err
@@ -141,7 +140,7 @@ func (sw *SSTableWriter) flushDataBlock() error {
 	}
 
 	// step 2
-	_, _, err = sw.storage.WriteSegment(enums.SegmentData, blockData)
+	_, _, err = sw.storage.WriteSegment(config.SegmentData, blockData)
 	if err != nil {
 		return err
 	}
@@ -173,43 +172,43 @@ func (sw *SSTableWriter) flushDataBlock() error {
 // 6. Write summary segment on disk
 // 7. Write metadata (merkle tree) segment on disk
 // 8. Write footer and sync storage
-func (sw *SSTableWriter) Finalize() error {
+func (w *SSTableWriter) Finalize() error {
 	// add remaining unfinished index block
 	// step 1
-	if sw.dataBlockBuilder.RecordCount() > 0 {
-		if err := sw.flushDataBlock(); err != nil {
+	if w.dataBlockBuilder.RecordCount() > 0 {
+		if err := w.flushDataBlock(); err != nil {
 			return err
 		}
 	}
-	if len(sw.currentIndexBlock.Entries) > 0 {
-		sw.indexSegment.AddBlock(sw.currentIndexBlock)
+	if len(w.currentIndexBlock.Entries) > 0 {
+		w.indexSegment.AddBlock(w.currentIndexBlock)
 	}
 
 	// step 2
-	if err := sw.merkleTree.Build(); err != nil {
+	if err := w.merkleTree.Build(); err != nil {
 		return err
 	}
 
 	// step 3
-	sw.footer.NumDataBlocks = sw.currentBlockIndex
-	sw.footer.TotalRecords = sw.recordCount
-	sw.footer.MinTimeStamp = sw.minTimestamp
-	sw.footer.MaxTimeStamp = sw.maxTimestamp
-	sw.footer.MinKeyLength = sw.minKeyLength
-	sw.footer.MaxKeyLength = sw.maxKeyLength
-	sw.footer.Format = sw.config.Format
+	w.footer.NumDataBlocks = w.currentBlockIndex
+	w.footer.TotalRecords = w.recordCount
+	w.footer.MinTimeStamp = w.minTimestamp
+	w.footer.MaxTimeStamp = w.maxTimestamp
+	w.footer.MinKeyLength = w.minKeyLength
+	w.footer.MaxKeyLength = w.maxKeyLength
+	w.footer.Format = w.config.Format
 
 	// step 4
-	if sw.filterSegment != nil {
-		filterData, err := sw.filterSegment.Encode()
+	if w.filterSegment != nil {
+		filterData, err := w.filterSegment.Encode()
 		if err != nil {
 			return err
 		}
-		filterOffset, filterSize, err := sw.storage.WriteSegment(enums.SegmentFilter, filterData)
+		filterOffset, filterSize, err := w.storage.WriteSegment(config.SegmentFilter, filterData)
 		if err != nil {
 			return err
 		}
-		sw.footer.FilterHandler = SegmentHandler{
+		w.footer.FilterHandler = SegmentHandler{
 			Offset: filterOffset,
 			Size:   filterSize,
 		}
@@ -218,14 +217,14 @@ func (sw *SSTableWriter) Finalize() error {
 	// step 5
 	var indexOffsets []uint64
 	// step 5 - write index blocks to disk and compute proper footer offsets
-	if len(sw.indexSegment.Blocks) > 0 {
-		indexOffsets = make([]uint64, len(sw.indexSegment.Blocks))
+	if len(w.indexSegment.Blocks) > 0 {
+		indexOffsets = make([]uint64, len(w.indexSegment.Blocks))
 		var firstOffset uint64
 		var lastOffsetPlusSize uint64
 
-		for i, indexBlock := range sw.indexSegment.Blocks {
+		for i, indexBlock := range w.indexSegment.Blocks {
 			blockData := indexBlock.EncodeIndexBlock(config.DefaultIndexBlockSize)
-			offset, size, err := sw.storage.WriteSegment(enums.SegmentIndex, blockData)
+			offset, size, err := w.storage.WriteSegment(config.SegmentIndex, blockData)
 			if err != nil {
 				return err
 			}
@@ -237,55 +236,55 @@ func (sw *SSTableWriter) Finalize() error {
 			lastOffsetPlusSize = offset + uint64(size)
 		}
 
-		sw.footer.IndexHandler.Offset = firstOffset
-		sw.footer.IndexHandler.Size = uint32(lastOffsetPlusSize - firstOffset)
+		w.footer.IndexHandler.Offset = firstOffset
+		w.footer.IndexHandler.Size = uint32(lastOffsetPlusSize - firstOffset)
 	} else {
-		sw.footer.IndexHandler.Offset = 0
-		sw.footer.IndexHandler.Size = 0
+		w.footer.IndexHandler.Offset = 0
+		w.footer.IndexHandler.Size = 0
 		indexOffsets = []uint64{}
 	}
 
 	// step 6
 	if len(indexOffsets) > 0 {
-		sw.summarySegment = BuildSummaryFromIndex(indexOffsets, sw.indexSegment.Blocks, 1)
-		summaryData := sw.summarySegment.Encode()
-		summaryOffset, summarySize, err := sw.storage.WriteSegment(enums.SegmentSummary, summaryData)
+		w.summarySegment = BuildSummaryFromIndex(indexOffsets, w.indexSegment.Blocks, 1)
+		summaryData := w.summarySegment.Encode()
+		summaryOffset, summarySize, err := w.storage.WriteSegment(config.SegmentSummary, summaryData)
 		if err != nil {
 			return err
 		}
-		sw.footer.SummaryHandler = SegmentHandler{
+		w.footer.SummaryHandler = SegmentHandler{
 			Offset: summaryOffset,
 			Size:   summarySize,
 		}
 	} else {
-		sw.summarySegment = NewSummarySegment(1)
-		sw.footer.SummaryHandler = SegmentHandler{
+		w.summarySegment = NewSummarySegment(1)
+		w.footer.SummaryHandler = SegmentHandler{
 			Offset: 0,
 			Size:   0,
 		}
 	}
 
 	// step 7
-	metadataData := sw.merkleTree.Encode()
-	metadataOffset, metadataSize, err := sw.storage.WriteSegment(enums.SegmentMetadata, metadataData)
+	metadataData := w.merkleTree.Encode()
+	metadataOffset, metadataSize, err := w.storage.WriteSegment(config.SegmentMetadata, metadataData)
 	if err != nil {
 		return err
 	}
-	sw.footer.MetaDataHandler = SegmentHandler{
+	w.footer.MetaDataHandler = SegmentHandler{
 		Offset: metadataOffset,
 		Size:   metadataSize,
 	}
 
 	// step 8
-	if err := sw.footer.WriteToStorage(sw.storage); err != nil {
+	if err := w.footer.WriteToStorage(w.storage); err != nil {
 		return err
 	}
-	if err := sw.storage.Sync(); err != nil {
+	if err := w.storage.Sync(); err != nil {
 		return err
 	}
-	return sw.storage.Close()
+	return w.storage.Close()
 }
 
-func (sw *SSTableWriter) Close() error {
-	return sw.storage.Close()
+func (w *SSTableWriter) Close() error {
+	return w.storage.Close()
 }
