@@ -101,7 +101,7 @@ func (m *Manifest) load() error {
 }
 
 func (m *Manifest) Save() error {
-	err := block.WriteJSON(path.Join(m.FileDir, ManifestFileName), m)
+	err := block.WriteJSON(filepath.Join(m.FileDir, ManifestFileName), m)
 	if err != nil {
 		return err
 	}
