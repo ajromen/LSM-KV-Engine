@@ -57,7 +57,3 @@ func (e *DictDeltaEncoder) DictionarySize() int {
 func (e *DictDeltaEncoder) RestartArray() []uint32 {
 	return e.deltaEncoder.RestartArray()
 }
-
-func (e *DictDeltaEncoder) RestartInterval() int {
-	return e.deltaEncoder.restartInterval
-}

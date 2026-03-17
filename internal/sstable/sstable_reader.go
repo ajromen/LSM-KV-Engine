@@ -14,7 +14,6 @@ import (
 
 	"github.com/ajromen/LSM-KV-Engine/internal/block"
 	"github.com/ajromen/LSM-KV-Engine/internal/config"
-	"github.com/ajromen/LSM-KV-Engine/internal/encoders"
 	"github.com/ajromen/LSM-KV-Engine/internal/enums"
 )
 
@@ -31,7 +30,6 @@ type SSTableReader struct {
 	filterSegment  *FilterSegment      // filter segment (read into RAM)
 	merkleTree     *MerkleTree         // merkle tree - metadata segment (read into RAM)
 	config         *config.Config      // config for given sstable
-	valueDecoder   *encoders.AdaptiveEncoder
 }
 
 // opens an SSTable file and loads all necessary segments into RAM -> needs to be fixed
@@ -100,9 +98,7 @@ func NewSSTableReader(id int, filePath string, format enums.SSTableFormat, cfg *
 	if err := reader.loadFilter(); err != nil {
 		reader.filterSegment = nil
 	}
-	if err := reader.loadDictionary(); err != nil {
-		return nil, err
-	}
+
 	// load merkle tree into RAM
 	if err := reader.loadMerkleTree(); err != nil {
 		return nil, err
@@ -180,27 +176,6 @@ func (r *SSTableReader) loadIndexBlock(blockNumber int) (*IndexBlock, error) {
 	return block, nil
 }
 
-func (r *SSTableReader) loadDictionary() error {
-	if r.footer.DictionaryHandler.Size == 0 {
-		r.valueDecoder = encoders.NewAdaptiveDictEncoderFrequency(2, 5)
-		return nil
-	}
-	data, err := r.storage.ReadSegment(
-		config.SegmentDictionary,
-		r.footer.DictionaryHandler.Offset,
-		r.footer.DictionaryHandler.Size,
-	)
-	if err != nil {
-		return err
-	}
-	decoder := encoders.NewAdaptiveDictEncoderFrequency(2, 5)
-	if err := decoder.ReadDictionary(data); err != nil {
-		return err
-	}
-	r.valueDecoder = decoder
-	return nil
-}
-
 // Get looks up a record by key in the SSTable in given order:
 // 1. Use filter segment to check if key might exist
 // 2. Use summary segment to find the correct index block that should contain key
@@ -249,7 +224,7 @@ func (r *SSTableReader) Get(key []byte) (*Record, error) {
 	}
 
 	// step 5
-	iterator, err := NewDataBlockIteratorRaw(blockData, int(r.footer.RestartInterval), r.footer.EncodingType, r.valueDecoder)
+	iterator, err := NewDataBlockIteratorRaw(blockData, int(r.footer.RestartInterval), r.footer.EncodingType)
 	if err != nil {
 		return nil, err
 	}

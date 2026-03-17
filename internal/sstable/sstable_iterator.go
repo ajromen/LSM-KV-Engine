@@ -51,7 +51,7 @@ func (s *sstableBlockSource) blockIteratorRaw(n int) (*DataBlockIteratorRaw, err
 	if err != nil {
 		return nil, err
 	}
-	return NewDataBlockIteratorRaw(data, int(s.reader.footer.RestartInterval), s.reader.footer.EncodingType, s.reader.valueDecoder)
+	return NewDataBlockIteratorRaw(data, int(s.reader.footer.RestartInterval), s.reader.footer.EncodingType)
 }
 
 // SSTableIteratorRaw iterates over all records in an SSTable at raw level

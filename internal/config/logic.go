@@ -7,20 +7,7 @@ import (
 	"strings"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/cli"
-  "github.com/ajromen/LSM-KV-Engine/internal/enums"
-)
-
-type SegmentType int
-
-const (
-	SegmentData       SegmentType = 0
-	SegmentFilter     SegmentType = 1
-	SegmentIndex      SegmentType = 2
-	SegmentSummary    SegmentType = 3
-	SegmentMetadata   SegmentType = 4
-	SegmentFooter     SegmentType = 5
-	SegmentDictionary SegmentType = 6
-	
+	"github.com/ajromen/LSM-KV-Engine/internal/enums"
 )
 
 func LoadConfig(flags *cli.FLags) (*Config, error) {
@@ -154,24 +141,23 @@ func (c *Config) loadFromFile(path string) error {
 	return nil
 }
 
-func (c *SSTableConfig) SegmentPaths(basePath string) map[SegmentType]string {
-	paths := make(map[SegmentType]string)
-	if c.Format == FormatSingleFile {
-		for _, segType := range []SegmentType{
-			SegmentData, SegmentFilter, SegmentIndex,
-			SegmentSummary, SegmentMetadata, SegmentFooter, SegmentDictionary,
+func (c *SSTableConfig) SegmentPaths(basePath string) map[enums.SegmentType]string {
+	paths := make(map[enums.SegmentType]string)
+	if c.Format == enums.FormatSingleFile {
+		for _, segType := range []enums.SegmentType{
+			enums.SegmentData, enums.SegmentFilter, enums.SegmentIndex,
+			enums.SegmentSummary, enums.SegmentMetadata, enums.SegmentFooter,
 		} {
 			paths[segType] = basePath
 		}
 	} else {
 		// Each segment has its own file
-		paths[SegmentData] = basePath
-		paths[SegmentFilter] = basePath + ".filter"
-		paths[SegmentIndex] = basePath + ".index"
-		paths[SegmentSummary] = basePath + ".summary"
-		paths[SegmentMetadata] = basePath + ".metadata"
-		paths[SegmentFooter] = basePath + ".footer"
-		paths[SegmentDictionary] = basePath + ".dictionary"
+		paths[enums.SegmentData] = basePath
+		paths[enums.SegmentFilter] = basePath + ".filter"
+		paths[enums.SegmentIndex] = basePath + ".index"
+		paths[enums.SegmentSummary] = basePath + ".summary"
+		paths[enums.SegmentMetadata] = basePath + ".metadata"
+		paths[enums.SegmentFooter] = basePath + ".footer"
 	}
 	return paths
 }

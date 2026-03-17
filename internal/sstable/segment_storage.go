@@ -204,8 +204,6 @@ func (m *MultiFileStorage) getFilePath(segType enums.SegmentType) string {
 		return m.basePath + ".metadata"
 	case enums.SegmentFooter:
 		return m.basePath + ".footer"
-	case config.SegmentDictionary:
-		return m.basePath + ".dictionary"
 	default:
 		return m.basePath
 	}
