@@ -25,6 +25,9 @@ func NewEngine(flags *cli.FLags) (*Engine, error) {
 	}
 
 	lsmTree, err := lsm.NewLSM(cfg, dataDir)
+	if err != nil {
+		return nil, err
+	}
 	engine := Engine{config: cfg, lsm: lsmTree}
 	return &engine, nil
 }
