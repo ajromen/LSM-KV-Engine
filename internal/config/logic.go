@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/cli"
+  "github.com/ajromen/LSM-KV-Engine/internal/enums"
 )
 
 type SegmentType int
@@ -18,6 +20,7 @@ const (
 	SegmentMetadata   SegmentType = 4
 	SegmentFooter     SegmentType = 5
 	SegmentDictionary SegmentType = 6
+	
 )
 
 func LoadConfig(flags *cli.FLags) (*Config, error) {
@@ -48,26 +51,57 @@ func (c *Config) applyFlags(flags *cli.FLags) error {
 		c.Memtable.MemtableMaxSizeBytes = *flags.MemtableMaxSizeKb
 	}
 	if flags.MemtableType != nil {
-		c.Memtable.MemtableType = *flags.MemtableType
+		memType := strings.TrimSpace(*flags.LSMCompactionAlgorithm)
+		memType = strings.ToLower(memType)
+		var memtableType enums.MemTableType
+
+		switch memType {
+		case "hashmap":
+			memtableType = enums.HashMapMemTable
+		case "skiplist":
+			memtableType = enums.SkiplistMemTable
+		case "btree":
+			memtableType = enums.BTreeMemTable
+		case "rbtree":
+			memtableType = enums.RBTreeMemTable
+		case "avltree":
+			memtableType = enums.AVLTreeMemTable
+		default:
+			return fmt.Errorf("invalid memtable type: %s", memType)
+		}
+		c.Memtable.MemtableType = memtableType
 	}
 	if flags.Instances != nil {
 		c.Memtable.Instances = *flags.Instances
 	}
 	if flags.SSTableFormat != nil {
-		if *flags.SSTableFormat == "single-file" {
-			c.SSTable.Format = FormatSingleFile
-		} else if *flags.SSTableFormat == "multi-file" {
-			c.SSTable.Format = FormatMultiFile
+		format := strings.TrimSpace(*flags.LSMCompactionAlgorithm)
+		format = strings.ToLower(format)
+		switch format {
+		case "single-file":
+			c.SSTable.Format = enums.FormatSingleFile
+		case "multi-file":
+			c.SSTable.Format = enums.FormatMultiFile
+		default:
+			return fmt.Errorf("invalid sstable format: %s", format)
 		}
 	}
 	if flags.BlockCacheMaxBlocks != nil {
 		c.BlockManager.BlockCacheMaxBlocks = *flags.BlockCacheMaxBlocks
 	}
 	if flags.LSMCompactionAlgorithm != nil {
-		c.LSMTree.CompactionAlgorithm = *flags.LSMCompactionAlgorithm
-	}
-	if flags.LSMMaxLayers != nil {
-		c.LSMTree.MaxLevels = *flags.LSMMaxLayers
+		algo := strings.TrimSpace(*flags.LSMCompactionAlgorithm)
+		algo = strings.ToLower(algo)
+		var algorithm enums.LSMCompaction
+		switch algo {
+		case "size-tiered":
+			algorithm = enums.SizeTieredCompaction
+		case "leveled":
+			algorithm = enums.LeveledCompaction
+		default:
+			return fmt.Errorf("unknown LSM compaction algorithm: %s", algo)
+		}
+		c.LSMTree.CompactionAlgorithm = algorithm
 	}
 	return nil
 }
@@ -84,12 +118,7 @@ func (c *Config) validateFields() error {
 		return fmt.Errorf("instances must be positive")
 	}
 
-	if c.Memtable.MemtableType != "hashmap" &&
-		c.Memtable.MemtableType != "skiplist" &&
-		c.Memtable.MemtableType != "btree" {
-		return fmt.Errorf("invalid memtable type")
-	}
-	if c.SSTable.Format != FormatSingleFile && c.SSTable.Format != FormatMultiFile {
+	if c.SSTable.Format != enums.FormatSingleFile && c.SSTable.Format != enums.FormatMultiFile {
 		return fmt.Errorf("invalid sstable format")
 	}
 
@@ -99,15 +128,6 @@ func (c *Config) validateFields() error {
 
 	if c.BlockManager.BlockCacheMaxBlocks < 1 {
 		return fmt.Errorf("invalid block cacheMaxBlocks must be positive")
-	}
-
-	if c.LSMTree.MaxLevels <= 0 {
-		return fmt.Errorf("invalid LSM level number")
-	}
-
-	if c.LSMTree.CompactionAlgorithm != "size-tiered" &&
-		c.LSMTree.CompactionAlgorithm != "leveled" {
-		return fmt.Errorf("invalid LSM compaction algorithm")
 	}
 
 	if !fileExists(c.SavePath) {

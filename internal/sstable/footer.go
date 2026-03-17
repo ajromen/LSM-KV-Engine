@@ -7,6 +7,7 @@ import (
 	"hash/crc32"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/config"
+	"github.com/ajromen/LSM-KV-Engine/internal/enums"
 	"github.com/ajromen/LSM-KV-Engine/internal/utils"
 )
 
@@ -44,14 +45,10 @@ type Footer struct {
 }
 
 func NewFooter(config config.SSTableConfig) *Footer {
-	formatByte := byte(0)
-	if config.Format == 1 {
-		formatByte = byte(1)
-	}
 	return &Footer{
 		CompressionType:        config.DataSegment.Compression,
 		Version:                1,
-		Format:                 formatByte,
+		Format:                 config.Format,
 		MagicNumber:            MagicNumber,
 		RestartInterval:        uint32(config.DataSegment.RestartInterval),
 		EncodingType:           1,
@@ -117,13 +114,13 @@ func (f *Footer) Encode() []byte {
 
 	buf[pos] = f.EncodingType
 	pos++
-	buf[pos] = f.CompressionType
+	buf[pos] = byte(f.CompressionType)
 	pos++
 	buf[pos] = f.MergeIteratorStructure
 	pos++
 	buf[pos] = f.Version
 	pos++
-	buf[pos] = f.Format
+	buf[pos] = byte(f.Format)
 	pos++
 
 	binary.LittleEndian.PutUint32(buf[pos:], f.MagicNumber)
@@ -195,13 +192,13 @@ func (f *Footer) Decode(buf []byte) error {
 
 	f.EncodingType = buf[pos]
 	pos++
-	f.CompressionType = buf[pos]
+	f.CompressionType = enums.SSTableCompression(buf[pos])
 	pos++
 	f.MergeIteratorStructure = buf[pos]
 	pos++
 	f.Version = buf[pos]
 	pos++
-	f.Format = buf[pos]
+	f.Format = enums.SSTableFormat(buf[pos])
 	pos++
 
 	f.MagicNumber = binary.LittleEndian.Uint32(buf[pos:])
@@ -241,12 +238,12 @@ func (f *Footer) Validate() error {
 
 func (f *Footer) WriteToStorage(storage SegmentStorage) error {
 	encoded := f.Encode()
-	_, _, err := storage.WriteSegment(config.SegmentFooter, encoded)
+	_, _, err := storage.WriteSegment(enums.SegmentFooter, encoded)
 	return err
 }
 
 func (f *Footer) ReadFromStorage(storage SegmentStorage, offset uint64) error {
-	data, err := storage.ReadSegment(config.SegmentFooter, offset, FooterSize)
+	data, err := storage.ReadSegment(enums.SegmentFooter, offset, FooterSize)
 	if err != nil {
 		return err
 	}
