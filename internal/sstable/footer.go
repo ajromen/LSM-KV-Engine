@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	FooterSize  = 125
+	FooterSize  = 137
 	MagicNumber = 0x53535442
 )
 
@@ -22,25 +22,26 @@ type SegmentHandler struct {
 }
 
 type Footer struct {
-	FilterHandler          SegmentHandler           // handler for filter segment
-	IndexHandler           SegmentHandler           // handler for index segment
-	SummaryHandler         SegmentHandler           // handler for summary segment
-	MetaDataHandler        SegmentHandler           // handler for metadatahandler
-	NumDataBlocks          uint32                   // number of data blocks in sstable
-	BlockSize              uint64                   // block size in sstable
-	MinTimeStamp           utils.Uint128            // min timestamp in sstable
-	MaxTimeStamp           utils.Uint128            // max timestamp in sstable
-	MinKeyLength           uint32                   // min keylength in sstable
-	MaxKeyLength           uint32                   // max keylength in sstable
-	TotalRecords           uint64                   // number of records in sstable
-	RestartInterval        uint32                   // restart interval
-	EncodingType           byte                     // encoding type - 0 - delta encoding / 1 - dict delta encoding
-	CompressionType        enums.SSTableCompression // type of compression = 0 always
-	MergeIteratorStructure byte                     // 0 - heap / 1 - winner-tree
-	Version                byte                     // version = 1 always
-	Format                 enums.SSTableFormat      // format (0 - singlefile / 1 - multifile)
-	MagicNumber            uint32                   // SSTB in hex
-	CRC                    uint32                   // crc over the whole footer segment
+	FilterHandler          SegmentHandler // handler for filter segment
+	IndexHandler           SegmentHandler // handler for index segment
+	SummaryHandler         SegmentHandler // handler for summary segment
+	MetaDataHandler        SegmentHandler // handler for metadatahandler
+	DictionaryHandler      SegmentHandler
+	NumDataBlocks          uint32        // number of data blocks in sstable
+	BlockSize              uint64        // block size in sstable
+	MinTimeStamp           utils.Uint128 // min timestamp in sstable
+	MaxTimeStamp           utils.Uint128 // max timestamp in sstable
+	MinKeyLength           uint32        // min keylength in sstable
+	MaxKeyLength           uint32        // max keylength in sstable
+	TotalRecords           uint64        // number of records in sstable
+	RestartInterval        uint32        // restart interval
+	EncodingType           byte          // encoding type - 0 - delta encoding / 1 - dict delta encoding
+	CompressionType        byte          // type of compression = 0 always
+	MergeIteratorStructure byte          // 0 - heap / 1 - winner-tree
+	Version                byte          // version = 1 always
+	Format                 byte          // format (0 - singlefile / 1 - multifile)
+	MagicNumber            uint32        // SSTB in hex
+	CRC                    uint32        // crc over the whole footer segment
 }
 
 func NewFooter(config config.SSTableConfig) *Footer {
@@ -80,6 +81,11 @@ func (f *Footer) Encode() []byte {
 	binary.LittleEndian.PutUint64(buf[pos:], f.MetaDataHandler.Offset)
 	pos += 8
 	binary.LittleEndian.PutUint32(buf[pos:], f.MetaDataHandler.Size)
+	pos += 4
+
+	binary.LittleEndian.PutUint64(buf[pos:], f.DictionaryHandler.Offset)
+	pos += 8
+	binary.LittleEndian.PutUint32(buf[pos:], f.DictionaryHandler.Size)
 	pos += 4
 
 	binary.LittleEndian.PutUint64(buf[pos:], f.BlockSize)
@@ -153,6 +159,11 @@ func (f *Footer) Decode(buf []byte) error {
 	f.MetaDataHandler.Offset = binary.LittleEndian.Uint64(buf[pos:])
 	pos += 8
 	f.MetaDataHandler.Size = binary.LittleEndian.Uint32(buf[pos:])
+	pos += 4
+
+	f.DictionaryHandler.Offset = binary.LittleEndian.Uint64(buf[pos:])
+	pos += 8
+	f.DictionaryHandler.Size = binary.LittleEndian.Uint32(buf[pos:])
 	pos += 4
 
 	f.BlockSize = binary.LittleEndian.Uint64(buf[pos:])

@@ -2,6 +2,7 @@ package encoders
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"testing"
 )
@@ -103,4 +104,26 @@ func TestAdaptiveDictPersistence(t *testing.T) {
 	if !bytes.Equal(decoded, val) {
 		t.Fatal("data corrupted after reload")
 	}
+}
+
+func TestMyProgram(t *testing.T) {
+	ad := NewAdaptiveDictEncoderFrequency(3, 3)
+	val := []byte("persistent-val")
+	ad.AddToDict(val)
+	ad.AddToDict(val)
+	payload := ad.Encode(val)
+	fmt.Println(payload)
+	valnon := []byte("non-persistent-val")
+	ad.AddToDict(valnon)
+	payload = ad.Encode(valnon)
+	fmt.Println(payload)
+	valtest := []byte("testing")
+	ad.AddToDict(valtest)
+	ad.AddToDict(valnon)
+	ad.AddToDict(valnon)
+	ad.AddToDict(val)
+	ad.AddToDict(valtest)
+	ad.AddToDict(valtest)
+	payload = ad.Encode(valtest)
+	fmt.Println(payload)
 }
