@@ -118,6 +118,7 @@ func handleDelete(engine *core.Engine, parts []string) {
 func handleClear(engine *core.Engine, parts []string) {
 	if len(parts) != 1 {
 		fmt.Println("Usage: clear-all")
+		return
 	}
 	fmt.Print("DELETE ALL DATA? (yes/N): ")
 	reader := bufio.NewReader(os.Stdin)
