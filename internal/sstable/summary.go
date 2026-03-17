@@ -172,8 +172,6 @@ func DecodeSummarySegment(buf []byte) (*SummarySegment, error) {
 ////////////////////////////////////////////////////////////
 
 // Returns index block number where key should be
-//
-//goland:noinspection GoRedundantElseInIf
 func (s *SummarySegment) FindIndexBlockNumber(key []byte) int {
 	left := 0
 	right := len(s.Entries) - 1

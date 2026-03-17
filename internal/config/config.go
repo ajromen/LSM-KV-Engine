@@ -1,9 +1,5 @@
 package config
 
-import (
-	"github.com/ajromen/LSM-KV-Engine/internal/enums"
-)
-
 type Config struct {
 	WAL               WALConfig               `json:"wal"`
 	Memtable          MemtableConfig          `json:"memtable"`
@@ -23,25 +19,25 @@ type WALConfig struct {
 }
 
 type MemtableConfig struct {
-	MemtableMaxEntries   int                `json:"memtable_max_size"`
-	MemtableMaxSizeBytes uint64             `json:"memtable_max_size_bytes"`
-	MemtableType         enums.MemTableType `json:"memtable_type"`
-	Instances            int                `json:"instances"`
-	SkipListConfig       SkipListConfig     `json:"skiplist_config"`
-	BTreeConfig          BTreeConfig        `json:"btree_config"`
+	MemtableMaxEntries   int            `json:"memtable_max_size"`
+	MemtableMaxSizeBytes uint64         `json:"memtable_max_size_bytes"`
+	MemtableType         string         `json:"memtable_type"`
+	Instances            int            `json:"instances"`
+	SkipListConfig       SkipListConfig `json:"skiplist_config"`
+	BTreeConfig          BTreeConfig    `json:"btree_config"`
 }
 
 type SSTableConfig struct {
-	Format       enums.SSTableFormat `json:"format"`
-	DataSegment  DataSegmentConfig   `json:"data_segment"`
-	IndexSegment IndexSegmentConfig  `json:"index_segment"`
+	Format       byte               `json:"format"`
+	DataSegment  DataSegmentConfig  `json:"data_segment"`
+	IndexSegment IndexSegmentConfig `json:"index_segment"`
 }
 
 type DataSegmentConfig struct {
-	BlockSize           int                      `json:"block_size"`
-	RestartInterval     int                      `json:"restart_interval"`
-	Compression         enums.SSTableCompression `json:"compression"`
-	MinBlockUtilization float64                  `json:"min_block_utilization"`
+	BlockSize           int     `json:"block_size"`
+	RestartInterval     int     `json:"restart_interval"`
+	Compression         byte    `json:"compression"`
+	MinBlockUtilization float64 `json:"min_block_utilization"`
 }
 
 type IndexSegmentConfig struct {
@@ -50,9 +46,8 @@ type IndexSegmentConfig struct {
 }
 
 type LSMTreeConfig struct {
-	MinMergeThreshold   int                 `json:"min_merge_threshold"`
-	LevelSizeMultiplier int                 `json:"level_size_multiplier"`
-	CompactionAlgorithm enums.LSMCompaction `json:"compaction_algorithm"`
+	MaxLevels           int    `json:"lsmtree_max_levels"`
+	CompactionAlgorithm string `json:"compaction_algorithm"`
 }
 
 type BlockManagerConfig struct {

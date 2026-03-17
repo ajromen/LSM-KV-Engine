@@ -4,10 +4,19 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/cli"
-	"github.com/ajromen/LSM-KV-Engine/internal/enums"
+)
+
+type SegmentType int
+
+const (
+	SegmentData     SegmentType = 0
+	SegmentFilter   SegmentType = 1
+	SegmentIndex    SegmentType = 2
+	SegmentSummary  SegmentType = 3
+	SegmentMetadata SegmentType = 4
+	SegmentFooter   SegmentType = 5
 )
 
 func LoadConfig(flags *cli.FLags) (*Config, error) {
@@ -38,57 +47,26 @@ func (c *Config) applyFlags(flags *cli.FLags) error {
 		c.Memtable.MemtableMaxSizeBytes = *flags.MemtableMaxSizeKb
 	}
 	if flags.MemtableType != nil {
-		memType := strings.TrimSpace(*flags.LSMCompactionAlgorithm)
-		memType = strings.ToLower(memType)
-		var memtableType enums.MemTableType
-
-		switch memType {
-		case "hashmap":
-			memtableType = enums.HashMapMemTable
-		case "skiplist":
-			memtableType = enums.SkiplistMemTable
-		case "btree":
-			memtableType = enums.BTreeMemTable
-		case "rbtree":
-			memtableType = enums.RBTreeMemTable
-		case "avltree":
-			memtableType = enums.AVLTreeMemTable
-		default:
-			return fmt.Errorf("invalid memtable type: %s", memType)
-		}
-		c.Memtable.MemtableType = memtableType
+		c.Memtable.MemtableType = *flags.MemtableType
 	}
 	if flags.Instances != nil {
 		c.Memtable.Instances = *flags.Instances
 	}
 	if flags.SSTableFormat != nil {
-		format := strings.TrimSpace(*flags.LSMCompactionAlgorithm)
-		format = strings.ToLower(format)
-		switch format {
-		case "single-file":
-			c.SSTable.Format = enums.FormatSingleFile
-		case "multi-file":
-			c.SSTable.Format = enums.FormatMultiFile
-		default:
-			return fmt.Errorf("invalid sstable format: %s", format)
+		if *flags.SSTableFormat == "single-file" {
+			c.SSTable.Format = FormatSingleFile
+		} else if *flags.SSTableFormat == "multi-file" {
+			c.SSTable.Format = FormatMultiFile
 		}
 	}
 	if flags.BlockCacheMaxBlocks != nil {
 		c.BlockManager.BlockCacheMaxBlocks = *flags.BlockCacheMaxBlocks
 	}
 	if flags.LSMCompactionAlgorithm != nil {
-		algo := strings.TrimSpace(*flags.LSMCompactionAlgorithm)
-		algo = strings.ToLower(algo)
-		var algorithm enums.LSMCompaction
-		switch algo {
-		case "size-tiered":
-			algorithm = enums.SizeTieredCompaction
-		case "leveled":
-			algorithm = enums.LeveledCompaction
-		default:
-			return fmt.Errorf("unknown LSM compaction algorithm: %s", algo)
-		}
-		c.LSMTree.CompactionAlgorithm = algorithm
+		c.LSMTree.CompactionAlgorithm = *flags.LSMCompactionAlgorithm
+	}
+	if flags.LSMMaxLayers != nil {
+		c.LSMTree.MaxLevels = *flags.LSMMaxLayers
 	}
 	return nil
 }
@@ -105,7 +83,12 @@ func (c *Config) validateFields() error {
 		return fmt.Errorf("instances must be positive")
 	}
 
-	if c.SSTable.Format != enums.FormatSingleFile && c.SSTable.Format != enums.FormatMultiFile {
+	if c.Memtable.MemtableType != "hashmap" &&
+		c.Memtable.MemtableType != "skiplist" &&
+		c.Memtable.MemtableType != "btree" {
+		return fmt.Errorf("invalid memtable type")
+	}
+	if c.SSTable.Format != FormatSingleFile && c.SSTable.Format != FormatMultiFile {
 		return fmt.Errorf("invalid sstable format")
 	}
 
@@ -115,6 +98,15 @@ func (c *Config) validateFields() error {
 
 	if c.BlockManager.BlockCacheMaxBlocks < 1 {
 		return fmt.Errorf("invalid block cacheMaxBlocks must be positive")
+	}
+
+	if c.LSMTree.MaxLevels <= 0 {
+		return fmt.Errorf("invalid LSM level number")
+	}
+
+	if c.LSMTree.CompactionAlgorithm != "size-tiered" &&
+		c.LSMTree.CompactionAlgorithm != "leveled" {
+		return fmt.Errorf("invalid LSM compaction algorithm")
 	}
 
 	if !fileExists(c.SavePath) {
@@ -141,23 +133,23 @@ func (c *Config) loadFromFile(path string) error {
 	return nil
 }
 
-func (c *SSTableConfig) SegmentPaths(basePath string) map[enums.SegmentType]string {
-	paths := make(map[enums.SegmentType]string)
-	if c.Format == enums.FormatSingleFile {
-		for _, segType := range []enums.SegmentType{
-			enums.SegmentData, enums.SegmentFilter, enums.SegmentIndex,
-			enums.SegmentSummary, enums.SegmentMetadata, enums.SegmentFooter,
+func (c *SSTableConfig) SegmentPaths(basePath string) map[SegmentType]string {
+	paths := make(map[SegmentType]string)
+	if c.Format == FormatSingleFile {
+		for _, segType := range []SegmentType{
+			SegmentData, SegmentFilter, SegmentIndex,
+			SegmentSummary, SegmentMetadata, SegmentFooter,
 		} {
 			paths[segType] = basePath
 		}
 	} else {
 		// Each segment has its own file
-		paths[enums.SegmentData] = basePath
-		paths[enums.SegmentFilter] = basePath + ".filter"
-		paths[enums.SegmentIndex] = basePath + ".index"
-		paths[enums.SegmentSummary] = basePath + ".summary"
-		paths[enums.SegmentMetadata] = basePath + ".metadata"
-		paths[enums.SegmentFooter] = basePath + ".footer"
+		paths[SegmentData] = basePath
+		paths[SegmentFilter] = basePath + ".filter"
+		paths[SegmentIndex] = basePath + ".index"
+		paths[SegmentSummary] = basePath + ".summary"
+		paths[SegmentMetadata] = basePath + ".metadata"
+		paths[SegmentFooter] = basePath + ".footer"
 	}
 	return paths
 }

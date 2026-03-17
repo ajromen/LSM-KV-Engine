@@ -4,7 +4,6 @@ import (
 	"bytes"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/config"
-	"github.com/ajromen/LSM-KV-Engine/internal/enums"
 )
 
 func NewMemtable(cfg config.MemtableConfig) Memtable {
@@ -31,24 +30,26 @@ func NewMemtable(cfg config.MemtableConfig) Memtable {
 	var store MemtableStore
 	t := cfg.MemtableType
 	switch t {
-	case enums.BTreeMemTable:
+	case "btree":
 		degree := cfg.BTreeConfig.MinimumDegree
 		if degree == 0 {
 			degree = 3
 		}
 		store = NewBTreeStore(degree, cmp)
-	case enums.SkiplistMemTable:
+	case "skiplist":
 		level := cfg.SkipListConfig.MaxLevel
 		if level == 0 {
 			level = 16
 		}
 		store = NewSkipListStore(level, cmp)
-	case enums.HashMapMemTable:
+	case "hashmap":
 		store = NewHashMapStore()
-	case enums.RBTreeMemTable:
+	case "rbtree":
 		store = NewRBTreeStore(cmp, cmp)
-	case enums.AVLTreeMemTable:
+	case "avltree":
 		store = NewAVLTreeStore(cmp, cmp)
+	default:
+		panic("unknown memtable type: " + t)
 	}
 	return NewGenericMemtable(store, cfg.MemtableMaxEntries, cfg.MemtableMaxSizeBytes)
 }

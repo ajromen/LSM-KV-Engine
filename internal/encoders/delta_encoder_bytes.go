@@ -88,7 +88,7 @@ func (de *DeltaEncoderBytes) WriteRestartArray(buf []byte) []byte {
 	return buf
 }
 
-func (de *DeltaEncoderBytes) DecodeWithMeta(data []byte, pos *int) (shared uint64, suffixLen uint64, suffix []byte, key []byte, err error) {
+func (d *DeltaEncoderBytes) DecodeWithMeta(data []byte, pos *int) (shared uint64, suffixLen uint64, suffix []byte, key []byte, err error) {
 	start := *pos
 	shared, n := binary.Uvarint(data[*pos:])
 	if n <= 0 {
@@ -105,13 +105,13 @@ func (de *DeltaEncoderBytes) DecodeWithMeta(data []byte, pos *int) (shared uint6
 	}
 	suffix = data[*pos : *pos+int(suffixLen)]
 	*pos += int(suffixLen)
-	prefix := de.prevKey[:shared]
+	prefix := d.prevKey[:shared]
 	key = append(append([]byte{}, prefix...), suffix...)
-	de.prevKey = key
+	d.prevKey = key
 	_ = start
 	return
 }
 
-func (de *DeltaEncoderBytes) RestartArray() []uint32 {
-	return de.restartArray
+func (d *DeltaEncoderBytes) RestartArray() []uint32 {
+	return d.restartArray
 }

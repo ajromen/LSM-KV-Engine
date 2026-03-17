@@ -74,8 +74,8 @@ func (de *DictEncoder) AddToDict(key []byte) (uint64, bool) {
 
 // Encode converts a key into its compact binary representation based on bitWidth
 func (de *DictEncoder) Encode(key []byte) []byte {
-	keyStr := string(key)
-	idx, ok := de.dictionary[keyStr]
+	key_str := string(key)
+	idx, ok := de.dictionary[key_str]
 	if !ok {
 		panic("Not found ")
 	}
@@ -106,7 +106,7 @@ func (de *DictEncoder) Decode(encoded []byte) string {
 	}
 	extraBits := uint8(outSize*8 - int(bw))
 	if extraBits > 0 {
-		idx &= 1<<bw - 1
+		idx &= (1<<bw - 1)
 	}
 	if idx >= uint64(len(de.keys)) {
 		panic("decoded index out of range")
@@ -194,12 +194,12 @@ func (de *DictEncoder) Size() int {
 
 // BuildDictionary builds dictionary from given slice of keys
 func (de *DictEncoder) BuildDictionary(keys [][]byte) {
-	keysStr := make([]string, len(keys))
+	keys_str := make([]string, len(keys))
 	for i, k := range keys {
-		keysStr[i] = string(k)
+		keys_str[i] = string(k)
 	}
-	sort.Strings(keysStr)
-	for _, key := range keysStr {
+	sort.Strings(keys_str)
+	for _, key := range keys_str {
 		de.AddToDict([]byte(key))
 	}
 }
