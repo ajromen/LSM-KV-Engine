@@ -223,16 +223,21 @@ func (sm *SSTableManager) MergeSSTables(readers []*SSTableReader, toLayer int) e
 	if err != nil {
 		return err
 	}
+	count := 0
 	for iterator.Valid() {
 		err := writer.AddRecord(iterator.Value())
 		if err != nil {
 			return err
 		}
 		iterator.Next()
+		count++
+	}
+	if count == 0 {
+		return fmt.Errorf("merge produced no records. All %d input SSTables may be empty", len(readers))
 	}
 	err = writer.Finalize()
 	if err != nil {
-		return err
+		return fmt.Errorf("cant finalize SSTable writer: %w", err)
 	}
 
 	// 3. open new reader and add to manager

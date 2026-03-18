@@ -32,8 +32,7 @@ type SSTableReader struct {
 	config         *config.Config      // config for given sstable
 }
 
-// opens an SSTable file and loads all necessary segments into RAM -> needs to be fixed
-// storage tries to read while blockManager is nil
+// opens an SSTable file and loads all necessary segments into RAM
 func NewSSTableReader(id int, filePath string, format enums.SSTableFormat, cfg *config.Config, layer int) (*SSTableReader, error) {
 	var storage SegmentStorage
 	var err error
