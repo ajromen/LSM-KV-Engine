@@ -31,26 +31,26 @@ func NewMerkleTree() *MerkleTree {
 }
 
 // AddLeaf ADDS A NEW LEAF NODE REPRESENTING ONE DATA BLOCK HASH
-func (tree *MerkleTree) AddLeaf(blockHash [32]byte) {
+func (mt *MerkleTree) AddLeaf(blockHash [32]byte) {
 	leaf := &MerkleNode{
 		Hash:       blockHash,
 		IsLeaf:     true,
 		LeftChild:  nil,
 		RightChild: nil,
 	}
-	tree.LeafNodes = append(tree.LeafNodes, leaf)
-	tree.NumDataBlocks++
+	mt.LeafNodes = append(mt.LeafNodes, leaf)
+	mt.NumDataBlocks++
 }
 
 // Build CONSTRUCTS MERKLE TREE FROM GIVEN LEAF NODES UP TO THE ROOT
-func (tree *MerkleTree) Build() error {
-	if len(tree.LeafNodes) == 0 {
+func (mt *MerkleTree) Build() error {
+	if len(mt.LeafNodes) == 0 {
 		return errors.New("no leaves to begin with")
 	}
 
 	// start from leaf level
-	currentLevel := make([]*MerkleNode, len(tree.LeafNodes))
-	copy(currentLevel, tree.LeafNodes)
+	currentLevel := make([]*MerkleNode, len(mt.LeafNodes))
+	copy(currentLevel, mt.LeafNodes)
 
 	// build levels until only root remains
 	for len(currentLevel) > 1 {
@@ -90,15 +90,15 @@ func (tree *MerkleTree) Build() error {
 		currentLevel = nextLevel
 	}
 
-	tree.Root = currentLevel[0]
+	mt.Root = currentLevel[0]
 	return nil
 }
 
-func (tree *MerkleTree) GetRootHash() [32]byte {
-	if tree.Root == nil {
+func (mt *MerkleTree) GetRootHash() [32]byte {
+	if mt.Root == nil {
 		return [32]byte{}
 	}
-	return tree.Root.Hash
+	return mt.Root.Hash
 }
 
 // HashDataBlock hashes raw data block bytes using sha256 hashing
@@ -117,28 +117,28 @@ func (mt *MerkleTree) encodedSize() int {
 }
 
 // Encode SERIALIZES MERKLE TREE INTO A BYTE BUFFER
-func (tree *MerkleTree) Encode() []byte {
-	size := tree.encodedSize()
+func (mt *MerkleTree) Encode() []byte {
+	size := mt.encodedSize()
 	buf := make([]byte, size)
 	pos := 0
 
 	// write number of data blocks
-	binary.LittleEndian.PutUint32(buf[pos:], tree.NumDataBlocks)
+	binary.LittleEndian.PutUint32(buf[pos:], mt.NumDataBlocks)
 	pos += 4
 
 	// write number of tree nodes
-	binary.LittleEndian.PutUint32(buf[pos:], uint32(len(tree.LeafNodes)))
+	binary.LittleEndian.PutUint32(buf[pos:], uint32(len(mt.LeafNodes)))
 	pos += 4
 
 	// write all the leaf node hashes
-	for _, leaf := range tree.LeafNodes {
+	for _, leaf := range mt.LeafNodes {
 		copy(buf[pos:pos+32], leaf.Hash[0:32])
 		pos += 32
 	}
 
 	// write the root
-	if tree.Root != nil {
-		copy(buf[pos:pos+32], tree.Root.Hash[0:32])
+	if mt.Root != nil {
+		copy(buf[pos:pos+32], mt.Root.Hash[0:32])
 		pos += 32
 	} else {
 		pos += 32
@@ -151,7 +151,7 @@ func (tree *MerkleTree) Encode() []byte {
 }
 
 // Decode DESERIALIZES A MERKLE TREE FROM BYTE BUFFER
-func (tree *MerkleTree) Decode(buf []byte) (*MerkleTree, error) {
+func (mt *MerkleTree) Decode(buf []byte) (*MerkleTree, error) {
 	if len(buf) < 4+4+32+4 { // minimal: numBlocks + leafCount + root + crc
 		return nil, errors.New("buffer too small")
 	}
@@ -173,7 +173,7 @@ func (tree *MerkleTree) Decode(buf []byte) (*MerkleTree, error) {
 	lenLeafNodes := binary.LittleEndian.Uint32(buf[pos : pos+4])
 
 	pos += 4
-	tree = &MerkleTree{
+	mt = &MerkleTree{
 		LeafNodes:     make([]*MerkleNode, lenLeafNodes),
 		NumDataBlocks: numDataBlocks,
 	}
@@ -186,7 +186,7 @@ func (tree *MerkleTree) Decode(buf []byte) (*MerkleTree, error) {
 		var hash [32]byte
 		copy(hash[:], buf[pos:pos+32])
 		pos += 32
-		tree.LeafNodes[i] = &MerkleNode{
+		mt.LeafNodes[i] = &MerkleNode{
 			Hash:   hash,
 			IsLeaf: true,
 		}
@@ -201,15 +201,15 @@ func (tree *MerkleTree) Decode(buf []byte) (*MerkleTree, error) {
 	pos += 32
 
 	// build a tree from leaf nodes and compare with rootHash that has been read
-	if len(tree.LeafNodes) > 0 {
-		if err := tree.Build(); err != nil {
+	if len(mt.LeafNodes) > 0 {
+		if err := mt.Build(); err != nil {
 			return nil, err
 		}
-		if tree.Root.Hash != rootHash {
+		if mt.Root.Hash != rootHash {
 			return nil, errors.New("root hash mismatch after rebuild")
 		}
 	}
-	return tree, nil
+	return mt, nil
 }
 
 // ValidationResult CONTAINS RESULT OF THE MERKLE TREE VALIDATION
@@ -222,20 +222,20 @@ type ValidationResult struct {
 }
 
 // Verify BUILDS A MERKLE TREE FROM GIVEN BLOCK HASHES AND COMPARES IT WITH EXPECTED MERKLE TREE
-func (tree *MerkleTree) Verify(blockHashes [][32]byte) (*ValidationResult, error) {
+func (mt *MerkleTree) Verify(blockHashes [][32]byte) (*ValidationResult, error) {
 	if len(blockHashes) == 0 {
 		return &ValidationResult{}, errors.New("block hashes is empty")
 	}
-	if len(blockHashes) != len(tree.LeafNodes) {
+	if len(blockHashes) != len(mt.LeafNodes) {
 		return &ValidationResult{Valid: false}, errors.New("block hashes length mismatch")
 	}
-	if uint32(len(blockHashes)) != tree.NumDataBlocks {
+	if uint32(len(blockHashes)) != mt.NumDataBlocks {
 		return &ValidationResult{Valid: false}, errors.New("block hashes count != NumDataBlocks")
 	}
 	result := &ValidationResult{
 		Valid:            true,
 		CorruptedBlocks:  make([]uint32, 0),
-		ExpectedRootHash: tree.GetRootHash(),
+		ExpectedRootHash: mt.GetRootHash(),
 		BlockHashes:      make(map[uint32][32]byte),
 	}
 	// build a tree from given block hashes
@@ -251,13 +251,13 @@ func (tree *MerkleTree) Verify(blockHashes [][32]byte) (*ValidationResult, error
 	}
 	result.ActualRootHash = actualTree.GetRootHash()
 	// compare hashes
-	if tree.GetRootHash() == actualTree.GetRootHash() {
+	if mt.GetRootHash() == actualTree.GetRootHash() {
 		result.Valid = true
 		return result, nil
 	}
 	// if hashes not equal find corrupted blocks
 	result.Valid = false
-	corruptedBlocks := findCorruptedBlocks(tree.Root, actualTree.Root, 0, len(tree.LeafNodes))
+	corruptedBlocks := findCorruptedBlocks(mt.Root, actualTree.Root, 0, len(mt.LeafNodes))
 	result.CorruptedBlocks = corruptedBlocks
 	for _, blockIdx := range corruptedBlocks {
 		result.BlockHashes[blockIdx] = blockHashes[blockIdx]

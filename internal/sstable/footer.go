@@ -7,6 +7,7 @@ import (
 	"hash/crc32"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/config"
+	"github.com/ajromen/LSM-KV-Engine/internal/enums"
 	"github.com/ajromen/LSM-KV-Engine/internal/utils"
 )
 
@@ -21,36 +22,32 @@ type SegmentHandler struct {
 }
 
 type Footer struct {
-	FilterHandler          SegmentHandler // handler for filter segment
-	IndexHandler           SegmentHandler // handler for index segment
-	SummaryHandler         SegmentHandler // handler for summary segment
-	MetaDataHandler        SegmentHandler // handler for metadatahandler
-	NumDataBlocks          uint32         // number of data blocks in sstable
-	BlockSize              uint64         // block size in sstable
-	MinTimeStamp           utils.Uint128  // min timestamp in sstable
-	MaxTimeStamp           utils.Uint128  // max timestamp in sstable
-	MinKeyLength           uint32         // min keylength in sstable
-	MaxKeyLength           uint32         // max keylength in sstable
-	TotalRecords           uint64         // number of records in sstable
-	RestartInterval        uint32         // restart interval
-	EncodingType           byte           // encoding type - 0 - delta encoding / 1 - dict delta encoding
-	CompressionType        byte           // type of compression = 0 always
-	MergeIteratorStructure byte           // 0 - heap / 1 - winner-tree
-	Version                byte           // version = 1 always
-	Format                 byte           // format (0 - singlefile / 1 - multifile)
-	MagicNumber            uint32         // SSTB in hex
-	CRC                    uint32         // crc over the whole footer segment
+	FilterHandler          SegmentHandler           // handler for filter segment
+	IndexHandler           SegmentHandler           // handler for index segment
+	SummaryHandler         SegmentHandler           // handler for summary segment
+	MetaDataHandler        SegmentHandler           // handler for metadatahandler
+	NumDataBlocks          uint32                   // number of data blocks in sstable
+	BlockSize              uint64                   // block size in sstable
+	MinTimeStamp           utils.Uint128            // min timestamp in sstable
+	MaxTimeStamp           utils.Uint128            // max timestamp in sstable
+	MinKeyLength           uint32                   // min keylength in sstable
+	MaxKeyLength           uint32                   // max keylength in sstable
+	TotalRecords           uint64                   // number of records in sstable
+	RestartInterval        uint32                   // restart interval
+	EncodingType           byte                     // encoding type - 0 - delta encoding / 1 - dict delta encoding
+	CompressionType        enums.SSTableCompression // type of compression = 0 always
+	MergeIteratorStructure byte                     // 0 - heap / 1 - winner-tree
+	Version                byte                     // version = 1 always
+	Format                 enums.SSTableFormat      // format (0 - singlefile / 1 - multifile)
+	MagicNumber            uint32                   // SSTB in hex
+	CRC                    uint32                   // crc over the whole footer segment
 }
 
 func NewFooter(config config.SSTableConfig) *Footer {
-	formatByte := byte(0)
-	if config.Format == 1 {
-		formatByte = byte(1)
-	}
 	return &Footer{
 		CompressionType:        config.DataSegment.Compression,
 		Version:                1,
-		Format:                 formatByte,
+		Format:                 config.Format,
 		MagicNumber:            MagicNumber,
 		RestartInterval:        uint32(config.DataSegment.RestartInterval),
 		EncodingType:           1,
@@ -111,13 +108,13 @@ func (f *Footer) Encode() []byte {
 
 	buf[pos] = f.EncodingType
 	pos++
-	buf[pos] = f.CompressionType
+	buf[pos] = byte(f.CompressionType)
 	pos++
 	buf[pos] = f.MergeIteratorStructure
 	pos++
 	buf[pos] = f.Version
 	pos++
-	buf[pos] = f.Format
+	buf[pos] = byte(f.Format)
 	pos++
 
 	binary.LittleEndian.PutUint32(buf[pos:], f.MagicNumber)
@@ -184,13 +181,13 @@ func (f *Footer) Decode(buf []byte) error {
 
 	f.EncodingType = buf[pos]
 	pos++
-	f.CompressionType = buf[pos]
+	f.CompressionType = enums.SSTableCompression(buf[pos])
 	pos++
 	f.MergeIteratorStructure = buf[pos]
 	pos++
 	f.Version = buf[pos]
 	pos++
-	f.Format = buf[pos]
+	f.Format = enums.SSTableFormat(buf[pos])
 	pos++
 
 	f.MagicNumber = binary.LittleEndian.Uint32(buf[pos:])
@@ -230,12 +227,12 @@ func (f *Footer) Validate() error {
 
 func (f *Footer) WriteToStorage(storage SegmentStorage) error {
 	encoded := f.Encode()
-	_, _, err := storage.WriteSegment(config.SegmentFooter, encoded)
+	_, _, err := storage.WriteSegment(enums.SegmentFooter, encoded)
 	return err
 }
 
 func (f *Footer) ReadFromStorage(storage SegmentStorage, offset uint64) error {
-	data, err := storage.ReadSegment(config.SegmentFooter, offset, FooterSize)
+	data, err := storage.ReadSegment(enums.SegmentFooter, offset, FooterSize)
 	if err != nil {
 		return err
 	}

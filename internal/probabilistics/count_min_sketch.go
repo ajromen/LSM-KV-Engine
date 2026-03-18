@@ -58,7 +58,7 @@ func (c *CountMinSketch) Increment(key []byte) {
 	c.Add(key, 1)
 }
 
-// OVO VAM JE BRAco glavni deo cms-a, on vam vraca najmanju vrednost za neki key iz sva tri reda
+// Estimate OVO VAM JE BRAco glavni deo cms-a, on vam vraca najmanju vrednost za neki key iz sva tri reda
 func (c *CountMinSketch) Estimate(key []byte) uint {
 	var min uint
 	first := true
