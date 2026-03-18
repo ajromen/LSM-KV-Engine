@@ -38,7 +38,7 @@ func (c *Config) applyFlags(flags *cli.FLags) error {
 		c.Memtable.MemtableMaxSizeBytes = *flags.MemtableMaxSizeKb
 	}
 	if flags.MemtableType != nil {
-		memType := strings.TrimSpace(*flags.LSMCompactionAlgorithm)
+		memType := strings.TrimSpace(*flags.MemtableType)
 		memType = strings.ToLower(memType)
 		var memtableType enums.MemTableType
 
@@ -62,7 +62,7 @@ func (c *Config) applyFlags(flags *cli.FLags) error {
 		c.Memtable.Instances = *flags.Instances
 	}
 	if flags.SSTableFormat != nil {
-		format := strings.TrimSpace(*flags.LSMCompactionAlgorithm)
+		format := strings.TrimSpace(*flags.SSTableFormat)
 		format = strings.ToLower(format)
 		switch format {
 		case "single-file":

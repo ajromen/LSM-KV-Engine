@@ -3,7 +3,6 @@ package sstable
 import (
 	"fmt"
 	"os"
-	"path"
 	"path/filepath"
 	"sort"
 	"strings"
