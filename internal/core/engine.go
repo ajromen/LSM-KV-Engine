@@ -2,23 +2,16 @@ package core
 
 import (
 	"os"
-	"time"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/cli"
 	"github.com/ajromen/LSM-KV-Engine/internal/config"
-	"github.com/ajromen/LSM-KV-Engine/internal/memtable"
-	"github.com/ajromen/LSM-KV-Engine/internal/sstable"
+	"github.com/ajromen/LSM-KV-Engine/internal/lsm"
 )
 
 type Engine struct {
-	config          *config.Config
-	memtableManager *memtable.MemtableManager
-	sstableManager  *sstable.SSTableManager
-}
-
-func currentTimestamp() uint64 {
-	now := time.Now().UnixNano() // nanosekunde od 1.1.1970
-	return uint64(now)
+	config *config.Config
+	lsm    *lsm.LSM
+	//wal
 }
 
 func NewEngine(flags *cli.FLags) (*Engine, error) {
@@ -26,52 +19,53 @@ func NewEngine(flags *cli.FLags) (*Engine, error) {
 	if err != nil {
 		return nil, err
 	}
-	dataDir := "./data"
+	dataDir := cfg.SavePath
 	if err := os.MkdirAll(dataDir, 0755); err != nil {
 		return nil, err
 	}
-	sstableManager := sstable.NewSSTableManager(dataDir, cfg)
-	factory := memtable.NewFactory(cfg.Memtable)
-	flushHandler := func(entries []memtable.MemtableEntry) {
-		if err := sstableManager.FlushToSSTable(entries); err != nil {
-			return
-		}
+
+	lsmTree, err := lsm.NewLSM(cfg, dataDir)
+	if err != nil {
+		return nil, err
 	}
-	memManager := memtable.NewMemtableManager(3, 0, factory, flushHandler)
-	engine := &Engine{
-		config:          cfg,
-		memtableManager: memManager,
-		sstableManager:  sstableManager,
-	}
-	return engine, nil
+	engine := Engine{config: cfg, lsm: lsmTree}
+	return &engine, nil
 }
 
 func (engine *Engine) Put(key []byte, value []byte) error {
-	ts := currentTimestamp()
-	engine.memtableManager.Put(key, value, ts, false)
+	//wal
+	err := engine.lsm.Put(key, value)
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
 func (engine *Engine) Get(key []byte) ([]byte, bool, error) {
-	entry, found := engine.memtableManager.Get(key)
-	if found {
-		return entry, true, nil
-	}
-	entry, found, err := engine.sstableManager.Get(key)
-	if err != nil {
-		return nil, false, err
-	}
-	if found {
-		return entry, true, nil
-	}
-	return nil, false, nil
+	value, found, err := engine.lsm.Get(key)
+	return value, found, err
 }
 
 func (engine *Engine) Delete(key []byte) error {
-	ts := currentTimestamp()
-	engine.memtableManager.Put(key, nil, ts, true)
+	// wal
+	err := engine.lsm.Delete(key)
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
-func (engine *Engine) Close() {
+func (engine *Engine) Close() error {
+	//wal finish write
+	err := engine.lsm.Finish()
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (engine *Engine) ClearAll() error {
+	//wal
+	print("TODO delete everything")
+	return nil
 }

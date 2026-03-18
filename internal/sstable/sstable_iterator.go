@@ -2,6 +2,7 @@ package sstable
 
 import (
 	"bytes"
+	"os"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/block"
 	"github.com/ajromen/LSM-KV-Engine/internal/data_structures"
@@ -33,8 +34,12 @@ func (s *sstableBlockSource) loadBlock(n int) ([]byte, error) {
 	if data, ok := s.blockCache[n]; ok {
 		return data, nil
 	}
+	dataFilePath := s.reader.filePath
+	if _, err := os.Stat(s.reader.filePath + string(DataSegmentExtension)); err == nil {
+		dataFilePath = s.reader.filePath + string(DataSegmentExtension)
+	}
 	key := block.BlockKey{
-		FilePath: s.reader.filePath,
+		FilePath: dataFilePath,
 		Offset:   uint32(n),
 	}
 	data, err := s.reader.blockManager.Read(key)
@@ -103,7 +108,7 @@ func (it *SSTableIteratorRaw) SeekToLast() {
 // this uses the sstable indexing structure - Summary -> Index -> Data
 func (it *SSTableIteratorRaw) Seek(target Record) {
 	// find index block containing the key from summary
-	indexBlockNum := it.src.reader.summarySegment.FindIndexBlockNumber(target.Key)
+	indexBlockNum := it.src.reader.SummarySegment.FindIndexBlockNumber(target.Key)
 	if indexBlockNum < 0 {
 		it.valid = false
 		return
@@ -300,7 +305,7 @@ func (it *SSTableIterator) Key() Record   { return *it.current }
 func (it *SSTableIterator) Value() Record { return *it.current }
 
 // SSTableMergeIteratorRaw merges multiple SSTableIteratorRaw instances using a merge structure
-// it produces records in sorted order across all sstables
+// it produces records in sorted order across all SSTables
 type SSTableMergeIteratorRaw struct {
 	structure data_structures.MergeStructure[Record]
 	current   *Record

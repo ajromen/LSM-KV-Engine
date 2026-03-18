@@ -91,6 +91,7 @@ func (mm *MemtableManager) Get(key []byte) ([]byte, bool) {
 			return v, true
 		}
 	}
+
 	return nil, false
 }
 
@@ -133,4 +134,8 @@ func (mm *MemtableManager) Iterator() iterator.Iterator[MemtableEntry] {
 
 	rawMerge := NewRawIterator(rawIters, mm.mergeStructure)
 	return NewMergedMemtableIterator(rawMerge)
+}
+
+func (mm *MemtableManager) Close() {
+	//close(mm.flushChannel) mozda treba
 }
