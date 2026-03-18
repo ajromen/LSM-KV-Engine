@@ -40,7 +40,7 @@ func (m *GenericMemtable) Get(key []byte) ([]byte, bool) {
 		return nil, false
 	}
 	if entry.Tombstone {
-		return nil, true
+		return nil, false
 	}
 	return entry.Value, true
 }

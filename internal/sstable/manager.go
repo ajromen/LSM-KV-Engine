@@ -9,52 +9,23 @@ import (
 
 	"github.com/ajromen/LSM-KV-Engine/internal/block"
 	"github.com/ajromen/LSM-KV-Engine/internal/config"
-	"github.com/ajromen/LSM-KV-Engine/internal/data_structures"
 	"github.com/ajromen/LSM-KV-Engine/internal/memtable"
 	"github.com/ajromen/LSM-KV-Engine/internal/utils"
 )
 
 type Layer struct {
-	SSTables    []*SSTableReader
-	sizeBytes   int64
-	needsUpdate bool
-}
-
-func (l *Layer) Length() int {
-	return len(l.SSTables)
-}
-
-func (l *Layer) GetSize() int64 {
-	if !l.needsUpdate {
-		return l.sizeBytes
-	}
-	var size int64
-	for _, reader := range l.SSTables {
-		size += reader.SizeBytes
-	}
-	return size
-}
-
-func (l *Layer) AppendSSTable(sstable *SSTableReader) {
-	l.SSTables = append(l.SSTables, sstable)
-	l.needsUpdate = true
-}
-
-func (l *Layer) RemoveSSTable(index int) {
-	l.SSTables = append(l.SSTables[:index], l.SSTables[index+1:]...)
+	sstables []*SSTableReader
 }
 
 func newLayer() *Layer {
 	return &Layer{
-		SSTables:    make([]*SSTableReader, 0),
-		sizeBytes:   0,
-		needsUpdate: false,
+		sstables: make([]*SSTableReader, 0),
 	}
 }
 
 type SSTableManager struct {
 	config       *config.Config
-	Layers       []*Layer
+	layers       []*Layer
 	blockManager *block.BlockManager
 	manifest     *Manifest
 	dataDir      string
@@ -64,9 +35,9 @@ func NewSSTableManager(dataDir string, cfg *config.Config) *SSTableManager {
 	manager := &SSTableManager{
 		config:  cfg,
 		dataDir: dataDir,
-		Layers:  make([]*Layer, 0),
+		layers:  make([]*Layer, 0),
 	}
-	manager.Layers = append(manager.Layers, newLayer())
+	manager.layers = append(manager.layers, newLayer())
 	blockSize := cfg.SSTable.DataSegment.BlockSize
 	manifest, err := NewManifest(dataDir)
 	if err != nil {
@@ -96,15 +67,15 @@ func (sm *SSTableManager) LoadExistingSSTables() error {
 	sort.Ints(keys)
 
 	for _, i := range keys {
-		for len(sm.Layers) <= i {
-			sm.Layers = append(sm.Layers, newLayer())
+		for len(sm.layers) <= i {
+			sm.layers = append(sm.layers, newLayer())
 		}
 		for _, sstManifest := range sm.manifest.Layers[i] {
-			reader, err := NewSSTableReader(sstManifest.Id, sstManifest.BaseFileName, sstManifest.Format, sm.config, int(sstManifest.Layer))
+			reader, err := NewSSTableReader(sstManifest.BaseFileName, sstManifest.Format, sm.config)
 			if err != nil {
 				return fmt.Errorf("cant create SSTable reader: %w", err)
 			}
-			sm.Layers[i].AppendSSTable(reader)
+			sm.layers[i].sstables = append(sm.layers[i].sstables, reader)
 		}
 	}
 	return nil
@@ -138,11 +109,11 @@ func (sm *SSTableManager) FlushToSSTable(entries []memtable.MemtableEntry) error
 	if err := writer.Finalize(); err != nil {
 		return err
 	}
-	reader, err := NewSSTableReader(sstableID, filePath, sm.config.SSTable.Format, sm.config, 0)
+	reader, err := NewSSTableReader(filePath, sm.config.SSTable.Format, sm.config)
 	if err != nil {
 		return fmt.Errorf("cant create SSTable reader: %w", err)
 	}
-	sm.Layers[0].AppendSSTable(reader)
+	sm.layers[0].sstables = append(sm.layers[0].sstables, reader)
 
 	sstManifest := SSTableManifest{
 		Id:           sstableID,
@@ -160,17 +131,14 @@ func (sm *SSTableManager) FlushToSSTable(entries []memtable.MemtableEntry) error
 }
 
 func (sm *SSTableManager) Get(key []byte) ([]byte, bool, error) {
-	for _, layer := range sm.Layers {
-		for i := len(layer.SSTables) - 1; i >= 0; i-- {
-			record, err := layer.SSTables[i].Get(key)
+	for _, layer := range sm.layers {
+		for i := len(layer.sstables) - 1; i >= 0; i-- {
+			record, err := layer.sstables[i].Get(key)
 			if err != nil {
 				return nil, false, err
 			}
 			if record == nil {
 				continue
-			}
-			if record.Tombstone {
-				return nil, false, nil
 			}
 			return record.Value, true, nil
 		}

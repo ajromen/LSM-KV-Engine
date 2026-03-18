@@ -8,21 +8,20 @@ import (
 	"strings"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/block"
-	"github.com/ajromen/LSM-KV-Engine/internal/enums"
 )
 
 const ManifestFileName = "MANIFEST.json"
 
 type SSTableManifest struct {
-	Id           int                 `json:"id"`
-	BaseFileName string              `json:"base_file_name"`
-	Format       enums.SSTableFormat `json:"is_multi"`
-	Layer        uint64              `json:"layer"`
+	Id           uint64 `json:"id"`
+	BaseFileName string `json:"base_file_name"`
+	Format       byte   `json:"is_multi"`
+	Layer        uint64 `json:"layer"`
 }
 
 type Manifest struct {
 	FileDir       string                    `json:"file_dir"`
-	NextSStableId int                       `json:"next_stable_id"`
+	NextSStableId uint64                    `json:"next_stable_id"`
 	Layers        map[int][]SSTableManifest `json:"layers"`
 }
 
@@ -51,7 +50,7 @@ func (m *Manifest) reconstruct(fileDir string) error {
 	if err != nil {
 		return err
 	}
-	sstableFiles := make(map[string]enums.SSTableFormat)
+	sstableFiles := make(map[string]byte)
 	for _, file := range files {
 		if !file.IsDir() {
 			name := file.Name()
@@ -103,52 +102,20 @@ func (m *Manifest) load() error {
 	return nil
 }
 
-func (m *Manifest) Save() error {
-	err := block.WriteJSON(filepath.Join(m.FileDir, ManifestFileName), m)
+func (m *Manifest) save() error {
+	err := block.WriteJSON(path.Join(m.FileDir, ManifestFileName), m)
 	if err != nil {
 		return err
 	}
 	return nil
-}
-
-func (m *Manifest) MoveSSTable(id, fromLayer, toLayer int) error {
-	layer := m.Layers[fromLayer]
-	var sstable SSTableManifest
-	for i, sst := range layer {
-		if sst.Id == id {
-			sstable = sst
-			m.Layers[fromLayer] = append(layer[:i], layer[i+1:]...)
-			break
-		}
-	}
-	m.Layers[toLayer] = append(m.Layers[toLayer], sstable)
-	return m.Save()
 }
 
 func (m *Manifest) AddSSTable(sstManifest SSTableManifest) error {
 	layer := int(sstManifest.Layer)
 	m.Layers[layer] = append(m.Layers[layer], sstManifest)
-	err := m.Save()
+	err := m.save()
 	if err != nil {
 		return err
 	}
 	return nil
-}
-
-func (m *Manifest) RemoveSSTable(id int, layerNumber int) error {
-	layers := m.Layers[layerNumber]
-	for i, sst := range layers {
-		if sst.Id == id {
-			m.Layers[layerNumber] = append(layers[:i], layers[i+1:]...)
-			return m.Save()
-		}
-	}
-	return fmt.Errorf("sstable %d not found in layer %d", id, layerNumber)
-}
-
-func (m *Manifest) IncrementId() {
-	m.NextSStableId++
-	if m.NextSStableId >= 10_000_000-1 {
-		m.NextSStableId = 0
-	}
 }

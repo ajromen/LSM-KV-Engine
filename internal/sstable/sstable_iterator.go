@@ -108,7 +108,7 @@ func (it *SSTableIteratorRaw) SeekToLast() {
 // this uses the sstable indexing structure - Summary -> Index -> Data
 func (it *SSTableIteratorRaw) Seek(target Record) {
 	// find index block containing the key from summary
-	indexBlockNum := it.src.reader.SummarySegment.FindIndexBlockNumber(target.Key)
+	indexBlockNum := it.src.reader.summarySegment.FindIndexBlockNumber(target.Key)
 	if indexBlockNum < 0 {
 		it.valid = false
 		return
@@ -305,7 +305,7 @@ func (it *SSTableIterator) Key() Record   { return *it.current }
 func (it *SSTableIterator) Value() Record { return *it.current }
 
 // SSTableMergeIteratorRaw merges multiple SSTableIteratorRaw instances using a merge structure
-// it produces records in sorted order across all SSTables
+// it produces records in sorted order across all sstables
 type SSTableMergeIteratorRaw struct {
 	structure data_structures.MergeStructure[Record]
 	current   *Record

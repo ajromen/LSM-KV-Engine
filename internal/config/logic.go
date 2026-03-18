@@ -4,10 +4,19 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/cli"
-	"github.com/ajromen/LSM-KV-Engine/internal/enums"
+)
+
+type SegmentType int
+
+const (
+	SegmentData     SegmentType = 0
+	SegmentFilter   SegmentType = 1
+	SegmentIndex    SegmentType = 2
+	SegmentSummary  SegmentType = 3
+	SegmentMetadata SegmentType = 4
+	SegmentFooter   SegmentType = 5
 )
 
 func LoadConfig(flags *cli.FLags) (*Config, error) {
@@ -77,18 +86,10 @@ func (c *Config) applyFlags(flags *cli.FLags) error {
 		c.BlockManager.BlockCacheMaxBlocks = *flags.BlockCacheMaxBlocks
 	}
 	if flags.LSMCompactionAlgorithm != nil {
-		algo := strings.TrimSpace(*flags.LSMCompactionAlgorithm)
-		algo = strings.ToLower(algo)
-		var algorithm enums.LSMCompaction
-		switch algo {
-		case "size-tiered":
-			algorithm = enums.SizeTieredCompaction
-		case "leveled":
-			algorithm = enums.LeveledCompaction
-		default:
-			return fmt.Errorf("unknown LSM compaction algorithm: %s", algo)
-		}
-		c.LSMTree.CompactionAlgorithm = algorithm
+		c.LSMTree.CompactionAlgorithm = *flags.LSMCompactionAlgorithm
+	}
+	if flags.LSMMaxLayers != nil {
+		c.LSMTree.MaxLevels = *flags.LSMMaxLayers
 	}
 	return nil
 }
@@ -105,7 +106,12 @@ func (c *Config) validateFields() error {
 		return fmt.Errorf("instances must be positive")
 	}
 
-	if c.SSTable.Format != enums.FormatSingleFile && c.SSTable.Format != enums.FormatMultiFile {
+	if c.Memtable.MemtableType != "hashmap" &&
+		c.Memtable.MemtableType != "skiplist" &&
+		c.Memtable.MemtableType != "btree" {
+		return fmt.Errorf("invalid memtable type")
+	}
+	if c.SSTable.Format != FormatSingleFile && c.SSTable.Format != FormatMultiFile {
 		return fmt.Errorf("invalid sstable format")
 	}
 
@@ -115,6 +121,15 @@ func (c *Config) validateFields() error {
 
 	if c.BlockManager.BlockCacheMaxBlocks < 1 {
 		return fmt.Errorf("invalid block cacheMaxBlocks must be positive")
+	}
+
+	if c.LSMTree.MaxLevels <= 0 {
+		return fmt.Errorf("invalid LSM level number")
+	}
+
+	if c.LSMTree.CompactionAlgorithm != "size-tiered" &&
+		c.LSMTree.CompactionAlgorithm != "leveled" {
+		return fmt.Errorf("invalid LSM compaction algorithm")
 	}
 
 	if !fileExists(c.SavePath) {

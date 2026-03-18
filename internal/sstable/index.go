@@ -85,18 +85,18 @@ func (entry *IndexEntry) EncodeIndexEntry() []byte {
 // DecodeIndexEntry DESERIALIZES INDEX ENTRY FROM GIVEN BUFFER -> RETURNS DECODED ENTRY, BYTES CONSUMED AND ERROR IF ANY
 func DecodeIndexEntry(buf []byte) (*IndexEntry, int, error) {
 	if len(buf) < 5 {
-		return nil, 0, errors.New("buffer too small")
+		return nil, 0, errors.New("Buffer too small")
 	}
 	pos := 0
 
 	// decode key length
 	keyLength, n := binary.Uvarint(buf[pos:])
 	if n <= 0 {
-		return nil, 0, errors.New("invalid index key length")
+		return nil, 0, errors.New("Invalid index key length")
 	}
 	pos += n
 	if pos+int(keyLength)+4 > len(buf) {
-		return nil, 0, errors.New("buffer too small")
+		return nil, 0, errors.New("Buffer too small")
 	}
 
 	// decode key
@@ -181,8 +181,6 @@ func DecodeIndexBlock(buf []byte) (*IndexBlock, error) {
 }
 
 // FindBlock PERFORMS BINARY SEARCH IN INDEX BLOCK AND RETURNS THE INDEX OF THE BLOCK IN DATA THAT MAY CONTAIN THE GIVEN KEY
-//
-//goland:noinspection GoRedundantElseInIf
 func (block *IndexBlock) FindBlock(key []byte) int {
 	if len(block.Entries) == 0 {
 		return -1

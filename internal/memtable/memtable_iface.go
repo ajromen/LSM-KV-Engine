@@ -39,6 +39,17 @@ type Memtable interface {
 	Iterator() iterator.Iterator[MemtableEntry]
 }
 
+type MemtableType string
+
+const (
+	TypeBTree     MemtableType = "btree"
+	TypeRBTree    MemtableType = "rbtree"
+	TypeSkipList  MemtableType = "skiplist"
+	TypeHashMap   MemtableType = "hashmap"
+	TypeAVLTree   MemtableType = "avltree"
+	TypeHashMapSL MemtableType = "hashmapsl"
+)
+
 type GenericMemtable struct {
 	store         MemtableStore
 	numEntries    int

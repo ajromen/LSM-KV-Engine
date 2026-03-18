@@ -26,7 +26,7 @@ func NewBlockManager(blockSize, maxLRUSize int) *BlockManager {
 	}
 }
 
-// BlockSize Getter (WAL needs to validate cfg.BlockSize == bm.BlockSize())
+// Getter (WAL needs to validate cfg.BlockSize == bm.BlockSize())
 func (bm *BlockManager) BlockSize() int {
 	return bm.blockSize
 }
@@ -151,8 +151,8 @@ func (bm *BlockManager) EnsureSize(path string, sizeBytes int64) error {
 	return f.Truncate(sizeBytes)
 }
 
-// WriteNoBlock used for specific parts of database
-func WriteNoBlock(f *os.File, offset uint64, data []byte) error {
+// used for specific parts of database
+func (bm *BlockManager) WriteNoBlock(f *os.File, offset uint64, data []byte) error {
 	_, err := f.Seek(int64(offset), io.SeekStart)
 	if err != nil {
 		return err
@@ -164,7 +164,7 @@ func WriteNoBlock(f *os.File, offset uint64, data []byte) error {
 	return nil
 }
 
-func ReadNoBlock(f *os.File, offset uint64, size uint32) ([]byte, error) {
+func (bm *BlockManager) ReadNoBlock(f *os.File, offset uint64, size uint32) ([]byte, error) {
 	data := make([]byte, size)
 	if _, err := f.ReadAt(data, int64(offset)); err != nil {
 		return nil, err
@@ -199,14 +199,6 @@ func WriteJSON(filePath string, obj any) error {
 
 func EnsureDir(path string) error {
 	if err := os.MkdirAll(path, 0755); err != nil {
-		return err
-	}
-	return nil
-}
-
-func DeleteFile(path string) error {
-	err := os.Remove(path)
-	if err != nil {
 		return err
 	}
 	return nil
