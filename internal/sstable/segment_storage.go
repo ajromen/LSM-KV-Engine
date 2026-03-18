@@ -151,7 +151,17 @@ type MultiFileStorage struct {
 func (m *MultiFileStorage) Delete() {
 	for _, file := range m.files {
 		file.Close()
-		os.Remove(file.Name())
+	}
+	extensions := []MultiFileSegmentExtensions{
+		DataSegmentExtension,
+		IndexSegmentExtension,
+		FilterSegmentExtension,
+		SummarySegmentExtension,
+		MetadataSegmentExtension,
+		FooterSegmentExtension,
+	}
+	for _, ext := range extensions {
+		os.Remove(m.basePath + string(ext))
 	}
 }
 

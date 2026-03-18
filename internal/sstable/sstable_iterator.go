@@ -2,6 +2,7 @@ package sstable
 
 import (
 	"bytes"
+	"os"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/block"
 	"github.com/ajromen/LSM-KV-Engine/internal/data_structures"
@@ -33,8 +34,12 @@ func (s *sstableBlockSource) loadBlock(n int) ([]byte, error) {
 	if data, ok := s.blockCache[n]; ok {
 		return data, nil
 	}
+	dataFilePath := s.reader.filePath
+	if _, err := os.Stat(s.reader.filePath + string(DataSegmentExtension)); err == nil {
+		dataFilePath = s.reader.filePath + string(DataSegmentExtension)
+	}
 	key := block.BlockKey{
-		FilePath: s.reader.filePath,
+		FilePath: dataFilePath,
 		Offset:   uint32(n),
 	}
 	data, err := s.reader.blockManager.Read(key)
