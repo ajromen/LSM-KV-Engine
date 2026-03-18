@@ -88,6 +88,10 @@ func (m *Manifest) reconstruct(fileDir string) error {
 		}
 		m.Layers[0] = append(m.Layers[0], sst)
 	}
+	err = m.Save()
+	if err != nil {
+		return fmt.Errorf("failed to save manifest: %w", err)
+	}
 	return nil
 }
 

@@ -152,7 +152,7 @@ func (c *SSTableConfig) SegmentPaths(basePath string) map[enums.SegmentType]stri
 		}
 	} else {
 		// Each segment has its own file
-		paths[enums.SegmentData] = basePath
+		paths[enums.SegmentData] = basePath + ".data"
 		paths[enums.SegmentFilter] = basePath + ".filter"
 		paths[enums.SegmentIndex] = basePath + ".index"
 		paths[enums.SegmentSummary] = basePath + ".summary"

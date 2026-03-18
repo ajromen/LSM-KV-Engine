@@ -154,11 +154,13 @@ func NewMultiFileStorage(basePath string, blockManager *block.BlockManager) (*Mu
 }
 
 func OpenMultiFileStorage(basePath string) (*MultiFileStorage, error) {
-	return &MultiFileStorage{
+	mfs := &MultiFileStorage{
 		basePath: basePath,
 		files:    make(map[enums.SegmentType]*os.File),
 		offsets:  make(map[enums.SegmentType]uint64),
-	}, nil
+	}
+	mfs.getOrCreateFile(enums.SegmentData)
+	return mfs, nil
 }
 
 // getOrCreateFile RETURNS AN OPEN FILE HANDLE FOR THE GIVEN SEGMENT TYPE

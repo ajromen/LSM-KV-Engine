@@ -75,7 +75,7 @@ func NewSSTableManager(dataDir string, cfg *config.Config) *SSTableManager {
 	manager.manifest = manifest
 	manager.blockManager = block.NewBlockManager(blockSize, 100)
 	if err := manager.LoadExistingSSTables(); err != nil {
-		panic(err)
+		panic(fmt.Errorf("failed to load existing sstables: %v", err))
 	}
 	return manager
 }
@@ -86,7 +86,7 @@ func (sm *SSTableManager) LoadExistingSSTables() error {
 	if os.IsNotExist(err) {
 		err := block.EnsureDir(sm.dataDir)
 		if err != nil {
-			return err
+			return fmt.Errorf("cant create data directory: %w", err)
 		}
 	}
 	keys := make([]int, 0, len(sm.manifest.Layers))
@@ -102,7 +102,7 @@ func (sm *SSTableManager) LoadExistingSSTables() error {
 		for _, sstManifest := range sm.manifest.Layers[i] {
 			reader, err := NewSSTableReader(sstManifest.Id, sstManifest.BaseFileName, sstManifest.Format, sm.config, int(sstManifest.Layer))
 			if err != nil {
-				return err
+				return fmt.Errorf("cant create SSTable reader: %w", err)
 			}
 			sm.Layers[i].AppendSSTable(reader)
 		}
@@ -122,7 +122,7 @@ func (sm *SSTableManager) FlushToSSTable(entries []memtable.MemtableEntry) error
 	filePath := filepath.Join(sm.dataDir, fmt.Sprintf("%06d.sst", sstableID))
 	writer, err := NewSSTableWriter(filePath, sm.blockManager, sm.config, uint64(len(entries)))
 	if err != nil {
-		return err
+		return fmt.Errorf("cant create SSTable writer: %w", err)
 	}
 	for _, entry := range entries {
 		record := Record{
@@ -132,7 +132,7 @@ func (sm *SSTableManager) FlushToSSTable(entries []memtable.MemtableEntry) error
 			Tombstone: entry.Tombstone,
 		}
 		if err := writer.AddRecord(record); err != nil {
-			return err
+			return fmt.Errorf("cant add record: %w", err)
 		}
 	}
 	if err := writer.Finalize(); err != nil {
@@ -140,7 +140,7 @@ func (sm *SSTableManager) FlushToSSTable(entries []memtable.MemtableEntry) error
 	}
 	reader, err := NewSSTableReader(sstableID, filePath, sm.config.SSTable.Format, sm.config, 0)
 	if err != nil {
-		return err
+		return fmt.Errorf("cant create SSTable reader: %w", err)
 	}
 	sm.Layers[0].AppendSSTable(reader)
 
