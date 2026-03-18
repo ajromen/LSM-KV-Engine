@@ -129,6 +129,17 @@ func (s *SingleFileStorage) File() *os.File {
 	return s.file
 }
 
+type MultiFileSegmentExtensions string
+
+const (
+	DataSegmentExtension     MultiFileSegmentExtensions = ".data"
+	IndexSegmentExtension    MultiFileSegmentExtensions = ".index"
+	FilterSegmentExtension   MultiFileSegmentExtensions = ".filter"
+	SummarySegmentExtension  MultiFileSegmentExtensions = ".summary"
+	MetadataSegmentExtension MultiFileSegmentExtensions = ".metadata"
+	FooterSegmentExtension   MultiFileSegmentExtensions = ".footer"
+)
+
 // MultiFileStorage STORES EACH SSTABLE SEGMENT IN A SEPARATE FILE
 type MultiFileStorage struct {
 	basePath     string                         // base path on which prefixes like .footer are added
@@ -194,17 +205,17 @@ func (m *MultiFileStorage) getOrOpenFile(segType enums.SegmentType) (*os.File, e
 func (m *MultiFileStorage) getFilePath(segType enums.SegmentType) string {
 	switch segType {
 	case enums.SegmentData:
-		return m.basePath + ".data"
+		return m.basePath + string(DataSegmentExtension)
 	case enums.SegmentFilter:
-		return m.basePath + ".filter"
+		return m.basePath + string(FilterSegmentExtension)
 	case enums.SegmentIndex:
-		return m.basePath + ".index"
+		return m.basePath + string(IndexSegmentExtension)
 	case enums.SegmentSummary:
-		return m.basePath + ".summary"
+		return m.basePath + string(SummarySegmentExtension)
 	case enums.SegmentMetadata:
-		return m.basePath + ".metadata"
+		return m.basePath + string(MetadataSegmentExtension)
 	case enums.SegmentFooter:
-		return m.basePath + ".footer"
+		return m.basePath + string(FooterSegmentExtension)
 	default:
 		return m.basePath
 	}

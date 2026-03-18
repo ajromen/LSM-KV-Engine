@@ -119,7 +119,7 @@ func (sm *SSTableManager) FlushToSSTable(entries []memtable.MemtableEntry) error
 	sort.Slice(entries, func(i, j int) bool { return bytes.Compare(entries[i].Key, entries[j].Key) < 0 })
 	sstableID := sm.manifest.NextSStableId
 	sm.manifest.IncrementId()
-	filePath := filepath.Join(sm.dataDir, fmt.Sprintf("%06d.sst", sstableID))
+	filePath := filepath.Join(sm.dataDir, fmt.Sprintf("%06d%s", sstableID, SSTableFileExtension))
 	writer, err := NewSSTableWriter(filePath, sm.blockManager, sm.config, uint64(len(entries)))
 	if err != nil {
 		return fmt.Errorf("cant create SSTable writer: %w", err)
@@ -206,7 +206,7 @@ func (sm *SSTableManager) MergeSSTables(readers []*SSTableReader, toLayer int) e
 	// 1. create new sstable
 	sstableID := sm.manifest.NextSStableId
 	sm.manifest.IncrementId()
-	filePath := filepath.Join(sm.dataDir, fmt.Sprintf("%06d.sst", sstableID))
+	filePath := filepath.Join(sm.dataDir, fmt.Sprintf("%06d%s", sstableID, SSTableFileExtension))
 
 	expectedElems := uint64(0)
 	for _, reader := range readers {

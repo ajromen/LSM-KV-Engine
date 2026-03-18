@@ -11,6 +11,8 @@ import (
 	"github.com/ajromen/LSM-KV-Engine/internal/utils"
 )
 
+const SSTableFileExtension = ".sst"
+
 // SSTableWriter allows writing records into sstable
 type SSTableWriter struct {
 	storage           SegmentStorage       // low-level writing of segments

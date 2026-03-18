@@ -8,6 +8,7 @@ import (
 
 	"github.com/ajromen/LSM-KV-Engine/internal/cli"
 	"github.com/ajromen/LSM-KV-Engine/internal/enums"
+	"github.com/ajromen/LSM-KV-Engine/internal/sstable"
 )
 
 func LoadConfig(flags *cli.FLags) (*Config, error) {
@@ -152,12 +153,12 @@ func (c *SSTableConfig) SegmentPaths(basePath string) map[enums.SegmentType]stri
 		}
 	} else {
 		// Each segment has its own file
-		paths[enums.SegmentData] = basePath + ".data"
-		paths[enums.SegmentFilter] = basePath + ".filter"
-		paths[enums.SegmentIndex] = basePath + ".index"
-		paths[enums.SegmentSummary] = basePath + ".summary"
-		paths[enums.SegmentMetadata] = basePath + ".metadata"
-		paths[enums.SegmentFooter] = basePath + ".footer"
+		paths[enums.SegmentData] = basePath + string(sstable.DataSegmentExtension)
+		paths[enums.SegmentFilter] = basePath + string(sstable.FilterSegmentExtension)
+		paths[enums.SegmentIndex] = basePath + string(sstable.IndexSegmentExtension)
+		paths[enums.SegmentSummary] = basePath + string(sstable.SummarySegmentExtension)
+		paths[enums.SegmentMetadata] = basePath + string(sstable.MetadataSegmentExtension)
+		paths[enums.SegmentFooter] = basePath + string(sstable.FooterSegmentExtension)
 	}
 	return paths
 }

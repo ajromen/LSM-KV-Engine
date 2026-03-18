@@ -56,12 +56,12 @@ func (m *Manifest) reconstruct(fileDir string) error {
 		if !file.IsDir() {
 			name := file.Name()
 			// Single-file: 000000.sst
-			if filepath.Ext(name) == ".sst" && !strings.Contains(strings.TrimSuffix(name, ".sst"), ".") {
+			if filepath.Ext(name) == SSTableFileExtension && !strings.Contains(strings.TrimSuffix(name, SSTableFileExtension), ".") {
 				sstableFiles[filepath.Join(fileDir, name)] = enums.FormatSingleFile
 			}
 			// Multi-file: 000000.sst.data -> add 000000.sst to list
-			if strings.HasSuffix(name, ".sst.data") {
-				basePath := filepath.Join(fileDir, strings.TrimSuffix(name, ".data"))
+			if strings.HasSuffix(name, SSTableFileExtension+string(DataSegmentExtension)) {
+				basePath := filepath.Join(fileDir, strings.TrimSuffix(name, string(DataSegmentExtension)))
 				sstableFiles[basePath] = enums.FormatMultiFile
 			}
 		}
@@ -73,7 +73,7 @@ func (m *Manifest) reconstruct(fileDir string) error {
 	sort.Strings(sortedFiles)
 	for _, filePath := range sortedFiles {
 		var id int
-		_, err := fmt.Sscanf(filepath.Base(filePath), "%d.sst", &id)
+		_, err := fmt.Sscanf(filepath.Base(filePath), "%d%s", &id, SSTableFileExtension)
 		if err != nil {
 			return err
 		}

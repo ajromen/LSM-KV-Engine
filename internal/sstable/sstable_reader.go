@@ -61,7 +61,7 @@ func NewSSTableReader(id int, filePath string, format enums.SSTableFormat, cfg *
 		offset = uint64(info.Size()) - FooterSize
 	case *MultiFileStorage:
 		offset = 0
-		info, err := os.Stat(filePath + ".data")
+		info, err := os.Stat(filePath + string(DataSegmentExtension))
 		if err != nil {
 			return nil, fmt.Errorf("multi storage failed to stat file: %w", err)
 		}
@@ -211,8 +211,8 @@ func (r *SSTableReader) Get(key []byte) (*Record, error) {
 	// step 4
 	dataBlockIdx := indexBlock.Entries[entryIdx].BlockIndex
 	dataFilePath := r.filePath
-	if _, err := os.Stat(r.filePath + ".data"); err == nil {
-		dataFilePath = r.filePath + ".data"
+	if _, err := os.Stat(r.filePath + string(DataSegmentExtension)); err == nil {
+		dataFilePath = r.filePath + string(DataSegmentExtension)
 	}
 	blockKey := block.BlockKey{
 		FilePath: dataFilePath,
