@@ -61,7 +61,7 @@ func NewSSTableReader(id int, filePath string, format enums.SSTableFormat, cfg *
 		offset = uint64(info.Size()) - FooterSize
 	case *MultiFileStorage:
 		offset = 0
-		info, err := s.files[enums.SegmentData].Stat()
+		info, err := os.Stat(filePath + ".data")
 		if err != nil {
 			return nil, fmt.Errorf("multi storage failed to stat file: %w", err)
 		}

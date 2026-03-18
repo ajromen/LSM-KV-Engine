@@ -159,7 +159,6 @@ func OpenMultiFileStorage(basePath string) (*MultiFileStorage, error) {
 		files:    make(map[enums.SegmentType]*os.File),
 		offsets:  make(map[enums.SegmentType]uint64),
 	}
-	mfs.getOrCreateFile(enums.SegmentData)
 	return mfs, nil
 }
 
