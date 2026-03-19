@@ -540,7 +540,26 @@ func (it *DataBlockIteratorRaw) Prev() {
 }
 
 // Key and Value return current record
-func (it *DataBlockIteratorRaw) Key() Record { return *it.current }
+func (it *DataBlockIteratorRaw) Key() Record {
+	rec := *it.current
+	recValue := rec.Value
+	recValueBool := it.reader.isEncodedBits.Get(it.reader.recordIdx)
+	recValueEncoded := make([]byte, 0, 1+len(recValue))
+	var recValueBit byte
+	if recValueBool {
+		recValueBit = 1
+	} else {
+		recValueBit = 0
+	}
+	recValueEncoded = append(recValueEncoded, recValueBit)
+	recValueEncoded = append(recValueEncoded, recValue...)
+	recValueDecoded, err := it.reader.valueDecoder.Decode(recValueEncoded)
+	if err != nil {
+		return Record{}
+	}
+	rec.Value = recValueDecoded
+	return rec
+}
 
 func (it *DataBlockIteratorRaw) Value() Record { return *it.current }
 
