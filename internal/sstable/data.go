@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"hash/crc32"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/data_structures"
@@ -348,7 +349,12 @@ func (r *DataBlockReader) ReadRecord() (*Record, error) {
 	}
 	// read value
 	isEncoded := r.isEncodedBits.Get(r.recordIdx)
+	fmt.Println("RecordIdx:", r.recordIdx)
+	fmt.Println("Bitmap byte:", r.isEncodedBits.bytes)
+	fmt.Println("Bit check:", r.isEncodedBits.Get(r.recordIdx))
+	fmt.Println("Is encoded: ", isEncoded)
 	rawValue := r.data[r.pos : r.pos+int(valLen)]
+	fmt.Println("Raw Value: ", rawValue)
 	r.pos += int(valLen)
 	var value []byte
 	if isEncoded {
@@ -356,13 +362,16 @@ func (r *DataBlockReader) ReadRecord() (*Record, error) {
 		encoded = append(encoded, 1)
 		encoded = append(encoded, rawValue...)
 		var err error
+		fmt.Println("What is sent for decode: ", encoded)
 		value, err = r.valueDecoder.Decode(encoded)
+		fmt.Println("What decode returned: ", value)
 		if err != nil {
 			return nil, err
 		}
 	} else {
 		value = append([]byte(nil), rawValue...)
 	}
+	r.recordIdx++
 	return &Record{
 		Timestamp: timestamp,
 		Tombstone: tombstone,
@@ -480,7 +489,6 @@ func (it *DataBlockIteratorRaw) Seek(target Record) {
 	it.reader.recordIdx = best * it.reader.decoder.RestartInterval()
 	for it.reader.HasNext() {
 		rec, err := it.reader.ReadRecord()
-		it.reader.recordIdx++
 		if err != nil {
 			it.valid = false
 			return
@@ -541,24 +549,7 @@ func (it *DataBlockIteratorRaw) Prev() {
 
 // Key and Value return current record
 func (it *DataBlockIteratorRaw) Key() Record {
-	rec := *it.current
-	recValue := rec.Value
-	recValueBool := it.reader.isEncodedBits.Get(it.reader.recordIdx)
-	recValueEncoded := make([]byte, 0, 1+len(recValue))
-	var recValueBit byte
-	if recValueBool {
-		recValueBit = 1
-	} else {
-		recValueBit = 0
-	}
-	recValueEncoded = append(recValueEncoded, recValueBit)
-	recValueEncoded = append(recValueEncoded, recValue...)
-	recValueDecoded, err := it.reader.valueDecoder.Decode(recValueEncoded)
-	if err != nil {
-		return Record{}
-	}
-	rec.Value = recValueDecoded
-	return rec
+	return *it.current
 }
 
 func (it *DataBlockIteratorRaw) Value() Record { return *it.current }

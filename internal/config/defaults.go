@@ -42,7 +42,7 @@ const (
 
 	//LSM
 	DefaultLSMCompactionAlgorithm = enums.SizeTieredCompaction
-	DefaultLSMMinMergeThreshold   = 4
+	DefaultLSMMinMergeThreshold   = 3
 	DefaultLSMLevelSizeMultiplier = 10
 )
 
