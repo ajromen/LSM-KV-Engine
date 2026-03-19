@@ -23,17 +23,21 @@ const (
 /*
 ┌─────────────────────────────────────────────────────────────────────┐
 │                          DATA BLOCK                                 │
+│                                                                     │
 │  ┌────────────────────────────────────────────────────────────────┐ │
-│  │  Record 1                                                      │ │
-│  │    - timestamp (Uint128 as 2x uvarint: low, high)              │ │
-│  │    - tombstone (1 byte: 0 = live, 1 = deleted)                 │ │
-│  │    - key (delta encoded: shared_prefix_len + suffix_len + data │ │
-│  │    - value_len (uvarint)                                       │ │
-│  │    - value bytes                                               │ │
+│  │                        DATA SECTION                            │ │
 │  │                                                                │ │
-│  │  Record 2                                                      │ │
+│  │  Record 0                                                      │ │
+│  │    - timestamp (Uint128 → 2x uvarint: low, high)               │ │
+│  │    - key (delta encoded):                                      │ │
+│  │         shared_prefix_len (uvarint)                            │ │
+│  │         suffix_len (uvarint)                                   │ │
+│  │         suffix bytes                                           │ │
+│  │    - value_len (uvarint)                                       │ │
+│  │    - value bytes (RAW or DICT-ENCODED, without flag byte)      │ │
+│  │                                                                │ │
+│  │  Record 1                                                      │ │
 │  │    - timestamp                                                 │ │
-│  │    - tombstone                                                 │ │
 │  │    - key (delta encoded)                                       │ │
 │  │    - value_len                                                 │ │
 │  │    - value bytes                                               │ │
@@ -44,34 +48,57 @@ const (
 │  Restart Array (uint32 offsets into DATA SECTION)                   │
 │    [restart_0][restart_1][restart_2]...                             │
 │                                                                     │
-│  Data Size      (uint32, little-endian)                             │
-│  Restart Count  (uint32, little-endian) 							  |
-|																      |
-│  Padding ............................................               |
+│  Data Size        (uint32, little-endian)                           │
+│  Restart Count    (uint32, little-endian)                           │
+│                                                                     │
+│  IsEncoded Bitmap (bitset)                                          │
+│    - 1 bit per record                                               │
+│    - 1 = value is dictionary-encoded                                │
+│    - 0 = raw value                                                  │
+│                                                                     │
+│  IsEncoded Size   (uint16, little-endian)                           │
+│                                                                     │
+│  Tombstone Bitmap (bitset)                                          │
+│    - 1 bit per record                                               │
+│    - 1 = tombstone (deleted)                                        │
+│    - 0 = live                                                       │
+│                                                                     │
+│  Tombstone Size   (uint16, little-endian)                           │
+│                                                                     │
+│  Padding ...............................................            │
 │                                                                     │
 │  CRC32 Checksum (uint32, little-endian)                             │
+│    - calculated over entire block except last 4 bytes               │
 └─────────────────────────────────────────────────────────────────────┘
 NOTES:
 Keys are delta-encoded: -> shared_prefix_len (uvarint) -> suffix_len (uvarint) -> suffix bytes
 Every restart interval records, the full key is stored and a restart offset is written into the restart array.
 The restart array allows faster binary search inside a block
+Tombstones are NOT stored inline per record -> instead, a Tombstone Bitmap is used (1 bit per record) -> reduces space overhead compared to 1 byte per record
+Values are encoded using adaptive encoding -> dictionary encoder which encodes value only if it is frequent enough
 CRC32 is calculated over the entire block except the last 4 bytes (CRC itself) we take padding into the calculation too
 */
 
-// DataBlockBuilder  BUILDS SSTABLE DATA BLOCK -> ENCODES KEYS USING DELTA ENCODING AND APPENDS RECORDS UNTIL THE BLOCK IS FULL
+// DATA BLOCK BUILDER BUILDS SSTABLE DATA BLOCK -> ENCODES KEYS USING DELTA ENCODING AND APPENDS RECORDS UNTIL THE BLOCK IS FULL
 type DataBlockBuilder struct {
-	encoder         encoders.Encoder // encoder used on given data
-	data            []byte           // raw data for block
-	restartInterval int              // number of keys between delta restart points
-	recordCount     int              // number of records added to block
-	firstKey        []byte           // first key in the block (for index)
+	encoder         encoders.Encoder          // encoder used on given data
+	valueEncoder    *encoders.AdaptiveEncoder // encoder used on values
+	data            []byte                    // raw data for block
+	restartInterval int                       // number of keys between delta restart points
+	recordCount     int                       // number of records added to block
+	firstKey        []byte                    // first key in the block (for index)
+	tombstoneBits   *BitSet                   // bitmap for tombstones
+	isEncodedBits   *BitSet                   // bitmap for whether record value is encoded using adaptive encoder
 }
 
-func NewDataBlockBuilder(t byte, restartInterval, blockSize int) *DataBlockBuilder {
+func NewDataBlockBuilder(t byte, restartInterval, blockSize int, valueEncoder *encoders.AdaptiveEncoder) *DataBlockBuilder {
 	return &DataBlockBuilder{
 		encoder:         encoders.NewEncoder(t, restartInterval),
+		valueEncoder:    valueEncoder,
 		data:            make([]byte, 0, blockSize),
 		restartInterval: restartInterval,
+		tombstoneBits:   NewBitSet(0),
+		isEncodedBits:   NewBitSet(0),
 	}
 }
 
@@ -84,25 +111,46 @@ func AppendUvarint128ToSlice2(buf []byte, v utils.Uint128) []byte {
 // APPENDS A SINGLE RECORD TO THE CURRENT BLOCK -> RETURNS FALSE IF THE RECORD DOES NOT FIT IN THE REMAINING BLOCK CAPACITY
 
 func (builder *DataBlockBuilder) AddRecord(record Record) bool {
+	// if its the first key store it for index
 	if builder.recordCount == 0 {
 		builder.firstKey = append([]byte(nil), record.Key...)
 	}
-	estimatedSize := len(record.Key)*2 + len(record.Value) + 32
-	reserved := 12 + (builder.recordCount/builder.restartInterval+1)*4
 
+	// estimate size to see if record fits in current block
+	estimatedSize := len(record.Key)*2 + len(record.Value) + 32
+	bitmapSize := (builder.recordCount / 8) + 1
+	reserved := 12 + (builder.recordCount/builder.restartInterval+1)*4 + bitmapSize
 	if len(builder.data)+estimatedSize+reserved > cap(builder.data) && builder.recordCount > 0 {
 		return false
 	}
+
+	// append timestamp
 	keyOffset := uint32(len(builder.data))
 	builder.data = AppendUvarint128ToSlice2(builder.data, record.Timestamp)
+
+	// set tombstone bit if record has tombstone true
 	if record.Tombstone {
-		builder.data = append(builder.data, 1)
-	} else {
-		builder.data = append(builder.data, 0)
+		builder.tombstoneBits.Set(builder.recordCount)
 	}
+
+	// append encoded key
+	builder.valueEncoder.AddToDict(record.Value)
 	builder.data = builder.encoder.Encode(record.Key, keyOffset, builder.data)
-	builder.data = utils.AppendUvarint(builder.data, uint64(len(record.Value)))
-	builder.data = append(builder.data, record.Value...)
+
+	// encode value process
+	// try to encode value and if value is encoded set corresponding bit to 1
+	encodedValue := builder.valueEncoder.Encode(record.Value)
+	isEncoded := encodedValue[0]
+	if isEncoded == 1 {
+		builder.isEncodedBits.Set(builder.recordCount)
+	}
+
+	// check value len and append it
+	valueLen := len(encodedValue) - 1 // -1 for flag whether the value is encoded or not
+	builder.data = utils.AppendUvarint(builder.data, uint64(valueLen))
+
+	// append value (could be encoded, but it doesn't need to be)
+	builder.data = append(builder.data, encodedValue[1:]...)
 	builder.recordCount++
 	return true
 }
@@ -116,10 +164,14 @@ func (builder *DataBlockBuilder) Finish(blockSize int) ([]byte, error) {
 	data := builder.data
 	restarts := builder.encoder.RestartArray()
 	restartCount := uint32(len(restarts))
+	bitmapData := builder.tombstoneBits.Encode()
+	bitmapSize := uint16(len(bitmapData))
+	isEncodedData := builder.isEncodedBits.Encode()
+	isEncodedSize := uint16(len(isEncodedData))
 	block := make([]byte, blockSize)
 	pos := 0
 	// check if everything fits into the block
-	if len(data)+int(restartCount)*4+4+4+4 > blockSize {
+	if len(data)+int(restartCount)*4+4+4+4+int(isEncodedSize)+int(bitmapSize)+4 > blockSize {
 		return nil, errors.New("data for block too large")
 	}
 	// copy encoded data
@@ -130,15 +182,28 @@ func (builder *DataBlockBuilder) Finish(blockSize int) ([]byte, error) {
 		binary.LittleEndian.PutUint32(block[pos:], restart)
 		pos += 4
 	}
+	crcPos := blockSize - 4
+	bitmapSizePos := crcPos - 2
+	bitmapPos := bitmapSizePos - int(bitmapSize)
+	isEncodedSizePos := bitmapPos - 2
+	isEncodedPos := isEncodedSizePos - int(isEncodedSize)
+	restartCountPos := isEncodedPos - 4
+	dataSizePos := restartCountPos - 4
 	// append data size
-	binary.LittleEndian.PutUint32(block[blockSize-12:], uint32(len(data)))
-	pos += 4
+	binary.LittleEndian.PutUint32(block[dataSizePos:], uint32(len(data)))
 	// append restart count
-	binary.LittleEndian.PutUint32(block[blockSize-8:], restartCount)
-	pos += 4
+	binary.LittleEndian.PutUint32(block[restartCountPos:], restartCount)
+	// append isencoded bitmap
+	copy(block[isEncodedPos:], isEncodedData)
+	// append isencoded bitmap size
+	binary.LittleEndian.PutUint16(block[isEncodedSizePos:], isEncodedSize)
+	// append tombstone bitmap
+	copy(block[bitmapPos:], bitmapData)
+	// append bitmap size
+	binary.LittleEndian.PutUint16(block[bitmapSizePos:], bitmapSize)
 	// append CRC
-	crc := crc32.ChecksumIEEE(block[:blockSize-4])
-	binary.LittleEndian.PutUint32(block[blockSize-4:], crc)
+	crc := crc32.ChecksumIEEE(block[:crcPos])
+	binary.LittleEndian.PutUint32(block[crcPos:], crc)
 	return block, nil
 }
 
@@ -149,6 +214,7 @@ func (builder *DataBlockBuilder) Reset() {
 	builder.encoder.Reset()
 	builder.recordCount = 0
 	builder.firstKey = nil
+	builder.tombstoneBits = NewBitSet(0)
 }
 
 func (builder *DataBlockBuilder) FirstKey() []byte {
@@ -161,29 +227,45 @@ func (builder *DataBlockBuilder) RecordCount() int {
 
 // DATA BLOCK READER READS AND DECODES RECORDS FROM A SINGLE DATA BLOCK
 type DataBlockReader struct {
-	data         []byte           // actual data in block
-	decoder      encoders.Encoder // delta encoder
-	restartArray []uint32         // restart points for binary search
-	pos          int              // current read position
-	dataSize     int              // size of the actual data
+	data          []byte           // actual data in block
+	decoder       encoders.Encoder // delta encoder
+	valueDecoder  *encoders.AdaptiveEncoder
+	restartArray  []uint32 // restart points for binary search
+	pos           int      // current read position
+	dataSize      int      // size of the actual data
+	tombstoneBits *BitSet
+	isEncodedBits *BitSet
+	recordIdx     int
 }
 
 // VERIFIES CRC AND INITIALIZES A BLOCK READER FOR GIVEN BLOCK
 
-func NewDataBlockReader(block []byte, restartInterval int, encodingType byte) (*DataBlockReader, error) {
+func NewDataBlockReader(block []byte, restartInterval int, encodingType byte, valueDecoder *encoders.AdaptiveEncoder) (*DataBlockReader, error) {
 	if len(block) < 12 {
 		return nil, errors.New("block too small")
 	}
 
+	//calculate positions
+	blockSize := len(block)
+	crcPos := blockSize - 4
+	bitmapSizePos := blockSize - 6
+
 	// verify CRC
-	expectedCRC := binary.LittleEndian.Uint32(block[len(block)-4:])
-	actualCRC := crc32.ChecksumIEEE(block[:len(block)-4])
+	expectedCRC := binary.LittleEndian.Uint32(block[crcPos:])
+	actualCRC := crc32.ChecksumIEEE(block[:crcPos])
 	if expectedCRC != actualCRC {
 		return nil, errors.New("CRC mismatch")
 	}
 
-	dataSize := binary.LittleEndian.Uint32(block[len(block)-12 : len(block)-8])
-	restartCount := binary.LittleEndian.Uint32(block[len(block)-8 : len(block)-4])
+	bitmapSize := binary.LittleEndian.Uint16(block[bitmapSizePos : bitmapSizePos+2])
+	bitmapPos := bitmapSizePos - int(bitmapSize)
+	isEncodedSizePos := bitmapPos - 2
+	isEncodedSize := binary.LittleEndian.Uint16(block[isEncodedSizePos : isEncodedSizePos+2])
+	isEncodedBitmapPos := isEncodedSizePos - int(isEncodedSize)
+	restartCountPos := isEncodedBitmapPos - 4
+	dataSizePos := restartCountPos - 4
+	dataSize := binary.LittleEndian.Uint32(block[dataSizePos : dataSizePos+4])
+	restartCount := binary.LittleEndian.Uint32(block[restartCountPos : restartCountPos+4])
 
 	restartArray := make([]uint32, restartCount)
 	for i := 0; i < int(restartCount); i++ {
@@ -191,12 +273,32 @@ func NewDataBlockReader(block []byte, restartInterval int, encodingType byte) (*
 		restartArray[i] = binary.LittleEndian.Uint32(block[offset : offset+4])
 	}
 
+	var tombstoneBits *BitSet
+	if bitmapSize > 0 {
+		bitmapPos := crcPos - 2 - int(bitmapSize)
+		bitmapData := block[bitmapPos:crcPos]
+		tombstoneBits = DecodeBitSet(bitmapData)
+	} else {
+		tombstoneBits = NewBitSet(0)
+	}
+
+	var isEncodedBits *BitSet
+	if isEncodedSize > 0 {
+		bitMapData := block[isEncodedBitmapPos : isEncodedBitmapPos+int(isEncodedSize)]
+		isEncodedBits = DecodeBitSet(bitMapData)
+	} else {
+		isEncodedBits = NewBitSet(0)
+	}
 	return &DataBlockReader{
-		data:         block[:dataSize],
-		decoder:      encoders.NewEncoder(encodingType, restartInterval),
-		restartArray: restartArray,
-		pos:          0,
-		dataSize:     int(dataSize),
+		data:          block[:dataSize],
+		decoder:       encoders.NewEncoder(encodingType, restartInterval),
+		valueDecoder:  valueDecoder,
+		restartArray:  restartArray,
+		pos:           0,
+		dataSize:      int(dataSize),
+		tombstoneBits: tombstoneBits,
+		isEncodedBits: isEncodedBits,
+		recordIdx:     0,
 	}, nil
 }
 
@@ -229,8 +331,7 @@ func (r *DataBlockReader) ReadRecord() (*Record, error) {
 		return nil, errors.New("unexpected end")
 	}
 	// read tombstone
-	tombstone := r.data[r.pos] == 1
-	r.pos++
+	tombstone := r.tombstoneBits.Get(r.recordIdx)
 	// read key
 	key, err := r.decoder.Decode(r.data, &r.pos)
 	if err != nil {
@@ -246,8 +347,23 @@ func (r *DataBlockReader) ReadRecord() (*Record, error) {
 		return nil, errors.New("value exceeds block bounds")
 	}
 	// read value
-	value := append([]byte(nil), r.data[r.pos:r.pos+int(valLen)]...)
+	isEncoded := r.isEncodedBits.Get(r.recordIdx)
+	rawValue := r.data[r.pos : r.pos+int(valLen)]
 	r.pos += int(valLen)
+	var value []byte
+	if isEncoded {
+		encoded := make([]byte, 0, valLen+1)
+		encoded = append(encoded, 1)
+		encoded = append(encoded, rawValue...)
+		var err error
+		value, err = r.valueDecoder.Decode(encoded)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		value = append([]byte(nil), rawValue...)
+	}
+	r.recordIdx++
 	return &Record{
 		Timestamp: timestamp,
 		Tombstone: tombstone,
@@ -291,8 +407,8 @@ type DataBlockIteratorRaw struct {
 }
 
 // NewDataBlockIteratorRaw creates a new raw iterator for a single block
-func NewDataBlockIteratorRaw(block []byte, restartInterval int, encodingType byte) (*DataBlockIteratorRaw, error) {
-	reader, err := NewDataBlockReader(block, restartInterval, encodingType)
+func NewDataBlockIteratorRaw(block []byte, restartInterval int, encodingType byte, valueDecoder *encoders.AdaptiveEncoder) (*DataBlockIteratorRaw, error) {
+	reader, err := NewDataBlockReader(block, restartInterval, encodingType, valueDecoder)
 	if err != nil {
 		return nil, err
 	}
@@ -362,6 +478,7 @@ func (it *DataBlockIteratorRaw) Seek(target Record) {
 		it.valid = false
 		return
 	}
+	it.reader.recordIdx = best * it.reader.decoder.RestartInterval()
 	for it.reader.HasNext() {
 		rec, err := it.reader.ReadRecord()
 		if err != nil {
@@ -423,7 +540,9 @@ func (it *DataBlockIteratorRaw) Prev() {
 }
 
 // Key and Value return current record
-func (it *DataBlockIteratorRaw) Key() Record { return *it.current }
+func (it *DataBlockIteratorRaw) Key() Record {
+	return *it.current
+}
 
 func (it *DataBlockIteratorRaw) Value() Record { return *it.current }
 
@@ -454,8 +573,8 @@ type DataBlockIterator struct {
 	valid       bool
 }
 
-func NewDataBlockIterator(block []byte, restartInterval int, encodingType byte) (*DataBlockIterator, error) {
-	raw, err := NewDataBlockIteratorRaw(block, restartInterval, encodingType)
+func NewDataBlockIterator(block []byte, restartInterval int, encodingType byte, valueDecoder *encoders.AdaptiveEncoder) (*DataBlockIterator, error) {
+	raw, err := NewDataBlockIteratorRaw(block, restartInterval, encodingType, valueDecoder)
 	if err != nil {
 		return nil, err
 	}
@@ -588,7 +707,7 @@ func NewMergeIteratorRaw(iters []*DataBlockIteratorRaw, mergeStructure byte) *Me
 
 func (m *MergeIteratorRaw) Valid() bool { return m.valid }
 
-// SeekToFirst moves the iterator on the record with the smallest key out of all data blocks (single data block iterators positioned on first record)
+// SeekToFirst moves the iterator on the record with smallest key out of all data blocks (single data block iterators positioned on first record)
 func (m *MergeIteratorRaw) SeekToFirst() {
 	for _, it := range m.structure.Iterators() {
 		it.SeekToFirst()

@@ -132,12 +132,13 @@ func (s *SingleFileStorage) File() *os.File {
 type MultiFileSegmentExtensions string
 
 const (
-	DataSegmentExtension     MultiFileSegmentExtensions = ".data"
-	IndexSegmentExtension    MultiFileSegmentExtensions = ".index"
-	FilterSegmentExtension   MultiFileSegmentExtensions = ".filter"
-	SummarySegmentExtension  MultiFileSegmentExtensions = ".summary"
-	MetadataSegmentExtension MultiFileSegmentExtensions = ".metadata"
-	FooterSegmentExtension   MultiFileSegmentExtensions = ".footer"
+	DataSegmentExtension       MultiFileSegmentExtensions = ".data"
+	IndexSegmentExtension      MultiFileSegmentExtensions = ".index"
+	FilterSegmentExtension     MultiFileSegmentExtensions = ".filter"
+	SummarySegmentExtension    MultiFileSegmentExtensions = ".summary"
+	MetadataSegmentExtension   MultiFileSegmentExtensions = ".metadata"
+	FooterSegmentExtension     MultiFileSegmentExtensions = ".footer"
+	DictionarySegmentExtension MultiFileSegmentExtensions = ".dictionary"
 )
 
 // MultiFileStorage STORES EACH SSTABLE SEGMENT IN A SEPARATE FILE
@@ -159,6 +160,7 @@ func (m *MultiFileStorage) Delete() {
 		SummarySegmentExtension,
 		MetadataSegmentExtension,
 		FooterSegmentExtension,
+		DictionarySegmentExtension,
 	}
 	for _, ext := range extensions {
 		os.Remove(m.basePath + string(ext))
@@ -226,6 +228,8 @@ func (m *MultiFileStorage) getFilePath(segType enums.SegmentType) string {
 		return m.basePath + string(MetadataSegmentExtension)
 	case enums.SegmentFooter:
 		return m.basePath + string(FooterSegmentExtension)
+	case enums.SegmentDictionary:
+		return m.basePath + string(DictionarySegmentExtension)
 	default:
 		return m.basePath
 	}

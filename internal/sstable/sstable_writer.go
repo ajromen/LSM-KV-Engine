@@ -6,6 +6,7 @@ import (
 
 	"github.com/ajromen/LSM-KV-Engine/internal/block"
 	"github.com/ajromen/LSM-KV-Engine/internal/config"
+	"github.com/ajromen/LSM-KV-Engine/internal/encoders"
 	"github.com/ajromen/LSM-KV-Engine/internal/enums"
 	"github.com/ajromen/LSM-KV-Engine/internal/probabilistics"
 	"github.com/ajromen/LSM-KV-Engine/internal/utils"
@@ -22,6 +23,7 @@ type SSTableWriter struct {
 	dataBlockBuilder  *DataBlockBuilder    // data block builder for building data block from records being written into sstable
 	indexSegment      *IndexSegment        // index segment of sstable : references data blocks
 	currentIndexBlock *IndexBlock
+	valueEncoder      *encoders.AdaptiveEncoder
 	summarySegment    *SummarySegment // summary segment of sstable : references index blocks
 	filterSegment     *FilterSegment  // filter segment of sstable
 	merkleTree        *MerkleTree     // merkle tree of sstable
@@ -50,12 +52,14 @@ func NewSSTableWriter(filePath string, blockManager *block.BlockManager, cfg *co
 		filter := probabilistics.NewBloomFilterWithParams(uint(expectedElements), float64(cfg.ProbabilisticType.BloomFilter.FalsePositiveRate), nil)
 		filterSegment = NewFilterSegment(filter)
 	}
+	valueEncoder := encoders.NewAdaptiveDictEncoderFrequency(2, 5)
 	return &SSTableWriter{
 		storage:           storage,
 		blockManager:      blockManager,
 		config:            cfg.SSTable,
 		filePath:          filePath,
-		dataBlockBuilder:  NewDataBlockBuilder(1, cfg.SSTable.DataSegment.RestartInterval, blockManager.BlockSize()),
+		valueEncoder:      valueEncoder,
+		dataBlockBuilder:  NewDataBlockBuilder(1, cfg.SSTable.DataSegment.RestartInterval, blockManager.BlockSize(), valueEncoder),
 		indexSegment:      NewIndexSegment(uint64(blockManager.BlockSize())),
 		currentIndexBlock: NewIndexBlock(),
 		summarySegment:    NewSummarySegment(1),
@@ -279,6 +283,15 @@ func (sw *SSTableWriter) Finalize() error {
 	}
 
 	// step 8
+	dictData := sw.valueEncoder.SaveDict()
+	dictOffset, dictSize, err := sw.storage.WriteSegment(enums.SegmentDictionary, dictData)
+	if err != nil {
+		return err
+	}
+	sw.footer.DictionaryHandler = SegmentHandler{
+		Offset: dictOffset,
+		Size:   dictSize,
+	}
 	if err := sw.footer.WriteToStorage(sw.storage); err != nil {
 		return err
 	}
