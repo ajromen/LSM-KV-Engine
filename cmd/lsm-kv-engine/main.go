@@ -136,7 +136,3 @@ func handleClear(engine *core.Engine, parts []string) {
 	}
 	fmt.Println("ClearAll: OK")
 }
-
-func dataraw(engine *core.Engine) {
-	engine.DataRaw()
-}

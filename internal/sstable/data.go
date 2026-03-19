@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
-	"fmt"
 	"hash/crc32"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/data_structures"
@@ -349,12 +348,7 @@ func (r *DataBlockReader) ReadRecord() (*Record, error) {
 	}
 	// read value
 	isEncoded := r.isEncodedBits.Get(r.recordIdx)
-	fmt.Println("RecordIdx:", r.recordIdx)
-	fmt.Println("Bitmap byte:", r.isEncodedBits.bytes)
-	fmt.Println("Bit check:", r.isEncodedBits.Get(r.recordIdx))
-	fmt.Println("Is encoded: ", isEncoded)
 	rawValue := r.data[r.pos : r.pos+int(valLen)]
-	fmt.Println("Raw Value: ", rawValue)
 	r.pos += int(valLen)
 	var value []byte
 	if isEncoded {
@@ -362,9 +356,7 @@ func (r *DataBlockReader) ReadRecord() (*Record, error) {
 		encoded = append(encoded, 1)
 		encoded = append(encoded, rawValue...)
 		var err error
-		fmt.Println("What is sent for decode: ", encoded)
 		value, err = r.valueDecoder.Decode(encoded)
-		fmt.Println("What decode returned: ", value)
 		if err != nil {
 			return nil, err
 		}

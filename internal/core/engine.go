@@ -1,7 +1,6 @@
 package core
 
 import (
-	"fmt"
 	"os"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/cli"
@@ -69,45 +68,4 @@ func (engine *Engine) ClearAll() error {
 	//wal
 	print("TODO delete everything")
 	return nil
-}
-
-func (engine *Engine) DataRaw() {
-	files := []string{
-		"/home/ajromen/.local/share/lsm-kv-engine/000000.sst.data",
-		"/home/ajromen/.local/share/lsm-kv-engine/000001.sst.data",
-		"/home/ajromen/.local/share/lsm-kv-engine/000002.sst.data",
-		"/home/ajromen/.local/share/lsm-kv-engine/000003.sst.data",
-	}
-
-	for _, filePath := range files {
-		dataF, err := os.Open(filePath)
-		if err != nil {
-			fmt.Println("open error:", filePath, err)
-			continue
-		}
-
-		stats, err := dataF.Stat()
-		if err != nil {
-			fmt.Println("stat error:", filePath, err)
-			dataF.Close()
-			continue
-		}
-
-		buf := make([]byte, int(stats.Size()))
-
-		n, err := dataF.ReadAt(buf, 0)
-		if err != nil {
-			fmt.Println("read error:", filePath, err)
-			dataF.Close()
-			continue
-		}
-
-		buf = buf[:n]
-
-		fmt.Println("File:", filePath)
-		fmt.Println("Data bytes:", buf)
-		fmt.Println("-----")
-
-		dataF.Close()
-	}
 }
