@@ -69,3 +69,7 @@ func (de *DeltaEncoderInt) WriteRestartArray(buf []byte) []byte {
 func (de *DeltaEncoderInt) RestartArray() []uint32 {
 	return de.restartArray
 }
+
+func (de *DeltaEncoderInt) RestartInterval() int {
+	return de.restartInterval
+}

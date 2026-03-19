@@ -3,12 +3,13 @@ package enums
 type SegmentType int
 
 const (
-	SegmentData     SegmentType = 0
-	SegmentFilter   SegmentType = 1
-	SegmentIndex    SegmentType = 2
-	SegmentSummary  SegmentType = 3
-	SegmentMetadata SegmentType = 4
-	SegmentFooter   SegmentType = 5
+	SegmentData       SegmentType = 0
+	SegmentFilter     SegmentType = 1
+	SegmentIndex      SegmentType = 2
+	SegmentSummary    SegmentType = 3
+	SegmentMetadata   SegmentType = 4
+	SegmentFooter     SegmentType = 5
+	SegmentDictionary SegmentType = 6
 )
 
 type SSTableCompression byte
