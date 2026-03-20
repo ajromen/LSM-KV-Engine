@@ -30,6 +30,13 @@ const (
 	KEY_START        = VALUE_SIZE_START + VALUE_SIZE_SIZE
 )
 
+type record struct {
+	timestamp uint64
+	tombstone bool
+	key       []byte
+	value     []byte
+}
+
 func CRC32(data []byte) uint32 {
 	return crc32.ChecksumIEEE(data)
 }
