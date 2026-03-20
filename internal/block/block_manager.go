@@ -1,6 +1,7 @@
 package block
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -25,7 +26,7 @@ func NewBlockManager(blockSize, maxLRUSize int) *BlockManager {
 	}
 }
 
-// Getter (WAL needs to validate cfg.BlockSize == bm.BlockSize())
+// BlockSize Getter (WAL needs to validate cfg.BlockSize == bm.BlockSize())
 func (bm *BlockManager) BlockSize() int {
 	return bm.blockSize
 }
@@ -148,4 +149,65 @@ func (bm *BlockManager) EnsureSize(path string, sizeBytes int64) error {
 	}
 	// Truncate file
 	return f.Truncate(sizeBytes)
+}
+
+// WriteNoBlock used for specific parts of database
+func WriteNoBlock(f *os.File, offset uint64, data []byte) error {
+	_, err := f.Seek(int64(offset), io.SeekStart)
+	if err != nil {
+		return err
+	}
+	_, err = f.Write(data)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func ReadNoBlock(f *os.File, offset uint64, size uint32) ([]byte, error) {
+	data := make([]byte, size)
+	if _, err := f.ReadAt(data, int64(offset)); err != nil {
+		return nil, err
+	}
+	return data, nil
+}
+
+func ReadJSON(filePath string, obj any) error {
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return err
+	}
+
+	if err := json.Unmarshal(data, obj); err != nil {
+		return err
+	}
+	return nil
+}
+
+func WriteJSON(filePath string, obj any) error {
+	data, err := json.MarshalIndent(obj, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	if err := os.WriteFile(filePath, data, 0644); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func EnsureDir(path string) error {
+	if err := os.MkdirAll(path, 0755); err != nil {
+		return err
+	}
+	return nil
+}
+
+func DeleteFile(path string) error {
+	err := os.Remove(path)
+	if err != nil {
+		return err
+	}
+	return nil
 }

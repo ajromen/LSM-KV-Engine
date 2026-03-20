@@ -1,8 +1,10 @@
 package sstable
 
+import "github.com/ajromen/LSM-KV-Engine/internal/utils"
+
 type Record struct {
-	Key       string
-	Value     []byte
+	Timestamp utils.Uint128
 	Tombstone bool
-	Type      string
+	Key       []byte
+	Value     []byte
 }

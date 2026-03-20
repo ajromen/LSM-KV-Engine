@@ -1,5 +1,9 @@
 package config
 
+import (
+	"github.com/ajromen/LSM-KV-Engine/internal/enums"
+)
+
 type Config struct {
 	WAL               WALConfig               `json:"wal"`
 	Memtable          MemtableConfig          `json:"memtable"`
@@ -11,6 +15,7 @@ type Config struct {
 	Backup            BackupConfig            `json:"backup"`
 	ProbabilisticType ProbabilisticTypeConfig `json:"probabilistic_type"`
 	SkipList          SkipListConfig          `json:"skiplist"`
+	SavePath          string                  `json:"save_path"`
 }
 
 type WALConfig struct {
@@ -26,20 +31,36 @@ type WALConfig struct {
 }
 
 type MemtableConfig struct {
-	MemtableMaxSize int    `json:"memtable_max_size"`
-	MemtableType    string `json:"memtable_type"`
-	MemtableSizeKB  int    `json:"memtable_size_kb"`
-	Instances       int    `json:"instances"`
+	MemtableMaxEntries   int                `json:"memtable_max_size"`
+	MemtableMaxSizeBytes uint64             `json:"memtable_max_size_bytes"`
+	MemtableType         enums.MemTableType `json:"memtable_type"`
+	Instances            int                `json:"instances"`
+	SkipListConfig       SkipListConfig     `json:"skiplist_config"`
+	BTreeConfig          BTreeConfig        `json:"btree_config"`
 }
 
 type SSTableConfig struct {
-	// Ovo treba imati Index/Filter/Summary/Metadata... samo ne znam jos nista o tome
-	SSTableDataBlockSize int `json:"data_block_size"`
+	Format       enums.SSTableFormat `json:"format"`
+	DataSegment  DataSegmentConfig   `json:"data_segment"`
+	IndexSegment IndexSegmentConfig  `json:"index_segment"`
+}
+
+type DataSegmentConfig struct {
+	BlockSize           int                      `json:"block_size"`
+	RestartInterval     int                      `json:"restart_interval"`
+	Compression         enums.SSTableCompression `json:"compression"`
+	MinBlockUtilization float64                  `json:"min_block_utilization"`
+}
+
+type IndexSegmentConfig struct {
+	IndexBlockSize int `json:"index_block_size"`
+	MaxCache       int `json:"max_cache_size"`
 }
 
 type LSMTreeConfig struct {
-	// Ovde ce jos trebati sa Compaction raditi
-	LSMTreeMaxLevels int `json:"lsmtree_max_levels"`
+	MinMergeThreshold   int                 `json:"min_merge_threshold"`
+	LevelSizeMultiplier int                 `json:"level_size_multiplier"`
+	CompactionAlgorithm enums.LSMCompaction `json:"compaction_algorithm"`
 }
 
 type BlockManagerConfig struct {
@@ -96,4 +117,8 @@ type TTLConfig struct {
 
 type SkipListConfig struct {
 	MaxLevel int `json:"max_level"`
+}
+
+type BTreeConfig struct {
+	MinimumDegree int `json:"minimum_degree"`
 }

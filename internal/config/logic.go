@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/cli"
+	"github.com/ajromen/LSM-KV-Engine/internal/enums"
 )
 
 func LoadConfig(flags *cli.FLags) (*Config, error) {
@@ -36,51 +38,83 @@ func LoadConfig(flags *cli.FLags) (*Config, error) {
 func (c *Config) applyFlags(flags *cli.FLags) error {
 	// Memtable
 	if flags.MemtableMaxSize != nil {
-		c.Memtable.MemtableMaxSize = *flags.MemtableMaxSize
+		c.Memtable.MemtableMaxEntries = *flags.MemtableMaxSize
 	}
 	if flags.MemtableMaxSizeKb != nil {
-		c.Memtable.MemtableSizeKB = *flags.MemtableMaxSizeKb
+		c.Memtable.MemtableMaxSizeBytes = *flags.MemtableMaxSizeKb
 	}
 	if flags.MemtableType != nil {
-		c.Memtable.MemtableType = *flags.MemtableType
+		memType := strings.TrimSpace(*flags.MemtableType)
+		memType = strings.ToLower(memType)
+		var memtableType enums.MemTableType
+
+		switch memType {
+		case "hashmap":
+			memtableType = enums.HashMapMemTable
+		case "skiplist":
+			memtableType = enums.SkiplistMemTable
+		case "btree":
+			memtableType = enums.BTreeMemTable
+		case "rbtree":
+			memtableType = enums.RBTreeMemTable
+		case "avltree":
+			memtableType = enums.AVLTreeMemTable
+		default:
+			return fmt.Errorf("invalid memtable type: %s", memType)
+		}
+		c.Memtable.MemtableType = memtableType
+	}
+	if flags.Instances != nil {
+		c.Memtable.Instances = *flags.Instances
+	}
+	if flags.SSTableFormat != nil {
+		format := strings.TrimSpace(*flags.SSTableFormat)
+		format = strings.ToLower(format)
+		switch format {
+		case "single-file":
+			c.SSTable.Format = enums.FormatSingleFile
+		case "multi-file":
+			c.SSTable.Format = enums.FormatMultiFile
+		default:
+			return fmt.Errorf("invalid sstable format: %s", format)
+		}
 	}
 
 	// Block cache
 	if flags.BlockCacheMaxBlocks != nil {
 		c.BlockManager.BlockCacheMaxBlocks = *flags.BlockCacheMaxBlocks
 	}
-
-	// BlockSize applies to WAL bcs they should match (??)
-	if flags.BlockSize != nil {
-		c.BlockManager.BlockSize = *flags.BlockSize
-		c.WAL.BlockSize = *flags.BlockSize
+	if flags.LSMCompactionAlgorithm != nil {
+		algo := strings.TrimSpace(*flags.LSMCompactionAlgorithm)
+		algo = strings.ToLower(algo)
+		var algorithm enums.LSMCompaction
+		switch algo {
+		case "size-tiered":
+			algorithm = enums.SizeTieredCompaction
+		case "leveled":
+			algorithm = enums.LeveledCompaction
+		default:
+			return fmt.Errorf("unknown LSM compaction algorithm: %s", algo)
+		}
+		c.LSMTree.CompactionAlgorithm = algorithm
 	}
-
-	// WAL overrides
-	if flags.WALSegmentSize != nil {
-		c.WAL.SegmentSize = *flags.WALSegmentSize
-	}
-	if flags.WALSyncInterval != nil {
-		c.WAL.SyncInterval = *flags.WALSyncInterval
-	}
-	if flags.WALMaxSegments != nil {
-		c.WAL.MaxSegments = *flags.WALMaxSegments
-	}
-
 	return nil
 }
 
 func (c *Config) validateFields() error {
-	// Memtable validation
-	if c.Memtable.MemtableMaxSize <= 0 &&
-		c.Memtable.MemtableSizeKB <= 0 {
-		return fmt.Errorf("memtable size must be positive")
+
+	if c.Memtable.MemtableMaxEntries <= 0 {
+		return fmt.Errorf("memtable size entries must be positive")
+	}
+	if c.Memtable.MemtableMaxSizeBytes <= 0 {
+		return fmt.Errorf("memtable size bytes must be positive")
+	}
+	if c.Memtable.Instances <= 0 {
+		return fmt.Errorf("instances must be positive")
 	}
 
-	if c.Memtable.MemtableType != "hashmap" &&
-		c.Memtable.MemtableType != "skiplist" &&
-		c.Memtable.MemtableType != "btree" {
-		return fmt.Errorf("invalid memtable type")
+	if c.SSTable.Format != enums.FormatSingleFile && c.SSTable.Format != enums.FormatMultiFile {
+		return fmt.Errorf("invalid sstable format")
 	}
 
 	// BlockManager validation
@@ -96,30 +130,11 @@ func (c *Config) validateFields() error {
 		return fmt.Errorf("invalid blockcache_max_blocks must be positive")
 	}
 
-	// WAL validation
-	if c.WAL.BlockSize <= 0 {
-		return fmt.Errorf("wal.block_size must be positive")
-	}
-	if c.WAL.SegmentSize <= 0 {
-		return fmt.Errorf("wal.segment_size must be positive")
-	}
-	if c.WAL.SegmentSize < c.WAL.BlockSize {
-		return fmt.Errorf("wal.segment_size (%d) must be >= wal.block_size (%d)", c.WAL.SegmentSize, c.WAL.BlockSize)
-	}
-	if c.WAL.SyncInterval < 0 {
-		return fmt.Errorf("wal.sync_interval cannot be negative")
-	}
-	if c.WAL.MaxSegments < 0 {
-		return fmt.Errorf("wal.max_segments cannot be negative")
+	if !fileExists(c.SavePath) {
+		return fmt.Errorf("save path does not exist")
 	}
 
-	// WAL BlockManager compatibility
-	if c.WAL.BlockSize != c.BlockManager.BlockSize {
-		return fmt.Errorf("wal.block_size (%d) must match blockmanager.block_size (%d)",
-			c.WAL.BlockSize, c.BlockManager.BlockSize)
-	}
-
-	// TODO: druge funkcionalnosti
+	// TODO continue validation
 	return nil
 }
 
@@ -137,4 +152,30 @@ func (c *Config) loadFromFile(path string) error {
 		return fmt.Errorf("invalid config format: %w", err)
 	}
 	return nil
+}
+
+//func (c *SSTableConfig) SegmentPaths(basePath string) map[enums.SegmentType]string {
+//	paths := make(map[enums.SegmentType]string)
+//	if c.Format == enums.FormatSingleFile {
+//		for _, segType := range []enums.SegmentType{
+//			enums.SegmentData, enums.SegmentFilter, enums.SegmentIndex,
+//			enums.SegmentSummary, enums.SegmentMetadata, enums.SegmentFooter,
+//		} {
+//			paths[segType] = basePath
+//		}
+//	} else {
+//		// Each segment has its own file
+//		paths[enums.SegmentData] = basePath + string(sstable.DataSegmentExtension)
+//		paths[enums.SegmentFilter] = basePath + string(sstable.FilterSegmentExtension)
+//		paths[enums.SegmentIndex] = basePath + string(sstable.IndexSegmentExtension)
+//		paths[enums.SegmentSummary] = basePath + string(sstable.SummarySegmentExtension)
+//		paths[enums.SegmentMetadata] = basePath + string(sstable.MetadataSegmentExtension)
+//		paths[enums.SegmentFooter] = basePath + string(sstable.FooterSegmentExtension)
+//	}
+//	return paths
+//}
+
+func fileExists(filename string) bool {
+	_, err := os.Stat(filename)
+	return err == nil
 }

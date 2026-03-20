@@ -1,42 +1,50 @@
 package memtable
 
+import "github.com/ajromen/LSM-KV-Engine/internal/iterator"
+
 type MemtableEntry struct {
-	Key       string
+	Key       []byte
 	Value     []byte
+	Timestamp uint64
 	Tombstone bool
 }
 
-type Memtable interface {
-	Put(key string, value []byte)
-	Get(key string) (MemtableEntry, bool)
-	Delete(key string)
-	Flush() bool
+func (m MemtableEntry) HashKey() string {
+	return string(m.Key)
+}
+
+type MemtableStore interface {
+	Insert(entry MemtableEntry)
+	Search(entry MemtableEntry) *MemtableEntry
+	EntriesInOrder() []MemtableEntry
 	Reset()
-	FlushEntries() []MemtableEntry
-	ReadEntriesNoFlushing() []MemtableEntry
+	Size() int
+	Visualize(func(MemtableEntry) string) string
+	RawIterator() iterator.Iterator[MemtableEntry]
+	Iterator() iterator.Iterator[MemtableEntry]
 }
 
-type HashMapMemtable struct {
-	memtableData map[string]MemtableEntry
-	maxSize      int
-	flushHandler func([]MemtableEntry)
+type Memtable interface {
+	Put(key []byte, value []byte, timeStamp uint64, tombstone bool)
+	Get(key []byte) ([]byte, bool)
+	Delete(key []byte, timeStamp uint64)
+	ShouldFlush() bool
+	Reset()
+	Flush() []MemtableEntry
+	ReadEntries() []MemtableEntry
+	NumEntries() int
+	SizeBytes() uint64
+	Visualize() string
+	RawIterator() iterator.Iterator[MemtableEntry]
+	Iterator() iterator.Iterator[MemtableEntry]
 }
 
-type BTreeMemtable struct {
-	memtableData *BTree
-	maxSize      int
-	flushHandler func([]MemtableEntry)
-}
+type GenericMemtable struct {
+	store         MemtableStore
+	numEntries    int
+	sizeBytes     uint64
+	maxNumEntries int
+	maxSizeBytes  uint64
 
-type SkipListMemtable struct {
-	memtableData *SkipList
-	maxSize      int
-	flushHandler func([]MemtableEntry)
-}
-
-type Memtables struct {
-	activeIndex  int
-	maxTables    int
-	tables       []Memtable
 	flushHandler func([]MemtableEntry)
 }
