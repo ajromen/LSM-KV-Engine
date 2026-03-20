@@ -30,11 +30,11 @@ const (
 	KEY_START        = VALUE_SIZE_START + VALUE_SIZE_SIZE
 )
 
-type record struct {
-	timestamp uint64
-	tombstone bool
-	key       []byte
-	value     []byte
+type Record struct {
+	Timestamp uint64
+	Tombstone bool
+	Key       []byte
+	Value     []byte
 }
 
 func CRC32(data []byte) uint32 {
