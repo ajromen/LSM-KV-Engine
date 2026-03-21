@@ -95,3 +95,11 @@ func (s *SimHash) SetFingerprintHex(fpHex string) error {
 	s.hasFingerprint = true
 	return nil
 }
+
+func (s *SimHash) Clear() {
+	if s == nil {
+		return
+	}
+	s.fingerprint = 0
+	s.hasFingerprint = false
+}
