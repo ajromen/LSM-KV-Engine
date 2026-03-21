@@ -281,3 +281,44 @@ func TestToBytesFromBytes_RoundTripWithFingerprint(t *testing.T) {
 		t.Fatal("seed mismatch after roundtrip")
 	}
 }
+
+func TestFromBytes_InvalidMagic(t *testing.T) {
+	var s SimHash
+	if err := s.FromBytes([]byte("BAD!")); err == nil {
+		t.Fatal("expected error for invalid magic")
+	}
+}
+
+func TestClear(t *testing.T) {
+	s := NewSimHashWithSeed(seedOf(0x99, 32))
+	s.HashText("some text")
+	if _, ok := s.Fingerprint(); !ok {
+		t.Fatal("expected fingerprint before Clear")
+	}
+
+	s.Clear()
+	if fp, ok := s.Fingerprint(); ok || fp != 0 {
+		t.Fatalf("expected cleared fingerprint, got=%d ok=%v", fp, ok)
+	}
+}
+
+func TestIsSimHashBytes(t *testing.T) {
+	if IsSimHashBytes(nil) {
+		t.Fatal("nil should not be simhash bytes")
+	}
+	if IsSimHashBytes([]byte("SMH")) {
+		t.Fatal("short bytes should not be simhash bytes")
+	}
+	if IsSimHashBytes([]byte("XXXX")) {
+		t.Fatal("wrong magic should not be simhash bytes")
+	}
+
+	s := NewSimHashWithSeed(seedOf(0xAA, 32))
+	b, err := s.ToBytes()
+	if err != nil {
+		t.Fatalf("ToBytes failed: %v", err)
+	}
+	if !IsSimHashBytes(b) {
+		t.Fatal("expected true for valid serialized simhash")
+	}
+}
