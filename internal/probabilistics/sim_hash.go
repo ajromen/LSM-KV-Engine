@@ -26,20 +26,24 @@ const (
 	SimHashBits = 64
 )
 
+// SimHash čuva seed hash funkcije i poslednji izračunat fingerprint.
 type SimHash struct {
 	hashFn         HashWithSeed
 	fingerprint    uint64
 	hasFingerprint bool
 }
 
+// NewSimHash pravi novu instancu na osnovu konfiguracije.
 func NewSimHash(cfg config.SimHashConfig) *SimHash {
 	return NewSimHashWithParams(cfg, nil)
 }
 
+// NewSimHashWithSeed pomoćni konstruktor kada želiš eksplicitno da zadaš seed.
 func NewSimHashWithSeed(seed []byte) *SimHash {
 	return NewSimHashWithParams(config.SimHashConfig{Enabled: true}, seed)
 }
 
+// NewSimHashWithParams pomoćni konstruktor.
 func NewSimHashWithParams(cfg config.SimHashConfig, seed []byte) *SimHash {
 	_ = cfg
 
@@ -54,10 +58,12 @@ func NewSimHashWithParams(cfg config.SimHashConfig, seed []byte) *SimHash {
 	}
 }
 
+// IsSimHashBytes proverava da li niz bajtova izgleda kao SimHash stanje.
 func IsSimHashBytes(data []byte) bool {
 	return len(data) >= 4 && string(data[:4]) == simHashMagic
 }
 
+// Seed vraća kopiju seed-a.
 func (s *SimHash) Seed() []byte {
 	if s == nil {
 		return nil
@@ -67,6 +73,7 @@ func (s *SimHash) Seed() []byte {
 	return out
 }
 
+// Fingerprint vraća trenutni fingerprint i da li postoji.
 func (s *SimHash) Fingerprint() (uint64, bool) {
 	if s == nil {
 		return 0, false
@@ -74,6 +81,7 @@ func (s *SimHash) Fingerprint() (uint64, bool) {
 	return s.fingerprint, s.hasFingerprint
 }
 
+// FingerprintHex vraća fingerprint kao 16-hex string.
 func (s *SimHash) FingerprintHex() (string, bool) {
 	fp, ok := s.Fingerprint()
 	if !ok {
@@ -84,6 +92,7 @@ func (s *SimHash) FingerprintHex() (string, bool) {
 	return hex.EncodeToString(buf), true
 }
 
+// SetFingerprint direktno postavlja fingerprint.
 func (s *SimHash) SetFingerprint(fp uint64) {
 	if s == nil {
 		return
@@ -92,6 +101,7 @@ func (s *SimHash) SetFingerprint(fp uint64) {
 	s.hasFingerprint = true
 }
 
+// SetFingerprintHex postavlja fingerprint iz 16-hex stringa.
 func (s *SimHash) SetFingerprintHex(fpHex string) error {
 	if s == nil {
 		return errors.New("nil simhash")
@@ -105,6 +115,7 @@ func (s *SimHash) SetFingerprintHex(fpHex string) error {
 	return nil
 }
 
+// Clear briše sačuvani fingerprint, ali ostavlja seed.
 func (s *SimHash) Clear() {
 	if s == nil {
 		return
@@ -113,6 +124,7 @@ func (s *SimHash) Clear() {
 	s.hasFingerprint = false
 }
 
+// HashText izračuna fingerprint za prosleđeni tekst i sačuva ga u instanci.
 func (s *SimHash) HashText(text string) uint64 {
 	if s == nil {
 		return 0
@@ -123,10 +135,12 @@ func (s *SimHash) HashText(text string) uint64 {
 	return fp
 }
 
+// HashBytes isto kao HashText za []byte.
 func (s *SimHash) HashBytes(data []byte) uint64 {
 	return s.HashText(string(data))
 }
 
+// DistanceTo računa Hemingovu udaljenost između dve SimHash instance.
 func (s *SimHash) DistanceTo(other *SimHash) (uint8, error) {
 	if s == nil || other == nil {
 		return 0, errors.New("nil simhash")
@@ -137,6 +151,7 @@ func (s *SimHash) DistanceTo(other *SimHash) (uint8, error) {
 	return HammingDistance64(s.fingerprint, other.fingerprint), nil
 }
 
+// DistanceToFingerprint računa udaljenost trenutnog fingerprint-a i prosleđenog.
 func (s *SimHash) DistanceToFingerprint(fp uint64) (uint8, error) {
 	if s == nil {
 		return 0, errors.New("nil simhash")
@@ -147,6 +162,7 @@ func (s *SimHash) DistanceToFingerprint(fp uint64) (uint8, error) {
 	return HammingDistance64(s.fingerprint, fp), nil
 }
 
+// DistanceToFingerprintHex računa udaljenost do fingerprint-a datog kao hex string.
 func (s *SimHash) DistanceToFingerprintHex(fpHex string) (uint8, error) {
 	fp, err := parseHexFingerprint(fpHex)
 	if err != nil {
@@ -155,15 +171,18 @@ func (s *SimHash) DistanceToFingerprintHex(fpHex string) (uint8, error) {
 	return s.DistanceToFingerprint(fp)
 }
 
+// ComputeSimHash je stateless helper.
 func ComputeSimHash(text string, seed []byte) uint64 {
 	s := NewSimHashWithSeed(seed)
 	return s.compute(text)
 }
 
+// HammingDistance64 vraća broj bitova koji se razlikuju između dva 64-bitna fingerprint-a.
 func HammingDistance64(a, b uint64) uint8 {
 	return uint8(bits.OnesCount64(a ^ b))
 }
 
+// HammingDistanceHex prima 2 heks stringa (16 hex karaktera) i računa udaljenost.
 func HammingDistanceHex(aHex, bHex string) (uint8, error) {
 	a, err := parseHexFingerprint(aHex)
 	if err != nil {
@@ -176,6 +195,7 @@ func HammingDistanceHex(aHex, bHex string) (uint8, error) {
 	return HammingDistance64(a, b), nil
 }
 
+// WriteTo serijalizuje SimHash u binarni format.
 func (s *SimHash) WriteTo(w io.Writer) (int64, error) {
 	if s == nil {
 		return 0, errors.New("nil simhash")
@@ -223,6 +243,7 @@ func (s *SimHash) WriteTo(w io.Writer) (int64, error) {
 	return written, nil
 }
 
+// ReadFrom deserijalizuje SimHash iz binarnog formata.
 func (s *SimHash) ReadFrom(r io.Reader) (int64, error) {
 	if s == nil {
 		return 0, errors.New("nil simhash")
@@ -279,6 +300,7 @@ func (s *SimHash) ReadFrom(r io.Reader) (int64, error) {
 	return read, nil
 }
 
+// ToBytes helper za serijalizaciju.
 func (s *SimHash) ToBytes() ([]byte, error) {
 	var buf bytes.Buffer
 	_, err := s.WriteTo(&buf)
@@ -288,11 +310,14 @@ func (s *SimHash) ToBytes() ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
+// FromBytes helper za deserijalizaciju.
 func (s *SimHash) FromBytes(data []byte) error {
 	_, err := s.ReadFrom(bytes.NewReader(data))
 	return err
 }
 
+// compute implementira 64-bitni SimHash.
+// Tokeni su lower-case reči/cifre; težina je frekvencija tokena u tekstu.
 func (s *SimHash) compute(text string) uint64 {
 	tokenFreq := tokenizeAndCount(text)
 	if len(tokenFreq) == 0 {
@@ -324,6 +349,7 @@ func (s *SimHash) compute(text string) uint64 {
 	return fp
 }
 
+// tokenizeAndCount deli tekst na tokene (slova/cifre), normalizuje na lower-case i broji frekvencije.
 func tokenizeAndCount(text string) map[string]uint32 {
 	freq := make(map[string]uint32)
 	if len(text) == 0 {
