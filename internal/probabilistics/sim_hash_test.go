@@ -192,3 +192,41 @@ func TestSetFingerprint_AndHexHelpers(t *testing.T) {
 		t.Fatalf("SetFingerprintHex mismatch: got=%x ok=%v", got2, ok)
 	}
 }
+
+func TestHammingDistance64_KnownValues(t *testing.T) {
+	// 1010 xor 0011 = 1001 -> 2 bita
+	var a uint64 = 0b1010
+	var b uint64 = 0b0011
+
+	d := HammingDistance64(a, b)
+	if d != 2 {
+		t.Fatalf("expected HammingDistance64=2, got=%d", d)
+	}
+}
+
+func TestHammingDistanceHex(t *testing.T) {
+	d, err := HammingDistanceHex("0000000000000000", "ffffffffffffffff")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if d != 64 {
+		t.Fatalf("expected distance=64, got=%d", d)
+	}
+
+	d2, err := HammingDistanceHex("0x000000000000000f", "0000000000000000")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if d2 != 4 {
+		t.Fatalf("expected distance=4, got=%d", d2)
+	}
+}
+
+func TestHammingDistanceHex_Invalid(t *testing.T) {
+	if _, err := HammingDistanceHex("1234", "0000000000000000"); err == nil {
+		t.Fatal("expected error for invalid hex length")
+	}
+	if _, err := HammingDistanceHex("zzzzzzzzzzzzzzzz", "0000000000000000"); err == nil {
+		t.Fatal("expected error for invalid hex chars")
+	}
+}
