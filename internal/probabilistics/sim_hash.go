@@ -38,3 +38,16 @@ func NewSimHashWithParams(cfg config.SimHashConfig, seed []byte) *SimHash {
 		hashFn: HashWithSeed{Seed: seedCopy},
 	}
 }
+
+func IsSimHashBytes(data []byte) bool {
+	return len(data) >= 4 && string(data[:4]) == simHashMagic
+}
+
+func (s *SimHash) Seed() []byte {
+	if s == nil {
+		return nil
+	}
+	out := make([]byte, len(s.hashFn.Seed))
+	copy(out, s.hashFn.Seed)
+	return out
+}
