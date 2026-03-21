@@ -1,6 +1,11 @@
 package probabilistic
 
-import "github.com/ajromen/LSM-KV-Engine/internal/config"
+import (
+	"encoding/binary"
+	"encoding/hex"
+
+	"github.com/ajromen/LSM-KV-Engine/internal/config"
+)
 
 const (
 	// Binarni format:
@@ -50,4 +55,21 @@ func (s *SimHash) Seed() []byte {
 	out := make([]byte, len(s.hashFn.Seed))
 	copy(out, s.hashFn.Seed)
 	return out
+}
+
+func (s *SimHash) Fingerprint() (uint64, bool) {
+	if s == nil {
+		return 0, false
+	}
+	return s.fingerprint, s.hasFingerprint
+}
+
+func (s *SimHash) FingerprintHex() (string, bool) {
+	fp, ok := s.Fingerprint()
+	if !ok {
+		return "", false
+	}
+	buf := make([]byte, 8)
+	binary.BigEndian.PutUint64(buf, fp)
+	return hex.EncodeToString(buf), true
 }
