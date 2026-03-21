@@ -112,8 +112,8 @@ func TestDistanceMethods(t *testing.T) {
 	b := NewSimHashWithSeed(seed)
 	c := NewSimHashWithSeed(seed)
 
+	_ = b.HashText("same text for both")
 	fpA := a.HashText("same text for both")
-	fpB := b.HashText("same text for both")
 	fpC := c.HashText("completely different tokens 999 xyz")
 
 	// isto -> distance 0
