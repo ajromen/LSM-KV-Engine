@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
+	"io"
 	"math/bits"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/config"
@@ -166,4 +167,52 @@ func HammingDistanceHex(aHex, bHex string) (uint8, error) {
 		return 0, err
 	}
 	return HammingDistance64(a, b), nil
+}
+
+// WriteTo serijalizuje SimHash u binarni format.
+func (s *SimHash) WriteTo(w io.Writer) (int64, error) {
+	if s == nil {
+		return 0, errors.New("nil simhash")
+	}
+
+	var written int64
+
+	n, err := w.Write([]byte(simHashMagic))
+	if err != nil {
+		return written, err
+	}
+	written += int64(n)
+
+	writeU64 := func(v uint64) error {
+		if err := binary.Write(w, binary.BigEndian, v); err != nil {
+			return err
+		}
+		written += 8
+		return nil
+	}
+
+	seed := s.hashFn.Seed
+	if err := writeU64(uint64(len(seed))); err != nil {
+		return written, err
+	}
+	n, err = w.Write(seed)
+	if err != nil {
+		return written, err
+	}
+	written += int64(n)
+
+	has := uint8(0)
+	if s.hasFingerprint {
+		has = 1
+	}
+	if err := binary.Write(w, binary.BigEndian, has); err != nil {
+		return written, err
+	}
+	written += 1
+
+	if err := writeU64(s.fingerprint); err != nil {
+		return written, err
+	}
+
+	return written, nil
 }
