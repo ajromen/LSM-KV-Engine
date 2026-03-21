@@ -127,3 +127,21 @@ func (s *SimHash) DistanceTo(other *SimHash) (uint8, error) {
 	}
 	return HammingDistance64(s.fingerprint, other.fingerprint), nil
 }
+
+func (s *SimHash) DistanceToFingerprint(fp uint64) (uint8, error) {
+	if s == nil {
+		return 0, errors.New("nil simhash")
+	}
+	if !s.hasFingerprint {
+		return 0, errors.New("nedostaje fingerprint")
+	}
+	return HammingDistance64(s.fingerprint, fp), nil
+}
+
+func (s *SimHash) DistanceToFingerprintHex(fpHex string) (uint8, error) {
+	fp, err := parseHexFingerprint(fpHex)
+	if err != nil {
+		return 0, err
+	}
+	return s.DistanceToFingerprint(fp)
+}
