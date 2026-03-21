@@ -120,7 +120,7 @@ func (sm *SSTableManager) FlushToSSTable(entries []memtable.MemtableEntry) error
 	sstableID := sm.manifest.NextSStableId
 	sm.manifest.IncrementId()
 	filePath := filepath.Join(sm.dataDir, fmt.Sprintf("%06d%s", sstableID, SSTableFileExtension))
-	writer, err := NewSSTableWriter(filePath, sm.blockManager, sm.config, uint64(len(entries)))
+	writer, err := NewSSTableWriter(filePath, sm.blockManager, sm.config, uint64(len(entries)), 0)
 	if err != nil {
 		return fmt.Errorf("cant create SSTable writer: %w", err)
 	}
@@ -227,7 +227,7 @@ func (sm *SSTableManager) MergeSSTables(readers []*SSTableReader, toLayer int, s
 		expectedElems += reader.footer.TotalRecords
 	}
 
-	writer, err := NewSSTableWriter(filePath, sm.blockManager, sm.config, expectedElems)
+	writer, err := NewSSTableWriter(filePath, sm.blockManager, sm.config, expectedElems, toLayer)
 	if err != nil {
 		return err
 	}
@@ -264,7 +264,7 @@ func (sm *SSTableManager) MergeSSTables(readers []*SSTableReader, toLayer int, s
 	}
 
 	// 3. open new reader and add to manager
-	reader, err := NewSSTableReader(sstableID, filePath, sm.config.SSTable.Format, sm.config, toLayer)
+	reader, err := NewSSTableReaderFromWriter(writer, sstableID, sm.config)
 	if err != nil {
 		return err
 	}

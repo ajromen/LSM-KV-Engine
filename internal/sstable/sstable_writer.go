@@ -37,9 +37,10 @@ type SSTableWriter struct {
 	minKey            []byte          // smallest key in sorting order
 	maxKey            []byte          // largest ket in sorting order
 	firstRecord       bool            // whether it is first record
+	Layer             int             // number of the lsm layer
 }
 
-func NewSSTableWriter(filePath string, blockManager *block.BlockManager, cfg *config.Config, expectedElements uint64) (*SSTableWriter, error) {
+func NewSSTableWriter(filePath string, blockManager *block.BlockManager, cfg *config.Config, expectedElements uint64, layer int) (*SSTableWriter, error) {
 	storage, err := CreateStorage(filePath, cfg, blockManager)
 	if err != nil {
 		return nil, err
@@ -71,6 +72,7 @@ func NewSSTableWriter(filePath string, blockManager *block.BlockManager, cfg *co
 		minKeyLength:      ^uint32(0),
 		maxKeyLength:      0,
 		firstRecord:       true,
+		Layer:             layer,
 	}, nil
 }
 
