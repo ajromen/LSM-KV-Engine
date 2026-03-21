@@ -20,3 +20,21 @@ type SimHash struct {
 func NewSimHash(cfg config.SimHashConfig) *SimHash {
 	return NewSimHashWithParams(cfg, nil)
 }
+
+func NewSimHashWithSeed(seed []byte) *SimHash {
+	return NewSimHashWithParams(config.SimHashConfig{Enabled: true}, seed)
+}
+
+func NewSimHashWithParams(cfg config.SimHashConfig, seed []byte) *SimHash {
+	_ = cfg
+
+	if len(seed) == 0 {
+		seed = generateSimHashSeed(32)
+	}
+	seedCopy := make([]byte, len(seed))
+	copy(seedCopy, seed)
+
+	return &SimHash{
+		hashFn: HashWithSeed{Seed: seedCopy},
+	}
+}
