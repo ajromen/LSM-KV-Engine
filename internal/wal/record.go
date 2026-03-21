@@ -1,6 +1,9 @@
 package wal
 
-import "hash/crc32"
+import (
+	"encoding/binary"
+	"hash/crc32"
+)
 
 /*
    +---------------+-----------------+---------------+---------------+-----------------+-...-+--...--+
@@ -35,6 +38,31 @@ type Record struct {
 	Tombstone bool
 	Key       []byte
 	Value     []byte
+}
+
+func Encode(r Record) []byte {
+
+	totalSize := KEY_START + len(r.Key) + len(r.Value)
+	buf := make([]byte, totalSize)
+
+	binary.BigEndian.PutUint64(buf[TIMESTAMP_START:], r.Timestamp)
+
+	if r.Tombstone {
+		buf[TOMBSTONE_START] = 1
+	} else {
+		buf[TOMBSTONE_START] = 0
+	}
+
+	binary.BigEndian.PutUint64(buf[KEY_SIZE_START:], uint64(len(r.Key)))
+	binary.BigEndian.PutUint64(buf[VALUE_SIZE_START:], uint64(len(r.Value)))
+
+	copy(buf[KEY_START:], r.Key)
+	copy(buf[KEY_START+len(r.Key):], r.Value)
+
+	hashed := CRC32(buf[TIMESTAMP_START:])
+	binary.BigEndian.PutUint32(buf[CRC_START:], hashed)
+
+	return buf
 }
 
 func CRC32(data []byte) uint32 {
