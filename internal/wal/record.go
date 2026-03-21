@@ -53,8 +53,8 @@ func Encode(r Record) []byte {
 		buf[TOMBSTONE_START] = 0
 	}
 
-	binary.LittleEndian.PutUint64(buf[KEY_SIZE_START:], uint64(len(r.Key)))
-	binary.LittleEndian.PutUint64(buf[VALUE_SIZE_START:], uint64(len(r.Value)))
+	binary.LittleEndian.PutUint64(buf[KEY_SIZE_START:VALUE_SIZE_START], uint64(len(r.Key)))
+	binary.LittleEndian.PutUint64(buf[VALUE_SIZE_START:KEY_START], uint64(len(r.Value)))
 
 	copy(buf[KEY_START:], r.Key)
 	copy(buf[KEY_START+len(r.Key):], r.Value)
