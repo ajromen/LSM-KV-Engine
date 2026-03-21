@@ -34,6 +34,14 @@ type SSTableReader struct {
 	valueDecoder   *encoders.AdaptiveEncoder
 }
 
+type ReaderOptions struct {
+	id       int
+	filePath string
+	format   enums.SSTableFormat
+	cfg      *config.LSMTreeConfig
+	layer    int
+}
+
 // opens an SSTable file and loads all necessary segments into RAM
 func NewSSTableReader(id int, filePath string, format enums.SSTableFormat, cfg *config.Config, layer int) (*SSTableReader, error) {
 	var storage SegmentStorage
@@ -111,6 +119,40 @@ func NewSSTableReader(id int, filePath string, format enums.SSTableFormat, cfg *
 	}
 
 	return reader, nil
+}
+
+// NewSSTableReaderFromWriter make sure writer finalize has been run before
+func NewSSTableReaderFromWriter(w *SSTableWriter, id int, cfg *config.Config) (*SSTableReader, error) {
+	r := &SSTableReader{
+		storage:        w.storage,
+		Layer:          w.Layer,
+		filePath:       w.filePath,
+		blockManager:   w.blockManager,
+		merkleTree:     w.merkleTree,
+		filterSegment:  w.filterSegment,
+		footer:         w.footer,
+		SummarySegment: w.summarySegment,
+		valueDecoder:   w.valueEncoder, // TODO check encoder is decoder
+		Id:             id,
+		config:         cfg,
+	}
+
+	switch s := r.storage.(type) {
+	case *SingleFileStorage:
+		info, err := s.File().Stat()
+		if err != nil {
+			return nil, fmt.Errorf("single storage failed to stat file: %w", err)
+		}
+		r.SizeBytes = info.Size()
+	case *MultiFileStorage:
+		info, err := os.Stat(r.filePath + string(DataSegmentExtension))
+		if err != nil {
+			return nil, fmt.Errorf("multi storage failed to stat file: %w", err)
+		}
+		r.SizeBytes = info.Size()
+	}
+
+	return r, nil
 }
 
 // loadSummary reads and decodes summary segment, which maps key ranges into index blocks

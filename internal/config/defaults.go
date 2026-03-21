@@ -20,7 +20,7 @@ const (
 	//memtable
 	MemtableType                = enums.HashMapMemTable
 	DefaultMemtableMaxEntries   = 1000
-	DefaultMemtableMaxSizeBytes = 1 << 20
+	DefaultMemtableMaxSizeBytes = 1
 	DefaultMemtableInstances    = 5
 	DefaultSkipListMaxLevel     = 10
 	DefaultBTreeMinimumDegree   = 8
@@ -42,8 +42,9 @@ const (
 
 	//LSM
 	DefaultLSMCompactionAlgorithm = enums.SizeTieredCompaction
-	DefaultLSMMinMergeThreshold   = 3
+	DefaultLSMMinMergeThreshold   = 4
 	DefaultLSMLevelSizeMultiplier = 10
+	DefaultMaxLSMHeight           = 5
 )
 
 func NewDefaultConfig() *Config {
@@ -77,6 +78,7 @@ func NewDefaultConfig() *Config {
 			},
 		},
 		LSMTree: LSMTreeConfig{
+			MaxHeight:           DefaultMaxLSMHeight,
 			MinMergeThreshold:   DefaultLSMMinMergeThreshold,
 			CompactionAlgorithm: DefaultLSMCompactionAlgorithm,
 			LevelSizeMultiplier: DefaultLSMLevelSizeMultiplier,

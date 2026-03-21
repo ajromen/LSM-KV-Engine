@@ -51,18 +51,30 @@ func (m *Manifest) reconstruct(fileDir string) error {
 	if err != nil {
 		return err
 	}
-	sstableFiles := make(map[string]enums.SSTableFormat)
+
+	type FormatLayer struct {
+		format enums.SSTableFormat
+		layer  uint64
+	}
+
+	sstableFiles := make(map[string]FormatLayer)
 	for _, file := range files {
 		if !file.IsDir() {
 			name := file.Name()
 			// Single-file: 000000.sst
 			if filepath.Ext(name) == SSTableFileExtension && !strings.Contains(strings.TrimSuffix(name, SSTableFileExtension), ".") {
-				sstableFiles[filepath.Join(fileDir, name)] = enums.FormatSingleFile
+				fl := FormatLayer{
+					format: enums.FormatSingleFile,
+				}
+				sstableFiles[filepath.Join(fileDir, name)] = fl
 			}
 			// Multi-file: 000000.sst.data -> add 000000.sst to list
 			if strings.HasSuffix(name, SSTableFileExtension+string(DataSegmentExtension)) {
 				basePath := filepath.Join(fileDir, strings.TrimSuffix(name, string(DataSegmentExtension)))
-				sstableFiles[basePath] = enums.FormatMultiFile
+				fl := FormatLayer{
+					format: enums.FormatSingleFile,
+				}
+				sstableFiles[basePath] = fl
 			}
 		}
 	}
@@ -83,7 +95,7 @@ func (m *Manifest) reconstruct(fileDir string) error {
 		sst := SSTableManifest{
 			Layer:        0,
 			BaseFileName: filepath.Base(filePath),
-			Format:       sstableFiles[filePath],
+			Format:       sstableFiles[filePath].format,
 			Id:           id,
 		}
 		m.Layers[0] = append(m.Layers[0], sst)
