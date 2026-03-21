@@ -24,10 +24,12 @@ func NewLSM(cfg *config.Config, dataDir string) (*LSM, error) {
 		lsm.strategy = LeveledCompaction{
 			L1MaxBytes:          int64(cfg.Memtable.MemtableMaxSizeBytes) * int64(cfg.LSMTree.LevelSizeMultiplier),
 			LevelSizeMultiplier: cfg.LSMTree.LevelSizeMultiplier,
+			MaxHeight:           cfg.LSMTree.MaxHeight,
 		}
 	case enums.SizeTieredCompaction:
 		lsm.strategy = SizeTiredCompaction{
 			MinMergeThreshold: cfg.LSMTree.MinMergeThreshold,
+			MaxHeight:         cfg.LSMTree.MaxHeight,
 		}
 	}
 

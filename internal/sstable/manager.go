@@ -196,13 +196,27 @@ func (sm *SSTableManager) DeleteSSTable(layer, id int) error {
 	return nil
 }
 
+func (sm *SSTableManager) DeleteSSTables(readers []*SSTableReader) error {
+	toDelete := make([]struct{ layer, id int }, len(readers))
+	for i, reader := range readers {
+		toDelete[i] = struct{ layer, id int }{reader.Layer, reader.Id}
+	}
+	for _, d := range toDelete {
+		if err := sm.DeleteSSTable(d.layer, d.id); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // MergeSSTables pass in sstables to merge them into a single sstable and delete old ones
+// skipTombstones if it's the last layer
 // 1. create new sstable
 // 2. iterate through all elems and add to new sstable
 // 3. open new reader and add to manager
 // 4. update manifest
 // 5. delete old sstables
-func (sm *SSTableManager) MergeSSTables(readers []*SSTableReader, toLayer int) error {
+func (sm *SSTableManager) MergeSSTables(readers []*SSTableReader, toLayer int, skipTombstones bool) error {
 	// 1. create new sstable
 	sstableID := sm.manifest.NextSStableId
 	sm.manifest.IncrementId()
@@ -225,16 +239,25 @@ func (sm *SSTableManager) MergeSSTables(readers []*SSTableReader, toLayer int) e
 	}
 	count := 0
 	for iterator.Valid() {
-		err := writer.AddRecord(iterator.Value())
+		rec := iterator.Value()
+		if rec.Tombstone { // TODO check if record is before checkpoints - check if key exists above
+			iterator.Next()
+			continue
+		}
+		err := writer.AddRecord(rec)
 		if err != nil {
 			return err
 		}
 		iterator.Next()
 		count++
 	}
+	// last layer all tombstones
 	if count == 0 {
-		return fmt.Errorf("merge produced no records. All %d input SSTables may be empty", len(readers))
+		return nil
 	}
+	//if count == 0 {
+	//	return fmt.Errorf("merge produced no records. All %d input SSTables may be empty", len(readers))
+	//}
 	err = writer.Finalize()
 	if err != nil {
 		return fmt.Errorf("cant finalize SSTable writer: %w", err)
@@ -263,17 +286,9 @@ func (sm *SSTableManager) MergeSSTables(readers []*SSTableReader, toLayer int) e
 	}
 
 	// 5. delete old sstables
-	toDelete := make([]struct{ layer, id int }, len(readers))
-	for i, reader := range readers {
-		toDelete[i] = struct{ layer, id int }{reader.Layer, reader.Id}
-	}
-	for _, d := range toDelete {
-		if err := sm.DeleteSSTable(d.layer, d.id); err != nil {
-			return err
-		}
-	}
+	err = sm.DeleteSSTables(readers)
 
-	return nil
+	return err
 }
 
 // MoveSSTable moves sstable from one layer to another
