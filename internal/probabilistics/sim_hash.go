@@ -2,13 +2,16 @@ package probabilistic
 
 import (
 	"bytes"
+	"crypto/rand"
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"math/bits"
+	mrand "math/rand"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/config"
@@ -350,4 +353,35 @@ func tokenizeAndCount(text string) map[string]uint32 {
 	flush()
 
 	return freq
+}
+
+func parseHexFingerprint(h string) (uint64, error) {
+	h = strings.TrimSpace(h)
+	h = strings.TrimPrefix(h, "0x")
+	h = strings.TrimPrefix(h, "0X")
+
+	if len(h) != 16 {
+		return 0, fmt.Errorf("hex fingerprint mora imati 16 karaktera (64 bita), dobio %d", len(h))
+	}
+
+	raw, err := hex.DecodeString(h)
+	if err != nil {
+		return 0, fmt.Errorf("neispravan hex fingerprint: %w", err)
+	}
+	return binary.BigEndian.Uint64(raw), nil
+}
+
+func generateSimHashSeed(seedLen int) []byte {
+	if seedLen <= 0 {
+		seedLen = 32
+	}
+	seed := make([]byte, seedLen)
+
+	if _, err := rand.Read(seed); err == nil {
+		return seed
+	}
+
+	r := mrand.New(mrand.NewSource(time.Now().UnixNano()))
+	_, _ = r.Read(seed)
+	return seed
 }
