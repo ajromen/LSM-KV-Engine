@@ -88,7 +88,6 @@ func NewDefaultConfig() *Config {
 		},
 		ProbabilisticType: ProbabilisticTypeConfig{
 			CountMinSketch: CountMinSketchConfig{
-				Enabled:    true,
 				Accuracy:   DefaultCMSAccuracy,
 				Confidence: DefaultCMSConfidence,
 				Seeds: [][]byte{

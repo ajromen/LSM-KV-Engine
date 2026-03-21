@@ -4,13 +4,18 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/ajromen/LSM-KV-Engine/internal/config"
 )
 
 func TestReadWrite(t *testing.T) {
 	dir := t.TempDir()
 	filePath := filepath.Join(dir, "data.bin")
+	cfg := config.NewDefaultConfig()
+	cfg.BlockManager.BlockCacheMaxBlocks = 10
+	config.TESTSetSettings(cfg)
 
-	bm := NewBlockManager(16, 10)
+	bm := NewBlockManager(16)
 
 	key := BlockKey{
 		FilePath: filePath,
@@ -37,7 +42,10 @@ func TestCache(t *testing.T) {
 	dir := t.TempDir()
 	filePath := filepath.Join(dir, "cache.bin")
 
-	bm := NewBlockManager(4, 1)
+	cfg := config.NewDefaultConfig()
+	cfg.BlockManager.BlockCacheMaxBlocks = 1
+	config.TESTSetSettings(cfg)
+	bm := NewBlockManager(4)
 
 	key := BlockKey{
 		FilePath: filePath,
@@ -73,7 +81,10 @@ func TestWriteAt(t *testing.T) {
 	dir := t.TempDir()
 	filePath := filepath.Join(dir, "writeat.bin")
 
-	bm := NewBlockManager(4, 10)
+	cfg := config.NewDefaultConfig()
+	cfg.BlockManager.BlockCacheMaxBlocks = 10
+	config.TESTSetSettings(cfg)
+	bm := NewBlockManager(4)
 
 	f, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
@@ -105,8 +116,11 @@ func TestWriteAt(t *testing.T) {
 func TestInvalidBlockSize(t *testing.T) {
 	dir := t.TempDir()
 	filePath := filepath.Join(dir, "invalid.bin")
+	cfg := config.NewDefaultConfig()
+	cfg.BlockManager.BlockCacheMaxBlocks = 10
+	config.TESTSetSettings(cfg)
 
-	bm := NewBlockManager(8, 10)
+	bm := NewBlockManager(8)
 
 	key := BlockKey{
 		FilePath: filePath,

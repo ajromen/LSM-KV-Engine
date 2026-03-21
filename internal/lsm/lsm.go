@@ -13,27 +13,27 @@ type LSM struct {
 	memtableeManager *memtable.MemtableManager
 	sstableManager   *sstable.SSTableManager
 	strategy         CompactionStrategy
-	cfg              *config.Config
 }
 
-func NewLSM(cfg *config.Config, dataDir string) (*LSM, error) {
-	lsm := LSM{cfg: cfg}
-	lsm.sstableManager = sstable.NewSSTableManager(dataDir, cfg)
-	switch cfg.LSMTree.CompactionAlgorithm {
+func NewLSM(dataDir string) (*LSM, error) {
+	lsm := LSM{}
+	lsm.sstableManager = sstable.NewSSTableManager(dataDir)
+	stt := config.GetSettings()
+	switch stt.LSMTree.CompactionAlgorithm {
 	case enums.LeveledCompaction:
 		lsm.strategy = LeveledCompaction{
-			L1MaxBytes:          int64(cfg.Memtable.MemtableMaxSizeBytes) * int64(cfg.LSMTree.LevelSizeMultiplier),
-			LevelSizeMultiplier: cfg.LSMTree.LevelSizeMultiplier,
-			MaxHeight:           cfg.LSMTree.MaxHeight,
+			L1MaxBytes:          int64(stt.Memtable.MemtableMaxSizeBytes) * int64(stt.LSMTree.LevelSizeMultiplier),
+			LevelSizeMultiplier: stt.LSMTree.LevelSizeMultiplier,
+			MaxHeight:           stt.LSMTree.MaxHeight,
 		}
 	case enums.SizeTieredCompaction:
 		lsm.strategy = SizeTiredCompaction{
-			MinMergeThreshold: cfg.LSMTree.MinMergeThreshold,
-			MaxHeight:         cfg.LSMTree.MaxHeight,
+			MinMergeThreshold: stt.LSMTree.MinMergeThreshold,
+			MaxHeight:         stt.LSMTree.MaxHeight,
 		}
 	}
 
-	factory := memtable.NewFactory(cfg.Memtable)
+	factory := memtable.NewFactory(stt.Memtable)
 	memManager := memtable.NewMemtableManager(3, 0, factory, lsm.onFlush)
 	lsm.memtableeManager = memManager
 	return &lsm, nil

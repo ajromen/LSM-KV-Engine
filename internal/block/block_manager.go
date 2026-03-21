@@ -17,10 +17,10 @@ type BlockKey struct {
 	Offset   uint32 // ako je blok 1kb dozvoljava segment size od 4 terabajta (16 bitova daje max 64mb)
 }
 
-func NewBlockManager(blockSize, maxLRUSize int) *BlockManager {
+func NewBlockManager(blockSize int) *BlockManager {
 	return &BlockManager{
 		blockSize: blockSize,
-		cache:     GetBlockCacheInstance(maxLRUSize),
+		cache:     GetBlockCacheInstance(),
 	}
 }
 

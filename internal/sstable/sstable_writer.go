@@ -16,12 +16,11 @@ const SSTableFileExtension = ".sst"
 
 // SSTableWriter allows writing records into sstable
 type SSTableWriter struct {
-	storage           SegmentStorage       // low-level writing of segments
-	blockManager      *block.BlockManager  // writing and encoding data blocks
-	config            config.SSTableConfig // system SSTable configuration
-	filePath          string               // file path where sstable is written (base path if multi file format)
-	dataBlockBuilder  *DataBlockBuilder    // data block builder for building data block from records being written into sstable
-	indexSegment      *IndexSegment        // index segment of sstable : references data blocks
+	storage           SegmentStorage      // low-level writing of segments
+	blockManager      *block.BlockManager // writing and encoding data blocks
+	filePath          string              // file path where sstable is written (base path if multi file format)
+	dataBlockBuilder  *DataBlockBuilder   // data block builder for building data block from records being written into sstable
+	indexSegment      *IndexSegment       // index segment of sstable : references data blocks
 	currentIndexBlock *IndexBlock
 	valueEncoder      *encoders.AdaptiveEncoder
 	summarySegment    *SummarySegment // summary segment of sstable : references index blocks
@@ -40,8 +39,9 @@ type SSTableWriter struct {
 	Layer             int             // number of the lsm layer
 }
 
-func NewSSTableWriter(filePath string, blockManager *block.BlockManager, cfg *config.Config, expectedElements uint64, layer int) (*SSTableWriter, error) {
-	storage, err := CreateStorage(filePath, cfg, blockManager)
+func NewSSTableWriter(filePath string, blockManager *block.BlockManager, expectedElements uint64, layer int) (*SSTableWriter, error) {
+	cfg := config.GetSettings()
+	storage, err := CreateStorage(filePath, blockManager)
 	if err != nil {
 		return nil, err
 	}
@@ -57,7 +57,6 @@ func NewSSTableWriter(filePath string, blockManager *block.BlockManager, cfg *co
 	return &SSTableWriter{
 		storage:           storage,
 		blockManager:      blockManager,
-		config:            cfg.SSTable,
 		filePath:          filePath,
 		valueEncoder:      valueEncoder,
 		dataBlockBuilder:  NewDataBlockBuilder(1, cfg.SSTable.DataSegment.RestartInterval, blockManager.BlockSize(), valueEncoder),
@@ -66,7 +65,7 @@ func NewSSTableWriter(filePath string, blockManager *block.BlockManager, cfg *co
 		summarySegment:    NewSummarySegment(1),
 		filterSegment:     filterSegment,
 		merkleTree:        NewMerkleTree(),
-		footer:            NewFooter(cfg.SSTable),
+		footer:            NewFooter(),
 		currentBlockIndex: 0,
 		recordCount:       0,
 		minKeyLength:      ^uint32(0),
@@ -143,7 +142,7 @@ func (sw *SSTableWriter) flushDataBlock() error {
 	}
 
 	// step 1
-	blockData, err := sw.dataBlockBuilder.Finish(sw.config.DataSegment.BlockSize)
+	blockData, err := sw.dataBlockBuilder.Finish(config.GetSettings().SSTable.DataSegment.BlockSize)
 	if err != nil {
 		return err
 	}
@@ -160,7 +159,7 @@ func (sw *SSTableWriter) flushDataBlock() error {
 
 	// step 4
 	sw.currentIndexBlock.AddFromDataBlock(sw.dataBlockBuilder, sw.currentBlockIndex)
-	if sw.currentIndexBlock.RealSize >= uint32(sw.config.IndexSegment.IndexBlockSize) {
+	if sw.currentIndexBlock.RealSize >= uint32(config.GetSettings().SSTable.IndexSegment.IndexBlockSize) {
 		sw.indexSegment.AddBlock(sw.currentIndexBlock)
 		sw.currentIndexBlock = NewIndexBlock()
 	}
@@ -205,7 +204,7 @@ func (sw *SSTableWriter) Finalize() error {
 	sw.footer.MaxTimeStamp = sw.maxTimestamp
 	sw.footer.MinKeyLength = sw.minKeyLength
 	sw.footer.MaxKeyLength = sw.maxKeyLength
-	sw.footer.Format = sw.config.Format
+	sw.footer.Format = config.GetSettings().SSTable.Format
 
 	// step 4
 	if sw.filterSegment != nil {

@@ -44,16 +44,17 @@ type Footer struct {
 	CRC                    uint32                   // crc over the whole footer segment
 }
 
-func NewFooter(config config.SSTableConfig) *Footer {
+func NewFooter() *Footer {
+	cfg := config.GetSettings().SSTable
 	return &Footer{
-		CompressionType:        config.DataSegment.Compression,
+		CompressionType:        cfg.DataSegment.Compression,
 		Version:                1,
-		Format:                 config.Format,
+		Format:                 cfg.Format,
 		MagicNumber:            MagicNumber,
-		RestartInterval:        uint32(config.DataSegment.RestartInterval),
+		RestartInterval:        uint32(cfg.DataSegment.RestartInterval),
 		EncodingType:           1,
 		MergeIteratorStructure: 1,
-		BlockSize:              uint64(config.DataSegment.BlockSize),
+		BlockSize:              uint64(cfg.DataSegment.BlockSize),
 	}
 }
 

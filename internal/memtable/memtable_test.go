@@ -17,7 +17,7 @@ var allTypes = []enums.MemTableType{enums.BTreeMemTable, enums.SkiplistMemTable,
 
 func newMemtable(t *testing.T, mt enums.MemTableType, maxEntries int, maxBytes uint64, handler func([]MemtableEntry)) *MemtableManager {
 	t.Helper()
-	factory := NewFactory(config.NewDefaultConfig().Memtable)
+	factory := NewFactory(config.GetSettings().Memtable)
 	return NewMemtableManager(5, 1, factory, handler)
 }
 
@@ -107,10 +107,15 @@ func TestOlderTimestampDoesNotOverwrite(t *testing.T) {
 // ============================================================
 
 func TestTombstoneHidesEntry(t *testing.T) {
+	cfg := config.NewDefaultConfig()
+	cfg.Memtable.MemtableMaxEntries = 100
+	cfg.Memtable.MemtableMaxSizeBytes = 1 << 20
+	config.TESTSetSettings(cfg)
+
 	for _, mt := range allTypes {
 		mt := mt
 		t.Run(string(mt), func(t *testing.T) {
-			m := newMemtable(t, mt, 100, 1<<20, nil)
+			m := newMemtable(t, mt, cfg.Memtable.MemtableMaxEntries, cfg.Memtable.MemtableMaxSizeBytes, nil)
 			m.Put([]byte("key"), []byte("value"), 10, false)
 			m.Put([]byte("key"), []byte(""), 20, true)
 			got, ok := m.Get([]byte("key"))
@@ -122,6 +127,11 @@ func TestTombstoneHidesEntry(t *testing.T) {
 }
 
 func TestDeleteHidesEntry(t *testing.T) {
+	cfg := config.NewDefaultConfig()
+	cfg.Memtable.MemtableMaxEntries = 100
+	cfg.Memtable.MemtableMaxSizeBytes = 1 << 20
+	config.TESTSetSettings(cfg)
+
 	for _, mt := range allTypes {
 		mt := mt
 		t.Run(string(mt), func(t *testing.T) {
@@ -475,6 +485,9 @@ func TestMemtableLifecycle(t *testing.T) {
 		MemtableMaxSizeBytes: 1 << 20,
 		MemtableMaxEntries:   3,
 	}
+	conf := config.NewDefaultConfig()
+	conf.Memtable = cfg
+	config.TESTSetSettings(conf)
 	factory := NewFactory(cfg)
 
 	wg.Add(1)

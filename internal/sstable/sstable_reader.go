@@ -30,7 +30,6 @@ type SSTableReader struct {
 	SummarySegment *SummarySegment     // summary segment (read into RAM)
 	filterSegment  *FilterSegment      // filter segment (read into RAM)
 	merkleTree     *MerkleTree         // merkle tree - metadata segment (read into RAM)
-	config         *config.Config      // config for given sstable
 	valueDecoder   *encoders.AdaptiveEncoder
 }
 
@@ -38,12 +37,11 @@ type ReaderOptions struct {
 	id       int
 	filePath string
 	format   enums.SSTableFormat
-	cfg      *config.LSMTreeConfig
 	layer    int
 }
 
 // opens an SSTable file and loads all necessary segments into RAM
-func NewSSTableReader(id int, filePath string, format enums.SSTableFormat, cfg *config.Config, layer int) (*SSTableReader, error) {
+func NewSSTableReader(id int, filePath string, format enums.SSTableFormat, layer int) (*SSTableReader, error) {
 	var storage SegmentStorage
 	var err error
 	switch format {
@@ -86,7 +84,7 @@ func NewSSTableReader(id int, filePath string, format enums.SSTableFormat, cfg *
 	if err := footer.Validate(); err != nil {
 		return nil, err
 	}
-	blockManager := block.NewBlockManager(int(footer.BlockSize), cfg.BlockManager.BlockCacheMaxBlocks)
+	blockManager := block.NewBlockManager(int(footer.BlockSize))
 	storage.SetBlockManager(blockManager)
 	// initialize reader
 	reader := &SSTableReader{
@@ -94,7 +92,6 @@ func NewSSTableReader(id int, filePath string, format enums.SSTableFormat, cfg *
 		blockManager: blockManager,
 		filePath:     filePath,
 		footer:       footer,
-		config:       cfg,
 		Layer:        layer,
 		Id:           id,
 		SizeBytes:    fileSize,
@@ -122,7 +119,7 @@ func NewSSTableReader(id int, filePath string, format enums.SSTableFormat, cfg *
 }
 
 // NewSSTableReaderFromWriter make sure writer finalize has been run before
-func NewSSTableReaderFromWriter(w *SSTableWriter, id int, cfg *config.Config) (*SSTableReader, error) {
+func NewSSTableReaderFromWriter(w *SSTableWriter, id int) (*SSTableReader, error) {
 	r := &SSTableReader{
 		storage:        w.storage,
 		Layer:          w.Layer,
@@ -134,7 +131,6 @@ func NewSSTableReaderFromWriter(w *SSTableWriter, id int, cfg *config.Config) (*
 		SummarySegment: w.summarySegment,
 		valueDecoder:   w.valueEncoder, // TODO check encoder is decoder
 		Id:             id,
-		config:         cfg,
 	}
 
 	switch s := r.storage.(type) {
@@ -204,7 +200,7 @@ func (r *SSTableReader) loadMerkleTree() error {
 // loadIndexBlock reads a specific index block from index segment -> NEEDS TO BE FIXED!
 func (r *SSTableReader) loadIndexBlock(blockNumber int) (*IndexBlock, error) {
 
-	indexBlockSize := r.config.SSTable.IndexSegment.IndexBlockSize
+	indexBlockSize := config.GetSettings().SSTable.IndexSegment.IndexBlockSize
 
 	offset := r.footer.IndexHandler.Offset +
 		uint64(blockNumber)*uint64(indexBlockSize)

@@ -58,8 +58,6 @@ func (lru *LRU[K, V]) Put(key K, value V) {
 }
 
 func (lru *LRU[K, V]) removeLast() {
-	lru.mu.Lock()
-	defer lru.mu.Unlock()
 	element := lru.list.Back()
 	if element == nil {
 		return

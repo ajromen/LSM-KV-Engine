@@ -27,8 +27,8 @@ func TestSSTableWriterBasic(t *testing.T) {
 	tempFile := filepath.Join("1.sst")
 	defer os.Remove(tempFile)
 	cfg := config.NewDefaultConfig()
-	blockManager := block.NewBlockManager(cfg.SSTable.DataSegment.BlockSize, 100)
-	writer, err := NewSSTableWriter(tempFile, blockManager, cfg, 100)
+	blockManager := block.NewBlockManager(cfg.SSTable.DataSegment.BlockSize)
+	writer, err := NewSSTableWriter(tempFile, blockManager, 100, 0)
 	if err != nil {
 		t.Fatalf("Failed to create writer: %v", err)
 	}
@@ -62,7 +62,7 @@ func TestSSTableWriterBasic(t *testing.T) {
 	if _, err := os.Stat(tempFile); os.IsNotExist(err) {
 		t.Fatalf("SSTable file was not created")
 	}
-	reader, err := NewSSTableReader(1, tempFile, 0, cfg, 0)
+	reader, err := NewSSTableReader(1, tempFile, 0, 0)
 	if err != nil {
 		fmt.Println("error building reader")
 	}
@@ -118,8 +118,9 @@ func TestSSTableMultiFileFormat(t *testing.T) {
 	defer os.Remove(tempFile + ".footer")
 	cfg := config.NewDefaultConfig()
 	cfg.SSTable.Format = 1
-	blockManager := block.NewBlockManager(cfg.SSTable.DataSegment.BlockSize, 100)
-	writer, err := NewSSTableWriter(tempFile, blockManager, cfg, 100)
+	config.TESTSetSettings(cfg)
+	blockManager := block.NewBlockManager(cfg.SSTable.DataSegment.BlockSize)
+	writer, err := NewSSTableWriter(tempFile, blockManager, 100, 0)
 	records := []Record{
 		createTestRecord("key001", "value001", 1, false),
 		createTestRecord("key002", "value002", 2, false),
@@ -160,7 +161,7 @@ func TestSSTableMultiFileFormat(t *testing.T) {
 			t.Errorf("Expected file %s to exist", file)
 		}
 	}
-	reader, err := NewSSTableReader(1, tempFile, 1, cfg, 0)
+	reader, err := NewSSTableReader(1, tempFile, 1, 0)
 	if err != nil {
 		t.Fatalf("Failed to create sstable reader: %v", err)
 	}
@@ -262,8 +263,9 @@ func TestSSTableIteratorRaw(t *testing.T) {
 	tempFile := filepath.Join("1.sst")
 	defer os.Remove(tempFile)
 	cfg := config.NewDefaultConfig()
-	blockManager := block.NewBlockManager(cfg.SSTable.DataSegment.BlockSize, 100)
-	writer, err := NewSSTableWriter(tempFile, blockManager, cfg, 100)
+	config.TESTSetSettings(cfg)
+	blockManager := block.NewBlockManager(cfg.SSTable.DataSegment.BlockSize)
+	writer, err := NewSSTableWriter(tempFile, blockManager, 100, 0)
 	if err != nil {
 		t.Fatalf("Failed to create writer: %v", err)
 	}
@@ -297,7 +299,7 @@ func TestSSTableIteratorRaw(t *testing.T) {
 	if _, err := os.Stat(tempFile); os.IsNotExist(err) {
 		t.Fatalf("SSTable file was not created")
 	}
-	reader, err := NewSSTableReader(1, tempFile, 0, cfg, 0)
+	reader, err := NewSSTableReader(1, tempFile, 0, 0)
 	iterator, err := NewSSTableIteratorRaw(reader)
 	if err != nil {
 		t.Fatalf("Failed to create iterator: %v", err)
@@ -314,8 +316,8 @@ func TestSSTableIterator(t *testing.T) {
 	tempFile := filepath.Join("1.sst")
 	defer os.Remove(tempFile)
 	cfg := config.NewDefaultConfig()
-	blockManager := block.NewBlockManager(cfg.SSTable.DataSegment.BlockSize, 100)
-	writer, err := NewSSTableWriter(tempFile, blockManager, cfg, 100)
+	blockManager := block.NewBlockManager(cfg.SSTable.DataSegment.BlockSize)
+	writer, err := NewSSTableWriter(tempFile, blockManager, 100, 0)
 	if err != nil {
 		t.Fatalf("Failed to create writer: %v", err)
 	}
@@ -338,7 +340,7 @@ func TestSSTableIterator(t *testing.T) {
 	if _, err := os.Stat(tempFile); os.IsNotExist(err) {
 		t.Fatalf("SSTable file was not created")
 	}
-	reader, err := NewSSTableReader(1, tempFile, 0, cfg, 0)
+	reader, err := NewSSTableReader(1, tempFile, 0, 0)
 	iterator, err := NewSSTableIterator(reader)
 	if err != nil {
 		t.Fatalf("Failed to create iterator: %v", err)
@@ -357,10 +359,10 @@ func TestSSTableMergeIteratorRaw(t *testing.T) {
 	defer os.Remove(tempFile2)
 
 	cfg := config.NewDefaultConfig()
-	blockManager := block.NewBlockManager(cfg.SSTable.DataSegment.BlockSize, 100)
+	blockManager := block.NewBlockManager(cfg.SSTable.DataSegment.BlockSize)
 
 	// SSTable 1 — neparni ključevi
-	writer1, err := NewSSTableWriter(tempFile1, blockManager, cfg, 100)
+	writer1, err := NewSSTableWriter(tempFile1, blockManager, 100, 0)
 	if err != nil {
 		t.Fatalf("Failed to create writer1: %v", err)
 	}
@@ -381,7 +383,7 @@ func TestSSTableMergeIteratorRaw(t *testing.T) {
 	}
 
 	// SSTable 2 — parni ključevi
-	writer2, err := NewSSTableWriter(tempFile2, blockManager, cfg, 100)
+	writer2, err := NewSSTableWriter(tempFile2, blockManager, 100, 0)
 	if err != nil {
 		t.Fatalf("Failed to create writer2: %v", err)
 	}
@@ -401,11 +403,11 @@ func TestSSTableMergeIteratorRaw(t *testing.T) {
 		t.Fatalf("Failed to finalize writer2: %v", err)
 	}
 
-	reader1, err := NewSSTableReader(1, tempFile1, 0, cfg, 0)
+	reader1, err := NewSSTableReader(1, tempFile1, 0, 0)
 	if err != nil {
 		t.Fatalf("Failed to create reader1: %v", err)
 	}
-	reader2, err := NewSSTableReader(2, tempFile2, 0, cfg, 0)
+	reader2, err := NewSSTableReader(2, tempFile2, 0, 0)
 	if err != nil {
 		t.Fatalf("Failed to create reader2: %v", err)
 	}
@@ -430,8 +432,8 @@ func TestSSTableMergeIteratorRawWithDuplicates(t *testing.T) {
 	defer os.Remove(tempFile1)
 	defer os.Remove(tempFile2)
 	cfg := config.NewDefaultConfig()
-	blockManager := block.NewBlockManager(cfg.SSTable.DataSegment.BlockSize, 100)
-	writer1, err := NewSSTableWriter(tempFile1, blockManager, cfg, 100)
+	blockManager := block.NewBlockManager(cfg.SSTable.DataSegment.BlockSize)
+	writer1, err := NewSSTableWriter(tempFile1, blockManager, 100, 0)
 	if err != nil {
 		t.Fatalf("Failed to create writer1: %v", err)
 	}
@@ -450,7 +452,7 @@ func TestSSTableMergeIteratorRawWithDuplicates(t *testing.T) {
 	if err := writer1.Finalize(); err != nil {
 		t.Fatalf("Failed to finalize writer1: %v", err)
 	}
-	writer2, err := NewSSTableWriter(tempFile2, blockManager, cfg, 100)
+	writer2, err := NewSSTableWriter(tempFile2, blockManager, 100, 0)
 	if err != nil {
 		t.Fatalf("Failed to create writer2: %v", err)
 	}
@@ -470,11 +472,11 @@ func TestSSTableMergeIteratorRawWithDuplicates(t *testing.T) {
 		t.Fatalf("Failed to finalize writer2: %v", err)
 	}
 
-	reader1, err := NewSSTableReader(1, tempFile1, 0, cfg, 0)
+	reader1, err := NewSSTableReader(1, tempFile1, 0, 0)
 	if err != nil {
 		t.Fatalf("Failed to create reader1: %v", err)
 	}
-	reader2, err := NewSSTableReader(2, tempFile2, 0, cfg, 0)
+	reader2, err := NewSSTableReader(2, tempFile2, 0, 0)
 	if err != nil {
 		t.Fatalf("Failed to create reader2: %v", err)
 	}
@@ -507,8 +509,8 @@ func TestSSTableMergeIteratorWithTombstones(t *testing.T) {
 	defer os.Remove(tempFile1)
 	defer os.Remove(tempFile2)
 	cfg := config.NewDefaultConfig()
-	blockManager := block.NewBlockManager(cfg.SSTable.DataSegment.BlockSize, 100)
-	writer1, err := NewSSTableWriter(tempFile1, blockManager, cfg, 100)
+	blockManager := block.NewBlockManager(cfg.SSTable.DataSegment.BlockSize)
+	writer1, err := NewSSTableWriter(tempFile1, blockManager, 100, 0)
 	if err != nil {
 		t.Fatalf("Failed to create writer1: %v", err)
 	}
@@ -527,7 +529,7 @@ func TestSSTableMergeIteratorWithTombstones(t *testing.T) {
 	if err := writer1.Finalize(); err != nil {
 		t.Fatalf("Failed to finalize writer1: %v", err)
 	}
-	writer2, err := NewSSTableWriter(tempFile2, blockManager, cfg, 100)
+	writer2, err := NewSSTableWriter(tempFile2, blockManager, 100, 0)
 	if err != nil {
 		t.Fatalf("Failed to create writer2: %v", err)
 	}
@@ -546,11 +548,11 @@ func TestSSTableMergeIteratorWithTombstones(t *testing.T) {
 	if err := writer2.Finalize(); err != nil {
 		t.Fatalf("Failed to finalize writer2: %v", err)
 	}
-	reader1, err := NewSSTableReader(1, tempFile1, 0, cfg, 0)
+	reader1, err := NewSSTableReader(1, tempFile1, 0, 0)
 	if err != nil {
 		t.Fatalf("Failed to create reader1: %v", err)
 	}
-	reader2, err := NewSSTableReader(2, tempFile2, 0, cfg, 0)
+	reader2, err := NewSSTableReader(2, tempFile2, 0, 0)
 	if err != nil {
 		t.Fatalf("Failed to create reader2: %v", err)
 	}
@@ -581,9 +583,9 @@ func TestSSTableGet(t *testing.T) {
 	defer os.Remove(tempFile)
 
 	cfg := config.NewDefaultConfig()
-	blockManager := block.NewBlockManager(cfg.SSTable.DataSegment.BlockSize, 100)
+	blockManager := block.NewBlockManager(cfg.SSTable.DataSegment.BlockSize)
 
-	writer, err := NewSSTableWriter(tempFile, blockManager, cfg, 100)
+	writer, err := NewSSTableWriter(tempFile, blockManager, 100, 0)
 	if err != nil {
 		t.Fatalf("Failed to create writer: %v", err)
 	}
@@ -607,7 +609,7 @@ func TestSSTableGet(t *testing.T) {
 		t.Fatalf("Failed to finalize writer: %v", err)
 	}
 
-	reader, err := NewSSTableReader(1, tempFile, 0, cfg, 0)
+	reader, err := NewSSTableReader(1, tempFile, 0, 0)
 	if err != nil {
 		t.Fatalf("Failed to create reader: %v", err)
 	}

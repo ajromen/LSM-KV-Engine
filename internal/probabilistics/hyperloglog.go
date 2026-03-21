@@ -11,8 +11,6 @@ import (
 	"math/bits"
 	mrand "math/rand"
 	"time"
-
-	"github.com/ajromen/LSM-KV-Engine/internal/config"
 )
 
 const (
@@ -38,8 +36,7 @@ type HyperLogLog struct {
 
 // NewHyperLogLog pravi novu HLL instancu koristeci konfiguraciju
 // Trenutno koristim default preciznost
-func NewHyperLogLog(cfg config.HyperLogLogConfig) *HyperLogLog {
-	_ = cfg
+func NewHyperLogLog() *HyperLogLog {
 	return NewHyperLogLogWithParams(DefaultHLLPrecision, nil)
 }
 
