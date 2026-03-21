@@ -1,6 +1,7 @@
 package probabilistics
 
 import (
+	"bytes"
 	"testing"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/config"
@@ -228,5 +229,55 @@ func TestHammingDistanceHex_Invalid(t *testing.T) {
 	}
 	if _, err := HammingDistanceHex("zzzzzzzzzzzzzzzz", "0000000000000000"); err == nil {
 		t.Fatal("expected error for invalid hex chars")
+	}
+}
+
+func TestToBytesFromBytes_RoundTripWithoutFingerprint(t *testing.T) {
+	s := NewSimHashWithSeed(seedOf(0x77, 32))
+
+	b, err := s.ToBytes()
+	if err != nil {
+		t.Fatalf("ToBytes failed: %v", err)
+	}
+	if !IsSimHashBytes(b) {
+		t.Fatal("expected IsSimHashBytes=true for serialized state")
+	}
+
+	var out SimHash
+	if err := out.FromBytes(b); err != nil {
+		t.Fatalf("FromBytes failed: %v", err)
+	}
+
+	if got, ok := out.Fingerprint(); ok || got != 0 {
+		t.Fatalf("expected no fingerprint after roundtrip, got=%d ok=%v", got, ok)
+	}
+	if !bytes.Equal(s.Seed(), out.Seed()) {
+		t.Fatal("seed mismatch after roundtrip")
+	}
+}
+
+func TestToBytesFromBytes_RoundTripWithFingerprint(t *testing.T) {
+	s := NewSimHashWithSeed(seedOf(0x88, 32))
+	fp := s.HashText("serialized fingerprint test text")
+
+	b, err := s.ToBytes()
+	if err != nil {
+		t.Fatalf("ToBytes failed: %v", err)
+	}
+
+	var out SimHash
+	if err := out.FromBytes(b); err != nil {
+		t.Fatalf("FromBytes failed: %v", err)
+	}
+
+	got, ok := out.Fingerprint()
+	if !ok {
+		t.Fatal("expected fingerprint present after roundtrip")
+	}
+	if got != fp {
+		t.Fatalf("fingerprint mismatch after roundtrip: got=%d expected=%d", got, fp)
+	}
+	if !bytes.Equal(s.Seed(), out.Seed()) {
+		t.Fatal("seed mismatch after roundtrip")
 	}
 }
