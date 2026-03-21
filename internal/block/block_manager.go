@@ -5,13 +5,11 @@ import (
 	"fmt"
 	"io"
 	"os"
-
-	"github.com/ajromen/LSM-KV-Engine/internal/cache"
 )
 
 type BlockManager struct {
 	blockSize int
-	cache     *cache.LRU[BlockKey, []byte]
+	cache     *BlockCache
 }
 
 type BlockKey struct {
@@ -22,7 +20,7 @@ type BlockKey struct {
 func NewBlockManager(blockSize, maxLRUSize int) *BlockManager {
 	return &BlockManager{
 		blockSize: blockSize,
-		cache:     cache.NewLRU[BlockKey, []byte](maxLRUSize),
+		cache:     GetBlockCacheInstance(maxLRUSize),
 	}
 }
 

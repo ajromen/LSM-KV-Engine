@@ -64,8 +64,6 @@ func RunCli(engine *core.Engine) {
 			os.Exit(0)
 		case "help":
 			fmt.Println(helpText)
-		case "dataraw":
-			dataraw(engine)
 		default:
 			fmt.Println("Unknown command: ", parts[0])
 		}
