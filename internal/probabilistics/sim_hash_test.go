@@ -142,3 +142,53 @@ func TestDistanceMethods(t *testing.T) {
 		t.Fatalf("expected non-zero distance for different fingerprints")
 	}
 }
+
+func TestDistanceMethods_MissingFingerprintErrors(t *testing.T) {
+	seed := seedOf(0x55, 32)
+
+	a := NewSimHashWithSeed(seed)
+	b := NewSimHashWithSeed(seed)
+
+	if _, err := a.DistanceTo(b); err == nil {
+		t.Fatal("expected error when both fingerprints are missing")
+	}
+
+	a.HashText("only A has fingerprint")
+	if _, err := a.DistanceTo(b); err == nil {
+		t.Fatal("expected error when one fingerprint is missing")
+	}
+
+	c := NewSimHashWithSeed(seed)
+	if _, err := c.DistanceToFingerprint(123); err == nil {
+		t.Fatal("expected error for DistanceToFingerprint when fingerprint missing")
+	}
+}
+
+func TestSetFingerprint_AndHexHelpers(t *testing.T) {
+	s := NewSimHashWithSeed(seedOf(0x66, 32))
+
+	const fp uint64 = 0x0102030405060708
+	s.SetFingerprint(fp)
+
+	got, ok := s.Fingerprint()
+	if !ok || got != fp {
+		t.Fatalf("SetFingerprint failed: got=%d ok=%v expected=%d", got, ok, fp)
+	}
+
+	hexStr, ok := s.FingerprintHex()
+	if !ok {
+		t.Fatal("expected FingerprintHex ok=true")
+	}
+	if hexStr != "0102030405060708" {
+		t.Fatalf("FingerprintHex mismatch: got=%q", hexStr)
+	}
+
+	// set preko hex-a sa prefix-om
+	if err := s.SetFingerprintHex("0x1122334455667788"); err != nil {
+		t.Fatalf("SetFingerprintHex failed: %v", err)
+	}
+	got2, ok := s.Fingerprint()
+	if !ok || got2 != 0x1122334455667788 {
+		t.Fatalf("SetFingerprintHex mismatch: got=%x ok=%v", got2, ok)
+	}
+}
