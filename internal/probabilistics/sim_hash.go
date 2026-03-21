@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"io"
 	"math/bits"
+	"strings"
+	"unicode"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/config"
 )
@@ -286,4 +288,66 @@ func (s *SimHash) ToBytes() ([]byte, error) {
 func (s *SimHash) FromBytes(data []byte) error {
 	_, err := s.ReadFrom(bytes.NewReader(data))
 	return err
+}
+
+func (s *SimHash) compute(text string) uint64 {
+	tokenFreq := tokenizeAndCount(text)
+	if len(tokenFreq) == 0 {
+		return 0
+	}
+
+	var vec [SimHashBits]int64
+
+	for tok, weight := range tokenFreq {
+		h := s.hashFn.Hash([]byte(tok))
+		w := int64(weight)
+
+		for i := 0; i < SimHashBits; i++ {
+			mask := uint64(1) << uint(i)
+			if (h & mask) != 0 {
+				vec[i] += w
+			} else {
+				vec[i] -= w
+			}
+		}
+	}
+
+	var fp uint64
+	for i := 0; i < SimHashBits; i++ {
+		if vec[i] >= 0 {
+			fp |= (uint64(1) << uint(i))
+		}
+	}
+	return fp
+}
+
+func tokenizeAndCount(text string) map[string]uint32 {
+	freq := make(map[string]uint32)
+	if len(text) == 0 {
+		return freq
+	}
+
+	var b strings.Builder
+
+	flush := func() {
+		if b.Len() == 0 {
+			return
+		}
+		tok := b.String()
+		if tok != "" {
+			freq[tok]++
+		}
+		b.Reset()
+	}
+
+	for _, r := range text {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			b.WriteRune(unicode.ToLower(r))
+		} else {
+			flush()
+		}
+	}
+	flush()
+
+	return freq
 }
