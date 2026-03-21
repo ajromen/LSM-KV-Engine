@@ -52,3 +52,42 @@ func TestNewSimHashWithSeed_CopiesInputAndSeedGetterReturnsCopy(t *testing.T) {
 		t.Fatalf("Seed() should return copy; internal seed changed to %x", got2[1])
 	}
 }
+
+func TestHashText_DeterministicForSameSeed(t *testing.T) {
+	seed := seedOf(0x11, 32)
+	text := "Hello, WORLD! This is a SimHash test 123."
+
+	s1 := NewSimHashWithSeed(seed)
+	s2 := NewSimHashWithSeed(seed)
+
+	fp1 := s1.HashText(text)
+	fp2 := s2.HashText(text)
+
+	if fp1 != fp2 {
+		t.Fatalf("same seed + same text must produce same fingerprint: %d vs %d", fp1, fp2)
+	}
+
+	fp3 := ComputeSimHash(text, seed)
+	if fp1 != fp3 {
+		t.Fatalf("ComputeSimHash mismatch: %d vs %d", fp1, fp3)
+	}
+
+	if got, ok := s1.Fingerprint(); !ok || got != fp1 {
+		t.Fatalf("Fingerprint() mismatch: got=%d ok=%v expected=%d", got, ok, fp1)
+	}
+}
+
+func TestHashText_NormalizationCaseAndPunctuation(t *testing.T) {
+	seed := seedOf(0x22, 32)
+
+	// tokenizeAndCount koristi lower-case i razdvaja po ne-alnum karakterima
+	a := "Hello, WORLD!! 123"
+	b := "hello world 123"
+
+	fpA := ComputeSimHash(a, seed)
+	fpB := ComputeSimHash(b, seed)
+
+	if fpA != fpB {
+		t.Fatalf("expected same fingerprint after normalization: %d vs %d", fpA, fpB)
+	}
+}
