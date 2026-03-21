@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
 	"math/bits"
 
@@ -215,4 +216,60 @@ func (s *SimHash) WriteTo(w io.Writer) (int64, error) {
 	}
 
 	return written, nil
+}
+
+func (s *SimHash) ReadFrom(r io.Reader) (int64, error) {
+	if s == nil {
+		return 0, errors.New("nil simhash")
+	}
+
+	var read int64
+
+	magic := make([]byte, len(simHashMagic))
+	n, err := io.ReadFull(r, magic)
+	if err != nil {
+		return read, err
+	}
+	read += int64(n)
+
+	if string(magic) != simHashMagic {
+		return read, fmt.Errorf("neispravan simhash magic: %q", string(magic))
+	}
+
+	readU64 := func(dst *uint64) error {
+		if err := binary.Read(r, binary.BigEndian, dst); err != nil {
+			return err
+		}
+		read += 8
+		return nil
+	}
+
+	var seedLen uint64
+	if err := readU64(&seedLen); err != nil {
+		return read, err
+	}
+
+	seed := make([]byte, seedLen)
+	n, err = io.ReadFull(r, seed)
+	if err != nil {
+		return read, err
+	}
+	read += int64(n)
+
+	var has uint8
+	if err := binary.Read(r, binary.BigEndian, &has); err != nil {
+		return read, err
+	}
+	read += 1
+
+	var fp uint64
+	if err := readU64(&fp); err != nil {
+		return read, err
+	}
+
+	s.hashFn = HashWithSeed{Seed: seed}
+	s.fingerprint = fp
+	s.hasFingerprint = (has != 0)
+
+	return read, nil
 }
