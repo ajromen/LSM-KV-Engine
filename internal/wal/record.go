@@ -65,6 +65,28 @@ func Encode(r Record) []byte {
 	return buf
 }
 
+func Decode(buf []byte) Record {
+	r := Record{}
+
+	r.Timestamp = binary.LittleEndian.Uint64(buf[TIMESTAMP_START:TOMBSTONE_START])
+
+	if buf[TOMBSTONE_START] == 0 {
+		r.Tombstone = false
+	} else {
+		r.Tombstone = true
+	}
+
+	keySize := binary.LittleEndian.Uint64(buf[KEY_SIZE_START:VALUE_SIZE_START])
+	valueSize := binary.LittleEndian.Uint64(buf[VALUE_SIZE_START:KEY_START])
+
+	valueStart := KEY_START + keySize
+
+	r.Key = buf[KEY_START:valueStart]
+	r.Value = buf[valueStart : valueStart+valueSize]
+
+	return r
+}
+
 func CRC32(data []byte) uint32 {
 	return crc32.ChecksumIEEE(data)
 }
