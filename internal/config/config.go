@@ -84,28 +84,23 @@ type ProbabilisticTypeConfig struct {
 }
 
 type BloomFilterConfig struct {
-	Enabled           bool    `json:"enabled"`
 	FalsePositiveRate float32 `json:"false_positive_rate"`
 }
 
 type CountMinSketchConfig struct {
-	Enabled    bool     `json:"enabled"`
 	Accuracy   float64  `json:"accuracy"`
 	Confidence float64  `json:"confidence"`
 	Seeds      [][]byte `json:"seeds"`
 }
 
 type HyperLogLogConfig struct {
-	Enabled bool `json:"enabled"`
 }
 
 type SimHashConfig struct {
-	Enabled bool `json:"enabled"`
 }
 
 type TTLConfig struct {
-	Enabled  bool `json:"enabled"`
-	Duration int  `json:"duration"`
+	Duration int `json:"duration"`
 }
 
 type SkipListConfig struct {

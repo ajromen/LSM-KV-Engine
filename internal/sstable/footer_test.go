@@ -5,14 +5,13 @@ import (
 	"hash/crc32"
 	"testing"
 
-	"github.com/ajromen/LSM-KV-Engine/internal/config"
 	"github.com/ajromen/LSM-KV-Engine/internal/utils"
 )
 
 func TestFooterEncodeDecode(t *testing.T) {
 	t.Log("---- FOOTER ENCODE/DECODE TEST ----")
 
-	footer := NewFooter(config.SSTableConfig{})
+	footer := NewFooter()
 	footer.NumDataBlocks = 5
 	footer.MinKeyLength = 3
 	footer.MaxKeyLength = 10
@@ -59,7 +58,7 @@ func TestFooterEncodeDecode(t *testing.T) {
 func TestFooterValidate(t *testing.T) {
 	t.Log("---- FOOTER VALIDATE TEST ----")
 
-	footer := NewFooter(config.SSTableConfig{})
+	footer := NewFooter()
 	footer.Version = 1
 	footer.Format = 0
 	footer.MagicNumber = MagicNumber
@@ -89,7 +88,7 @@ func TestFooterValidate(t *testing.T) {
 func TestFooterCRCError(t *testing.T) {
 	t.Log("---- FOOTER CRC ERROR TEST ----")
 
-	footer := NewFooter(config.SSTableConfig{})
+	footer := NewFooter()
 	encoded := footer.Encode()
 
 	// corrupt one byte
@@ -105,7 +104,7 @@ func TestFooterCRCError(t *testing.T) {
 func TestFooterWriteReadBuffer(t *testing.T) {
 	t.Log("---- FOOTER WRITE/READ BUFFER TEST ----")
 
-	footer := NewFooter(config.SSTableConfig{})
+	footer := NewFooter()
 	footer.NumDataBlocks = 2
 	buf := footer.Encode()
 

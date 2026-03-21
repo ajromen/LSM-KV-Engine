@@ -311,16 +311,16 @@ func (m *MultiFileStorage) Sync() error {
 }
 
 // CreateStorage CREATES SINGLE FILE / MULTI FILE STORAGE BASED ON SSTABLE FORMAT CONFIGURATION
-func CreateStorage(basePath string, config *config.Config, blockManager *block.BlockManager) (SegmentStorage, error) {
-	if config.SSTable.Format == 0 {
+func CreateStorage(basePath string, blockManager *block.BlockManager) (SegmentStorage, error) {
+	if config.GetSettings().SSTable.Format == 0 {
 		return NewSingleFileStorage(basePath, blockManager)
 	}
 	return NewMultiFileStorage(basePath, blockManager)
 }
 
 // OpenStorage OPENS SINGLE FILE / MULTI FILE STORAGE BASED ON SSTABLE FORMAT CONFIGURATION
-func OpenStorage(basePath string, config *config.Config) (SegmentStorage, error) {
-	if config.SSTable.Format == 0 {
+func OpenStorage(basePath string) (SegmentStorage, error) {
+	if config.GetSettings().SSTable.Format == 0 {
 		return OpenSingleFileStorage(basePath)
 	}
 	return OpenMultiFileStorage(basePath)

@@ -53,27 +53,25 @@ func newLayer() *Layer {
 }
 
 type SSTableManager struct {
-	config       *config.Config
 	Layers       []*Layer
 	blockManager *block.BlockManager
 	manifest     *Manifest
 	dataDir      string
 }
 
-func NewSSTableManager(dataDir string, cfg *config.Config) *SSTableManager {
+func NewSSTableManager(dataDir string) *SSTableManager {
 	manager := &SSTableManager{
-		config:  cfg,
 		dataDir: dataDir,
 		Layers:  make([]*Layer, 0),
 	}
 	manager.Layers = append(manager.Layers, newLayer())
-	blockSize := cfg.SSTable.DataSegment.BlockSize
+	blockSize := config.GetSettings().SSTable.DataSegment.BlockSize
 	manifest, err := NewManifest(dataDir)
 	if err != nil {
 		panic(err)
 	}
 	manager.manifest = manifest
-	manager.blockManager = block.NewBlockManager(blockSize, 100)
+	manager.blockManager = block.NewBlockManager(blockSize)
 	if err := manager.LoadExistingSSTables(); err != nil {
 		panic(fmt.Errorf("failed to load existing sstables: %v", err))
 	}
@@ -100,7 +98,7 @@ func (sm *SSTableManager) LoadExistingSSTables() error {
 			sm.Layers = append(sm.Layers, newLayer())
 		}
 		for _, sstManifest := range sm.manifest.Layers[i] {
-			reader, err := NewSSTableReader(sstManifest.Id, sstManifest.BaseFileName, sstManifest.Format, sm.config, int(sstManifest.Layer))
+			reader, err := NewSSTableReader(sstManifest.Id, sstManifest.BaseFileName, sstManifest.Format, int(sstManifest.Layer))
 			if err != nil {
 				return fmt.Errorf("cant create SSTable reader: %w", err)
 			}
@@ -120,7 +118,7 @@ func (sm *SSTableManager) FlushToSSTable(entries []memtable.MemtableEntry) error
 	sstableID := sm.manifest.NextSStableId
 	sm.manifest.IncrementId()
 	filePath := filepath.Join(sm.dataDir, fmt.Sprintf("%06d%s", sstableID, SSTableFileExtension))
-	writer, err := NewSSTableWriter(filePath, sm.blockManager, sm.config, uint64(len(entries)), 0)
+	writer, err := NewSSTableWriter(filePath, sm.blockManager, uint64(len(entries)), 0)
 	if err != nil {
 		return fmt.Errorf("cant create SSTable writer: %w", err)
 	}
@@ -138,7 +136,8 @@ func (sm *SSTableManager) FlushToSSTable(entries []memtable.MemtableEntry) error
 	if err := writer.Finalize(); err != nil {
 		return err
 	}
-	reader, err := NewSSTableReader(sstableID, filePath, sm.config.SSTable.Format, sm.config, 0)
+	format := config.GetSettings().SSTable.Format
+	reader, err := NewSSTableReader(sstableID, filePath, format, 0)
 	if err != nil {
 		return fmt.Errorf("cant create SSTable reader: %w", err)
 	}
@@ -147,7 +146,7 @@ func (sm *SSTableManager) FlushToSSTable(entries []memtable.MemtableEntry) error
 	sstManifest := SSTableManifest{
 		Id:           sstableID,
 		Layer:        0,
-		Format:       sm.config.SSTable.Format,
+		Format:       format,
 		BaseFileName: filePath,
 	}
 	err = sm.manifest.AddSSTable(sstManifest)
@@ -227,7 +226,7 @@ func (sm *SSTableManager) MergeSSTables(readers []*SSTableReader, toLayer int, s
 		expectedElems += reader.footer.TotalRecords
 	}
 
-	writer, err := NewSSTableWriter(filePath, sm.blockManager, sm.config, expectedElems, toLayer)
+	writer, err := NewSSTableWriter(filePath, sm.blockManager, expectedElems, toLayer)
 	if err != nil {
 		return err
 	}
@@ -264,7 +263,7 @@ func (sm *SSTableManager) MergeSSTables(readers []*SSTableReader, toLayer int, s
 	}
 
 	// 3. open new reader and add to manager
-	reader, err := NewSSTableReaderFromWriter(writer, sstableID, sm.config)
+	reader, err := NewSSTableReaderFromWriter(writer, sstableID)
 	if err != nil {
 		return err
 	}
@@ -277,7 +276,7 @@ func (sm *SSTableManager) MergeSSTables(readers []*SSTableReader, toLayer int, s
 	sstManifest := SSTableManifest{
 		Id:           sstableID,
 		Layer:        uint64(toLayer),
-		Format:       sm.config.SSTable.Format,
+		Format:       config.GetSettings().SSTable.Format,
 		BaseFileName: filePath,
 	}
 	err = sm.manifest.AddSSTable(sstManifest)

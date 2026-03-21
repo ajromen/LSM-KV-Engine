@@ -15,20 +15,20 @@ type Engine struct {
 }
 
 func NewEngine(flags *cli.FLags) (*Engine, error) {
-	cfg, err := config.LoadConfig(flags)
+	err := config.LoadConfig(flags)
 	if err != nil {
 		return nil, err
 	}
-	dataDir := cfg.SavePath
+	dataDir := config.GetSettings().SavePath
 	if err := os.MkdirAll(dataDir, 0755); err != nil {
 		return nil, err
 	}
 
-	lsmTree, err := lsm.NewLSM(cfg, dataDir)
+	lsmTree, err := lsm.NewLSM(dataDir)
 	if err != nil {
 		return nil, err
 	}
-	engine := Engine{config: cfg, lsm: lsmTree}
+	engine := Engine{lsm: lsmTree}
 	return &engine, nil
 }
 

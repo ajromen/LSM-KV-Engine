@@ -10,24 +10,25 @@ import (
 	"github.com/ajromen/LSM-KV-Engine/internal/enums"
 )
 
-func LoadConfig(flags *cli.FLags) (*Config, error) {
+func LoadConfig(flags *cli.FLags) error {
 	cfg := NewDefaultConfig()
 	if flags.ConfigPath != nil {
 		err := cfg.loadFromFile(*flags.ConfigPath)
 		if err != nil {
-			return nil, err
+			return err
 		}
 	}
 	err := cfg.applyFlags(flags)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	err = cfg.validateFields()
 	if err != nil {
-		return nil, err
+		return err
 	}
-	return cfg, nil
+	createSettings(cfg)
+	return nil
 }
 
 func (c *Config) applyFlags(flags *cli.FLags) error {

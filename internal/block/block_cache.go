@@ -1,6 +1,9 @@
 package block
 
-import "github.com/ajromen/LSM-KV-Engine/internal/cache"
+import (
+	"github.com/ajromen/LSM-KV-Engine/internal/cache"
+	"github.com/ajromen/LSM-KV-Engine/internal/config"
+)
 
 var instance *BlockCache
 
@@ -9,10 +12,10 @@ type BlockCache struct {
 }
 
 // ensures single block cache instance
-func GetBlockCacheInstance(maxLRUSize int) *BlockCache {
+func GetBlockCacheInstance() *BlockCache {
 	if instance == nil {
 		instance = &BlockCache{
-			cache.NewLRU[BlockKey, []byte](maxLRUSize),
+			cache.NewLRU[BlockKey, []byte](config.GetSettings().BlockManager.BlockCacheMaxBlocks),
 		}
 	}
 	return instance

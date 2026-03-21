@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"math"
 	"testing"
-
-	"github.com/ajromen/LSM-KV-Engine/internal/config"
 )
 
 func fixedSeed(val byte, n int) []byte {
@@ -29,7 +27,8 @@ func buildHLLWithRange(precision uint8, seed []byte, prefix string, start, count
 }
 
 func TestHyperLogLog_NewFromConfig_Defaults(t *testing.T) {
-	h := NewHyperLogLog(config.HyperLogLogConfig{Enabled: true})
+
+	h := NewHyperLogLog()
 	if h == nil {
 		t.Fatal("ocekivan non-nil HyperLogLog")
 	}
