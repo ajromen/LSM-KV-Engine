@@ -103,3 +103,17 @@ func (s *SimHash) Clear() {
 	s.fingerprint = 0
 	s.hasFingerprint = false
 }
+
+func (s *SimHash) HashText(text string) uint64 {
+	if s == nil {
+		return 0
+	}
+	fp := s.compute(text)
+	s.fingerprint = fp
+	s.hasFingerprint = true
+	return fp
+}
+
+func (s *SimHash) HashBytes(data []byte) uint64 {
+	return s.HashText(string(data))
+}
