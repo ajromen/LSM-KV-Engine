@@ -1,4 +1,4 @@
-package probabilistic
+package probabilistics
 
 import (
 	"bytes"
