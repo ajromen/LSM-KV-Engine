@@ -3,6 +3,7 @@ package probabilistic
 import (
 	"encoding/binary"
 	"encoding/hex"
+	"errors"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/config"
 )
@@ -72,4 +73,25 @@ func (s *SimHash) FingerprintHex() (string, bool) {
 	buf := make([]byte, 8)
 	binary.BigEndian.PutUint64(buf, fp)
 	return hex.EncodeToString(buf), true
+}
+
+func (s *SimHash) SetFingerprint(fp uint64) {
+	if s == nil {
+		return
+	}
+	s.fingerprint = fp
+	s.hasFingerprint = true
+}
+
+func (s *SimHash) SetFingerprintHex(fpHex string) error {
+	if s == nil {
+		return errors.New("nil simhash")
+	}
+	fp, err := parseHexFingerprint(fpHex)
+	if err != nil {
+		return err
+	}
+	s.fingerprint = fp
+	s.hasFingerprint = true
+	return nil
 }
