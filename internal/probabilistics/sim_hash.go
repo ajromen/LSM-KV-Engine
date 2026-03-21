@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
+	"math/bits"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/config"
 )
@@ -144,4 +145,25 @@ func (s *SimHash) DistanceToFingerprintHex(fpHex string) (uint8, error) {
 		return 0, err
 	}
 	return s.DistanceToFingerprint(fp)
+}
+
+func ComputeSimHash(text string, seed []byte) uint64 {
+	s := NewSimHashWithSeed(seed)
+	return s.compute(text)
+}
+
+func HammingDistance64(a, b uint64) uint8 {
+	return uint8(bits.OnesCount64(a ^ b))
+}
+
+func HammingDistanceHex(aHex, bHex string) (uint8, error) {
+	a, err := parseHexFingerprint(aHex)
+	if err != nil {
+		return 0, err
+	}
+	b, err := parseHexFingerprint(bHex)
+	if err != nil {
+		return 0, err
+	}
+	return HammingDistance64(a, b), nil
 }
