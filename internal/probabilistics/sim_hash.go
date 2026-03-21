@@ -1,6 +1,7 @@
 package probabilistic
 
 import (
+	"bytes"
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
@@ -170,7 +171,6 @@ func HammingDistanceHex(aHex, bHex string) (uint8, error) {
 	return HammingDistance64(a, b), nil
 }
 
-// WriteTo serijalizuje SimHash u binarni format.
 func (s *SimHash) WriteTo(w io.Writer) (int64, error) {
 	if s == nil {
 		return 0, errors.New("nil simhash")
@@ -272,4 +272,18 @@ func (s *SimHash) ReadFrom(r io.Reader) (int64, error) {
 	s.hasFingerprint = (has != 0)
 
 	return read, nil
+}
+
+func (s *SimHash) ToBytes() ([]byte, error) {
+	var buf bytes.Buffer
+	_, err := s.WriteTo(&buf)
+	if err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+func (s *SimHash) FromBytes(data []byte) error {
+	_, err := s.ReadFrom(bytes.NewReader(data))
+	return err
 }
