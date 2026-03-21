@@ -8,3 +8,9 @@ const (
 	// Standardni SimHash fingerprint: 64 bita
 	SimHashBits = 64
 )
+
+type SimHash struct {
+	hashFn         HashWithSeed
+	fingerprint    uint64
+	hasFingerprint bool
+}
