@@ -322,3 +322,35 @@ func TestIsSimHashBytes(t *testing.T) {
 		t.Fatal("expected true for valid serialized simhash")
 	}
 }
+
+func TestTokenizeAndCount(t *testing.T) {
+	in := "Go, go! gO 123 123 x-y"
+	got := tokenizeAndCount(in)
+
+	if got["go"] != 3 {
+		t.Fatalf("expected go=3, got=%d", got["go"])
+	}
+	if got["123"] != 2 {
+		t.Fatalf("expected 123=2, got=%d", got["123"])
+	}
+	if got["x"] != 1 || got["y"] != 1 {
+		t.Fatalf("expected x=1 and y=1, got x=%d y=%d", got["x"], got["y"])
+	}
+}
+
+func TestParseHexFingerprint(t *testing.T) {
+	v, err := parseHexFingerprint("0x1122334455667788")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if v != 0x1122334455667788 {
+		t.Fatalf("parsed value mismatch: got=%x expected=1122334455667788", v)
+	}
+
+	if _, err := parseHexFingerprint("abcd"); err == nil {
+		t.Fatal("expected error for short length")
+	}
+	if _, err := parseHexFingerprint("zzzzzzzzzzzzzzzz"); err == nil {
+		t.Fatal("expected error for invalid chars")
+	}
+}
