@@ -72,7 +72,7 @@ func (m *Manifest) reconstruct(fileDir string) error {
 			if strings.HasSuffix(name, SSTableFileExtension+string(DataSegmentExtension)) {
 				basePath := filepath.Join(fileDir, strings.TrimSuffix(name, string(DataSegmentExtension)))
 				fl := FormatLayer{
-					format: enums.FormatSingleFile,
+					format: enums.FormatMultiFile,
 				}
 				sstableFiles[basePath] = fl
 			}
@@ -89,14 +89,15 @@ func (m *Manifest) reconstruct(fileDir string) error {
 		var id int
 		_, err := fmt.Sscanf(filepath.Base(filePath), "L%d_%d%s", &layer, &id, &ext)
 		if err != nil {
-			return err
+			fmt.Printf("Failed to load sstable %s continuing", filePath)
+			continue
 		}
 		if id >= m.NextSStableId {
 			m.NextSStableId = id + 1
 		}
 		sst := SSTableManifest{
 			Layer:        uint64(layer),
-			BaseFileName: filepath.Base(filePath),
+			BaseFileName: filePath,
 			Format:       sstableFiles[filePath].format,
 			Id:           id,
 		}
