@@ -302,8 +302,13 @@ func (t *RBTree[T]) deleteFixup(x *RBTreeNode[T]) {
 }
 
 func (t *RBTree[T]) EntriesInOrder() []T {
+	it := t.Iterator()
+	it.SeekToFirst()
 	result := make([]T, 0, t.size)
-	t.inOrderHelper(t.root, &result)
+	for it.Valid() {
+		result = append(result, it.Value())
+		it.Next()
+	}
 	return result
 }
 

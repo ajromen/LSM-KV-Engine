@@ -112,13 +112,14 @@ func (hm *HackMap[T]) KeysInOrder() []string {
 }
 
 func (hm *HackMap[T]) EntriesInOrder() []T {
-	entries := make([]T, 0, len(hm.data))
-	keys := hm.KeysInOrder()
-	for _, k := range keys {
-		stack := hm.data[k]
-		entries = append(entries, stack.Peek())
+	it := hm.Iterator()
+	it.SeekToFirst()
+	var result []T
+	for it.Valid() {
+		result = append(result, it.Value())
+		it.Next()
 	}
-	return entries
+	return result
 }
 
 func (hm *HackMap[T]) Data() map[string]*Stack[T] {
@@ -141,7 +142,11 @@ func (hm *HackMap[T]) Iterator() *HackMapIterator[T] {
 }
 
 func (it *HackMapIterator[T]) Valid() bool {
-	return it.keyIndex >= 0 && it.keyIndex < len(it.keys) && it.valIndex >= 0
+	if it.keyIndex < 0 || it.keyIndex >= len(it.keys) {
+		return false
+	}
+	stack := it.hackmap.data[it.keys[it.keyIndex]]
+	return it.valIndex >= 0 && it.valIndex < stack.Len()
 }
 
 func (it *HackMapIterator[T]) SeekToFirst() {

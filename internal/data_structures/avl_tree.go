@@ -203,8 +203,13 @@ func (t *AVLTree[T]) Delete(key T) {
 }
 
 func (t *AVLTree[T]) EntriesInOrder() []T {
-	result := make([]T, 0)
-	t.inOrderHelper(t.root, &result)
+	it := t.Iterator()
+	it.SeekToFirst()
+	var result []T
+	for it.Valid() {
+		result = append(result, it.Key())
+		it.Next()
+	}
 	return result
 }
 

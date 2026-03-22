@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/cli"
@@ -64,6 +65,8 @@ func RunCli(engine *core.Engine) {
 			os.Exit(0)
 		case "help":
 			fmt.Println(helpText)
+		case "dataraw":
+			handleDataRaw(engine, parts)
 		default:
 			fmt.Println("Unknown command: ", parts[0])
 		}
@@ -133,4 +136,21 @@ func handleClear(engine *core.Engine, parts []string) {
 		return
 	}
 	fmt.Println("ClearAll: OK")
+}
+
+func handleDataRaw(engine *core.Engine, parts []string) {
+	if len(parts) != 2 {
+		fmt.Println("Usage: dataraw <index>")
+		return
+	}
+
+	indxStr := parts[1]
+
+	indx, err := strconv.Atoi(indxStr)
+	if err != nil {
+		fmt.Println("invalid index:", indxStr)
+		return
+	}
+
+	engine.DataRaw(indx)
 }
