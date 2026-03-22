@@ -9,14 +9,14 @@ import (
 	"github.com/ajromen/LSM-KV-Engine/internal/enums"
 )
 
-func newConfig(compaction enums.LSMCompaction) *config.Config {
+func newConfig(compaction enums.LSMCompaction) {
 	cfg := config.NewDefaultConfig()
 	cfg.LSMTree.CompactionAlgorithm = compaction
 	cfg.LSMTree.MinMergeThreshold = 4
 	cfg.LSMTree.LevelSizeMultiplier = 10
 	cfg.Memtable.MemtableMaxEntries = 5
 	cfg.Memtable.MemtableMaxSizeBytes = 1024 * 4
-	return cfg
+	config.TESTSetSettings(cfg)
 }
 
 func setupLSM(t *testing.T, compaction enums.LSMCompaction) (*LSM, string) {
@@ -25,7 +25,8 @@ func setupLSM(t *testing.T, compaction enums.LSMCompaction) (*LSM, string) {
 	if err != nil {
 		t.Fatalf("MkdirTemp: %v", err)
 	}
-	lsm, err := NewLSM(newConfig(compaction), dir)
+	newConfig(compaction)
+	lsm, err := NewLSM(dir)
 	if err != nil {
 		t.Fatalf("NewLSM: %v", err)
 	}
@@ -158,7 +159,7 @@ func TestSizeTiered_CompactionReducesL0(t *testing.T) {
 	l0 := lsm.sstableManager.Layers[0].Length()
 	t.Logf("L0 count after 200 puts: %d", l0)
 
-	threshold := lsm.cfg.LSMTree.MinMergeThreshold
+	threshold := config.GetSettings().LSMTree.MinMergeThreshold
 	if l0 >= threshold {
 		t.Errorf("L0 should have been compacted, got %d (threshold %d)", l0, threshold)
 	}
@@ -234,16 +235,16 @@ func testPersistence(t *testing.T, compaction enums.LSMCompaction) {
 		_ = os.RemoveAll(dir)
 	})
 
-	cfg := newConfig(compaction)
+	newConfig(compaction)
 
-	lsm1, err := NewLSM(cfg, dir)
+	lsm1, err := NewLSM(dir)
 	if err != nil {
 		t.Fatalf("NewLSM: %v", err)
 	}
 	putN(t, lsm1, 50)
 	_ = lsm1.Finish()
 
-	lsm2, err := NewLSM(cfg, dir)
+	lsm2, err := NewLSM(dir)
 	if err != nil {
 		t.Fatalf("NewLSM reopen: %v", err)
 	}

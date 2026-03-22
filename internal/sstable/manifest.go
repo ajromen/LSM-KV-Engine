@@ -83,9 +83,11 @@ func (m *Manifest) reconstruct(fileDir string) error {
 		sortedFiles = append(sortedFiles, file)
 	}
 	sort.Strings(sortedFiles)
+	var layer int
+	var ext string
 	for _, filePath := range sortedFiles {
 		var id int
-		_, err := fmt.Sscanf(filepath.Base(filePath), "%d%s", &id, SSTableFileExtension)
+		_, err := fmt.Sscanf(filepath.Base(filePath), "L%d_%d%s", &layer, &id, &ext)
 		if err != nil {
 			return err
 		}
@@ -93,12 +95,12 @@ func (m *Manifest) reconstruct(fileDir string) error {
 			m.NextSStableId = id + 1
 		}
 		sst := SSTableManifest{
-			Layer:        0,
+			Layer:        uint64(layer),
 			BaseFileName: filepath.Base(filePath),
 			Format:       sstableFiles[filePath].format,
 			Id:           id,
 		}
-		m.Layers[0] = append(m.Layers[0], sst)
+		m.Layers[layer] = append(m.Layers[layer], sst)
 	}
 	err = m.Save()
 	if err != nil {

@@ -1,6 +1,7 @@
 package lsm
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/config"
@@ -42,7 +43,7 @@ func NewLSM(dataDir string) (*LSM, error) {
 func (l *LSM) onFlush(entries []memtable.MemtableEntry) {
 	err := l.sstableManager.FlushToSSTable(entries)
 	if err != nil {
-		panic(err)
+		panic(fmt.Errorf("error flushing memtable entries: %v", err))
 	}
 
 	// TODO set this in a goroutine

@@ -120,6 +120,10 @@ func NewSSTableReader(id int, filePath string, format enums.SSTableFormat, layer
 
 // NewSSTableReaderFromWriter make sure writer finalize has been run before
 func NewSSTableReaderFromWriter(w *SSTableWriter, id int) (*SSTableReader, error) {
+	if err := w.storage.Restart(); err != nil {
+		return nil, fmt.Errorf("failed to restart storage: %w", err)
+	}
+
 	r := &SSTableReader{
 		storage:        w.storage,
 		Layer:          w.Layer,
@@ -132,7 +136,6 @@ func NewSSTableReaderFromWriter(w *SSTableWriter, id int) (*SSTableReader, error
 		valueDecoder:   w.valueEncoder, // TODO check encoder is decoder
 		Id:             id,
 	}
-
 	switch s := r.storage.(type) {
 	case *SingleFileStorage:
 		info, err := s.File().Stat()
