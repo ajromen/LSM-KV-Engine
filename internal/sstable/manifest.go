@@ -72,7 +72,7 @@ func (m *Manifest) reconstruct(fileDir string) error {
 			if strings.HasSuffix(name, SSTableFileExtension+string(DataSegmentExtension)) {
 				basePath := filepath.Join(fileDir, strings.TrimSuffix(name, string(DataSegmentExtension)))
 				fl := FormatLayer{
-					format: enums.FormatSingleFile,
+					format: enums.FormatMultiFile,
 				}
 				sstableFiles[basePath] = fl
 			}
@@ -83,22 +83,25 @@ func (m *Manifest) reconstruct(fileDir string) error {
 		sortedFiles = append(sortedFiles, file)
 	}
 	sort.Strings(sortedFiles)
+	var layer int
+	var ext string
 	for _, filePath := range sortedFiles {
 		var id int
-		_, err := fmt.Sscanf(filepath.Base(filePath), "%d%s", &id, SSTableFileExtension)
+		_, err := fmt.Sscanf(filepath.Base(filePath), "L%d_%d%s", &layer, &id, &ext)
 		if err != nil {
-			return err
+			fmt.Printf("Failed to load sstable %s continuing", filePath)
+			continue
 		}
 		if id >= m.NextSStableId {
 			m.NextSStableId = id + 1
 		}
 		sst := SSTableManifest{
-			Layer:        0,
-			BaseFileName: filepath.Base(filePath),
+			Layer:        uint64(layer),
+			BaseFileName: filePath,
 			Format:       sstableFiles[filePath].format,
 			Id:           id,
 		}
-		m.Layers[0] = append(m.Layers[0], sst)
+		m.Layers[layer] = append(m.Layers[layer], sst)
 	}
 	err = m.Save()
 	if err != nil {

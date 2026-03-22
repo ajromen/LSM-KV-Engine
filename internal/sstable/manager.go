@@ -108,20 +108,54 @@ func (sm *SSTableManager) LoadExistingSSTables() error {
 	return nil
 }
 
+func (sm *SSTableManager) createSSTable(expectedElems uint64, toLayer int) (string, int, *SSTableWriter, error) {
+	sstableID := sm.manifest.NextSStableId
+	sm.manifest.IncrementId()
+	filePath := filepath.Join(sm.dataDir, fmt.Sprintf("L%d_%06d%s", toLayer, sstableID, SSTableFileExtension))
+	writer, err := NewSSTableWriter(filePath, sm.blockManager, expectedElems, toLayer)
+	if err != nil {
+		return "", 0, nil, fmt.Errorf("cant create SSTable writer: %w", err)
+	}
+	return filePath, sstableID, writer, nil
+}
+
+func (sm *SSTableManager) addToLayers(reader *SSTableReader, toLayer int) error {
+	for len(sm.Layers) <= toLayer {
+		sm.Layers = append(sm.Layers, newLayer())
+	}
+	sm.Layers[toLayer].AppendSSTable(reader)
+
+	sstManifest := SSTableManifest{
+		Id:           reader.Id,
+		Layer:        uint64(toLayer),
+		Format:       config.GetSettings().SSTable.Format,
+		BaseFileName: reader.filePath,
+	}
+	err := sm.manifest.AddSSTable(sstManifest)
+	if err != nil {
+		return fmt.Errorf("cant add sstable to manifest: %w", err)
+	}
+	return nil
+}
+
 // takes memtables and flushes them to sstable
+// 1. create new sstable
+// 2. add entries
+// 3. create reader and add to manager
 func (sm *SSTableManager) FlushToSSTable(entries []memtable.MemtableEntry) error {
 	if len(entries) == 0 {
 		return nil
 	}
 	fmt.Printf("Flushing %d entries\n", len(entries))
 	sort.Slice(entries, func(i, j int) bool { return bytes.Compare(entries[i].Key, entries[j].Key) < 0 })
-	sstableID := sm.manifest.NextSStableId
-	sm.manifest.IncrementId()
-	filePath := filepath.Join(sm.dataDir, fmt.Sprintf("%06d%s", sstableID, SSTableFileExtension))
-	writer, err := NewSSTableWriter(filePath, sm.blockManager, uint64(len(entries)), 0)
+
+	// 1. create new sstable
+	filePath, sstableID, writer, err := sm.createSSTable(uint64(len(entries)), 0)
 	if err != nil {
-		return fmt.Errorf("cant create SSTable writer: %w", err)
+		return err
 	}
+
+	// 2. add entries
 	for _, entry := range entries {
 		record := Record{
 			Key:       entry.Key,
@@ -136,20 +170,14 @@ func (sm *SSTableManager) FlushToSSTable(entries []memtable.MemtableEntry) error
 	if err := writer.Finalize(); err != nil {
 		return err
 	}
-	format := config.GetSettings().SSTable.Format
-	reader, err := NewSSTableReader(sstableID, filePath, format, 0)
+
+	// 3. create reader and add to manager
+	reader, err := NewSSTableReaderFromWriter(writer, sstableID)
 	if err != nil {
 		return fmt.Errorf("cant create SSTable reader: %w", err)
 	}
-	sm.Layers[0].AppendSSTable(reader)
 
-	sstManifest := SSTableManifest{
-		Id:           sstableID,
-		Layer:        0,
-		Format:       format,
-		BaseFileName: filePath,
-	}
-	err = sm.manifest.AddSSTable(sstManifest)
+	err = sm.addToLayers(reader, 0)
 	if err != nil {
 		return err
 	}
@@ -213,20 +241,16 @@ func (sm *SSTableManager) DeleteSSTables(readers []*SSTableReader) error {
 // 1. create new sstable
 // 2. iterate through all elems and add to new sstable
 // 3. open new reader and add to manager
-// 4. update manifest
-// 5. delete old sstables
+// 4. delete old sstables
 func (sm *SSTableManager) MergeSSTables(readers []*SSTableReader, toLayer int, skipTombstones bool) error {
 	// 1. create new sstable
-	sstableID := sm.manifest.NextSStableId
-	sm.manifest.IncrementId()
-	filePath := filepath.Join(sm.dataDir, fmt.Sprintf("%06d%s", sstableID, SSTableFileExtension))
 
 	expectedElems := uint64(0)
 	for _, reader := range readers {
 		expectedElems += reader.footer.TotalRecords
 	}
 
-	writer, err := NewSSTableWriter(filePath, sm.blockManager, expectedElems, toLayer)
+	_, sstableID, writer, err := sm.createSSTable(expectedElems, toLayer)
 	if err != nil {
 		return err
 	}
@@ -267,24 +291,12 @@ func (sm *SSTableManager) MergeSSTables(readers []*SSTableReader, toLayer int, s
 	if err != nil {
 		return err
 	}
-	for len(sm.Layers) <= toLayer {
-		sm.Layers = append(sm.Layers, newLayer())
-	}
-	sm.Layers[toLayer].AppendSSTable(reader)
-
-	// 4. update manifest
-	sstManifest := SSTableManifest{
-		Id:           sstableID,
-		Layer:        uint64(toLayer),
-		Format:       config.GetSettings().SSTable.Format,
-		BaseFileName: filePath,
-	}
-	err = sm.manifest.AddSSTable(sstManifest)
+	err = sm.addToLayers(reader, toLayer)
 	if err != nil {
 		return err
 	}
 
-	// 5. delete old sstables
+	// 4. delete old sstables
 	err = sm.DeleteSSTables(readers)
 
 	return err

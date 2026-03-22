@@ -13,8 +13,6 @@ import (
 	"strings"
 	"time"
 	"unicode"
-
-	"github.com/ajromen/LSM-KV-Engine/internal/config"
 )
 
 const (
@@ -34,18 +32,17 @@ type SimHash struct {
 }
 
 // NewSimHash pravi novu instancu na osnovu konfiguracije.
-func NewSimHash(cfg config.SimHashConfig) *SimHash {
-	return NewSimHashWithParams(cfg, nil)
+func NewSimHash() *SimHash {
+	return NewSimHashWithParams(nil)
 }
 
 // NewSimHashWithSeed pomoćni konstruktor kada želiš eksplicitno da zadaš seed.
 func NewSimHashWithSeed(seed []byte) *SimHash {
-	return NewSimHashWithParams(config.SimHashConfig{Enabled: true}, seed)
+	return NewSimHashWithParams(seed)
 }
 
 // NewSimHashWithParams pomoćni konstruktor.
-func NewSimHashWithParams(cfg config.SimHashConfig, seed []byte) *SimHash {
-	_ = cfg
+func NewSimHashWithParams(seed []byte) *SimHash {
 
 	if len(seed) == 0 {
 		seed = generateSimHashSeed(32)

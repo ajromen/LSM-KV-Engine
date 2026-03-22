@@ -42,7 +42,7 @@ func (s *sstableBlockSource) loadBlock(n int) ([]byte, error) {
 		FilePath: dataFilePath,
 		Offset:   uint32(n),
 	}
-	data, err := s.reader.blockManager.Read(key)
+	data, err := s.reader.blockManager.ReadNoCache(key)
 	if err != nil {
 		return nil, err
 	}

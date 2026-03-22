@@ -15,6 +15,7 @@ type SegmentStorage interface {
 	ReadSegment(segType enums.SegmentType, offset uint64, size uint32) ([]byte, error)
 	Delete()
 	Close() error
+	Restart() error
 	Sync() error
 	SetBlockManager(bm *block.BlockManager)
 }
@@ -332,4 +333,24 @@ func (s *SingleFileStorage) Size() (uint64, error) {
 		return 0, err
 	}
 	return uint64(info.Size()), nil
+}
+
+func (s *SingleFileStorage) Restart() error {
+	name := s.file.Name()
+	if s.file != nil {
+		s.file.Close()
+	}
+	file, err := os.OpenFile(name, os.O_RDONLY, 0644)
+	if err != nil {
+		return err
+	}
+	s.file = file
+	return nil
+}
+
+func (m *MultiFileStorage) Restart() error {
+	for segType := range m.files {
+		delete(m.files, segType)
+	}
+	return nil
 }
