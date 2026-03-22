@@ -3,8 +3,6 @@ package probabilistics
 import (
 	"bytes"
 	"testing"
-
-	"github.com/ajromen/LSM-KV-Engine/internal/config"
 )
 
 func seedOf(b byte, n int) []byte {
@@ -19,7 +17,7 @@ func seedOf(b byte, n int) []byte {
 }
 
 func TestNewSimHash_FromConfig(t *testing.T) {
-	s := NewSimHash(config.SimHashConfig{Enabled: true})
+	s := NewSimHash()
 	if s == nil {
 		t.Fatal("expected non-nil SimHash")
 	}
