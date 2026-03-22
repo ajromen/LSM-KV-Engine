@@ -88,6 +88,11 @@ func (l *LSM) Finish() error {
 	return nil
 }
 
+func (l *LSM) ClearAll() error {
+	l.memtableeManager.ResetAll()
+	return l.sstableManager.ClearAll()
+}
+
 func currentTimestamp() uint64 {
 	now := time.Now().UnixNano()
 	return uint64(now)
