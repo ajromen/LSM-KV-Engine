@@ -2,6 +2,7 @@ package wal
 
 import (
 	"encoding/binary"
+	"errors"
 	"hash/crc32"
 )
 
@@ -65,8 +66,14 @@ func Encode(r Record) []byte {
 	return buf
 }
 
-func Decode(buf []byte) Record {
+func Decode(buf []byte) (Record, error) {
 	r := Record{}
+
+	crc := binary.LittleEndian.Uint32(buf[CRC_START:TIMESTAMP_START])
+	hashed := CRC32(buf[TIMESTAMP_START:])
+	if crc != hashed {
+		return r, errors.New("crc mismatch")
+	}
 
 	r.Timestamp = binary.LittleEndian.Uint64(buf[TIMESTAMP_START:TOMBSTONE_START])
 
@@ -84,7 +91,7 @@ func Decode(buf []byte) Record {
 	r.Key = buf[KEY_START:valueStart]
 	r.Value = buf[valueStart : valueStart+valueSize]
 
-	return r
+	return r, nil
 }
 
 func CRC32(data []byte) uint32 {
