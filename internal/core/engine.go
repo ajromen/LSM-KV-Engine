@@ -69,7 +69,8 @@ func (engine *Engine) Close() error {
 
 func (engine *Engine) ClearAll() error {
 	//wal
-	return nil
+
+	return engine.lsm.ClearAll()
 }
 
 func (engine *Engine) DataRaw(index int) {
