@@ -69,7 +69,6 @@ func (engine *Engine) Close() error {
 
 func (engine *Engine) ClearAll() error {
 	//wal
-	print("TODO delete everything")
 	return nil
 }
 
