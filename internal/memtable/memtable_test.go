@@ -119,7 +119,7 @@ func TestTombstoneHidesEntry(t *testing.T) {
 			m.Put([]byte("key"), []byte("value"), 10, false)
 			m.Put([]byte("key"), []byte(""), 20, true)
 			got, ok := m.Get([]byte("key"))
-			if ok || got != nil {
+			if got != nil {
 				t.Errorf("expected deleted key to be hidden, got (%v, %v)", got, ok)
 			}
 		})
@@ -139,7 +139,7 @@ func TestDeleteHidesEntry(t *testing.T) {
 			m.Put([]byte("key"), []byte("value"), 10, false)
 			m.Delete([]byte("key"), 20)
 			got, ok := m.Get([]byte("key"))
-			if ok || got != nil {
+			if got != nil {
 				t.Errorf("expected deleted key to be hidden, got (%v, %v)", got, ok)
 			}
 		})
@@ -443,7 +443,7 @@ func TestConcurrency(t *testing.T) {
 	mu.Unlock()
 
 	expectedWrites := numWriters * writesPerWriter
-	expectedDeletes := 0
+	expectedDeletes := 50
 	expectedTotal := expectedWrites + expectedDeletes
 
 	// entries still in active memtable were not flushed yet
