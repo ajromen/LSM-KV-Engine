@@ -6,11 +6,18 @@ import (
 )
 
 func TestEncodeDecode(t *testing.T) {
-	r := Record{
-		Timestamp: 5,
-		Tombstone: false,
-		Key:       []byte("11"),
-		Value:     []byte("1"),
+	r := WALRecord{
+		FragType:  FIRST,
+		RecType:   COMMIT,
+		TxnID:     9,
+		KeySize:   2,
+		ValueSize: 3,
+		Record: Record{
+			Timestamp: 88,
+			Tombstone: false,
+			Key:       []byte("aa"),
+			Value:     []byte("bbb"),
+		},
 	}
 
 	buf := Encode(r)
@@ -18,17 +25,33 @@ func TestEncodeDecode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decode failed: %v", err)
 	}
-	if r.Timestamp != decoded.Timestamp {
-		t.Errorf("Timestamp mismatch: got %d, want %d", decoded.Timestamp, r.Timestamp)
+	if r.Record.Timestamp != decoded.Record.Timestamp {
+		t.Errorf("Timestamp mismatch: got %d, expected %d", decoded.Record.Timestamp, r.Record.Timestamp)
 	}
-	if r.Tombstone != decoded.Tombstone {
-		t.Errorf("Tombstone mismatch: got %v, want %v", decoded.Tombstone, r.Tombstone)
+	if r.FragType != decoded.FragType {
+		t.Errorf("FragType mismatch: got %d, expected %d", decoded.FragType, r.FragType)
 	}
-	if !bytes.Equal(r.Key, decoded.Key) {
-		t.Errorf("Key mismatch: got %v, want %v", decoded.Key, r.Key)
+	if r.Record.Tombstone != decoded.Record.Tombstone {
+		t.Errorf("Tombstone mismatch: got %v, expected %v", decoded.Record.Tombstone, r.Record.Tombstone)
 	}
-	if !bytes.Equal(r.Value, decoded.Value) {
-		t.Errorf("Key mismatch: got %v, want %v", decoded.Value, r.Value)
+	if r.RecType != decoded.RecType {
+		t.Errorf("RecType mismatch: got %d, expected %d", decoded.RecType, r.RecType)
+	}
+	if r.TxnID != decoded.TxnID {
+		t.Errorf("Transaction ID mismatch: got %d, expected %d", decoded.TxnID, r.TxnID)
+	}
+	if r.KeySize != decoded.KeySize {
+		t.Errorf("KeySize mismatch: got %d, expected %d", decoded.KeySize, r.KeySize)
+	}
+	if r.ValueSize != decoded.ValueSize {
+		t.Errorf("ValueSize mismatch: got %d, expected %d", decoded.ValueSize, r.ValueSize)
+	}
+
+	if !bytes.Equal(r.Record.Key, decoded.Record.Key) {
+		t.Errorf("Key mismatch: got %d, expected %d", decoded.Record.Key, r.Record.Key)
+	}
+	if !bytes.Equal(r.Record.Value, decoded.Record.Value) {
+		t.Errorf("Value mismatch: got %d, expected %d", decoded.Record.Value, r.Record.Value)
 	}
 
 }
