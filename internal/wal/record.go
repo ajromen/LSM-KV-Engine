@@ -70,7 +70,6 @@ type Record struct {
 }
 
 type WALRecord struct {
-	CRC       uint32
 	FragType  FragmentType
 	RecType   RecordType
 	TxnID     uint64
@@ -79,24 +78,30 @@ type WALRecord struct {
 	Record    Record
 }
 
-func Encode(r Record) []byte {
+func Encode(r WALRecord) []byte {
 
-	totalSize := KEY_START + len(r.Key) + len(r.Value)
+	totalSize := KEY_START + len(r.Record.Key) + len(r.Record.Value)
 	buf := make([]byte, totalSize)
 
-	binary.LittleEndian.PutUint64(buf[TIMESTAMP_START:], r.Timestamp)
+	binary.LittleEndian.PutUint64(buf[TIMESTAMP_START:], r.Record.Timestamp)
 
-	if r.Tombstone {
+	buf[FRAGTYPE_START] = byte(r.FragType)
+
+	if r.Record.Tombstone {
 		buf[TOMBSTONE_START] = 1
 	} else {
 		buf[TOMBSTONE_START] = 0
 	}
 
-	binary.LittleEndian.PutUint64(buf[KEY_SIZE_START:VALUE_SIZE_START], uint64(len(r.Key)))
-	binary.LittleEndian.PutUint64(buf[VALUE_SIZE_START:KEY_START], uint64(len(r.Value)))
+	buf[RECTYPE_START] = byte(r.RecType)
 
-	copy(buf[KEY_START:], r.Key)
-	copy(buf[KEY_START+len(r.Key):], r.Value)
+	binary.LittleEndian.PutUint64(buf[TXNID_START:KEY_SIZE_START], r.TxnID)
+
+	binary.LittleEndian.PutUint64(buf[KEY_SIZE_START:VALUE_SIZE_START], uint64(len(r.Record.Key)))
+	binary.LittleEndian.PutUint64(buf[VALUE_SIZE_START:KEY_START], uint64(len(r.Record.Value)))
+
+	copy(buf[KEY_START:], r.Record.Key)
+	copy(buf[KEY_START+len(r.Record.Key):], r.Record.Value)
 
 	hashed := CRC32(buf[TIMESTAMP_START:])
 	binary.LittleEndian.PutUint32(buf[CRC_START:], hashed)
@@ -104,8 +109,8 @@ func Encode(r Record) []byte {
 	return buf
 }
 
-func Decode(buf []byte) (Record, error) {
-	r := Record{}
+func Decode(buf []byte) (WALRecord, error) {
+	r := WALRecord{}
 
 	crc := binary.LittleEndian.Uint32(buf[CRC_START:TIMESTAMP_START])
 	hashed := CRC32(buf[TIMESTAMP_START:])
@@ -113,21 +118,45 @@ func Decode(buf []byte) (Record, error) {
 		return r, errors.New("crc mismatch")
 	}
 
-	r.Timestamp = binary.LittleEndian.Uint64(buf[TIMESTAMP_START:TOMBSTONE_START])
+	r.Record.Timestamp = binary.LittleEndian.Uint64(buf[TIMESTAMP_START:FRAGTYPE_START])
 
-	if buf[TOMBSTONE_START] == 0 {
-		r.Tombstone = false
-	} else {
-		r.Tombstone = true
+	switch buf[FRAGTYPE_START] {
+	case FULL:
+		r.FragType = FULL
+	case FIRST:
+		r.FragType = FIRST
+	case MIDDLE:
+		r.FragType = MIDDLE
+	case LAST:
+		r.FragType = LAST
 	}
 
-	keySize := binary.LittleEndian.Uint64(buf[KEY_SIZE_START:VALUE_SIZE_START])
-	valueSize := binary.LittleEndian.Uint64(buf[VALUE_SIZE_START:KEY_START])
+	if buf[TOMBSTONE_START] == 0 {
+		r.Record.Tombstone = false
+	} else {
+		r.Record.Tombstone = true
+	}
 
-	valueStart := KEY_START + keySize
+	switch buf[RECTYPE_START] {
+	case SINGLE:
+		r.RecType = SINGLE
+	case START:
+		r.RecType = START
+	case TRANSACTION:
+		r.RecType = TRANSACTION
+	case COMMIT:
+		r.RecType = COMMIT
+	}
 
-	r.Key = buf[KEY_START:valueStart]
-	r.Value = buf[valueStart : valueStart+valueSize]
+	r.TxnID = binary.LittleEndian.Uint64(buf[TXNID_START:KEY_SIZE_START])
+
+	r.KeySize = binary.LittleEndian.Uint64(buf[KEY_SIZE_START:VALUE_SIZE_START])
+	r.ValueSize = binary.LittleEndian.Uint64(buf[VALUE_SIZE_START:KEY_START])
+
+	valueStart := KEY_START + r.KeySize
+
+	r.Record.Key = buf[KEY_START:valueStart]
+	r.Record.Value = buf[valueStart : valueStart+r.ValueSize]
 
 	return r, nil
 }
