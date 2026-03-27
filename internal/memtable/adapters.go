@@ -5,6 +5,11 @@ import (
 	"github.com/ajromen/LSM-KV-Engine/internal/iterator"
 )
 
+// Memtable Store Adapters -> set of adapter types that wrap different in-memory data structures for storing memtable entries
+// Adapters provide an interface for basic operations over those in-memory data structures and provide generic look on memtable itself
+// Adapters allow the memtable layer to remain data-structure-agnostic,so different in-memory structures can be swapped without changing the upper layers.
+// All adapters must implement MemtableStore interface
+
 // ---- BTree Store Adapter ----
 
 type BTreeStore struct {
