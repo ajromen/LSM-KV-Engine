@@ -87,6 +87,7 @@ type DataBlockBuilder struct {
 	restartInterval int                       // number of keys between delta restart points
 	recordCount     int                       // number of records added to block
 	firstKey        []byte                    // first key in the block (for index)
+	lastKey         []byte                    // last key in the block (for index)
 	tombstoneBits   *BitSet                   // bitmap for tombstones
 	isEncodedBits   *BitSet                   // bitmap for whether record value is encoded using adaptive encoder
 }
@@ -115,6 +116,8 @@ func (builder *DataBlockBuilder) AddRecord(record Record) bool {
 	if builder.recordCount == 0 {
 		builder.firstKey = append([]byte(nil), record.Key...)
 	}
+	// change last key to current key
+	builder.lastKey = append([]byte(nil), record.Key...)
 
 	// estimate size to see if record fits in current block
 	estimatedSize := len(record.Key)*2 + len(record.Value) + 32
@@ -221,6 +224,10 @@ func (builder *DataBlockBuilder) FirstKey() []byte {
 	return builder.firstKey
 }
 
+func (builder *DataBlockBuilder) LastKey() []byte {
+	return builder.lastKey
+}
+
 func (builder *DataBlockBuilder) RecordCount() int {
 	return builder.recordCount
 }
@@ -254,7 +261,7 @@ func NewDataBlockReader(block []byte, restartInterval int, encodingType byte, va
 	expectedCRC := binary.LittleEndian.Uint32(block[crcPos:])
 	actualCRC := crc32.ChecksumIEEE(block[:crcPos])
 	if expectedCRC != actualCRC {
-		return nil, errors.New("CRC mismatch")
+		return nil, errors.New("CRC mismatch right here")
 	}
 
 	bitmapSize := binary.LittleEndian.Uint16(block[bitmapSizePos : bitmapSizePos+2])

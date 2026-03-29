@@ -6,6 +6,7 @@ import (
 
 	"github.com/ajromen/LSM-KV-Engine/internal/block"
 	"github.com/ajromen/LSM-KV-Engine/internal/data_structures"
+	"github.com/ajromen/LSM-KV-Engine/internal/encoders"
 	"github.com/ajromen/LSM-KV-Engine/internal/iterator"
 )
 
@@ -21,9 +22,10 @@ type sstableBlockSource struct {
 
 // newSSTableBlockSource constructs a block source from an SSTableReader
 func newSSTableBlockSource(reader *SSTableReader) *sstableBlockSource {
+	numdb, _ := reader.meta.GetUint64(FieldNumDataBlocks)
 	return &sstableBlockSource{
 		reader:     reader,
-		numBlocks:  int(reader.footer.NumDataBlocks),
+		numBlocks:  int(numdb),
 		blockSize:  reader.blockManager.BlockSize(),
 		blockCache: make(map[int][]byte),
 	}
@@ -56,7 +58,8 @@ func (s *sstableBlockSource) blockIteratorRaw(n int) (*DataBlockIteratorRaw, err
 	if err != nil {
 		return nil, err
 	}
-	return NewDataBlockIteratorRaw(data, int(s.reader.footer.RestartInterval), s.reader.footer.EncodingType, s.reader.valueDecoder)
+	ri, _ := s.reader.meta.GetUint64(FieldRestartInterval)
+	return NewDataBlockIteratorRaw(data, int(ri), encoders.PrefixCompression, s.reader.valueDecoder)
 }
 
 // SSTableIteratorRaw iterates over all records in an SSTable at raw level

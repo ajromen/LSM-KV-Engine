@@ -26,6 +26,7 @@ type SSTableWriter struct {
 	summarySegment    *SummarySegment // summary segment of sstable : references index blocks
 	filterSegment     *FilterSegment  // filter segment of sstable
 	merkleTree        *MerkleTree     // merkle tree of sstable
+	metadataSegment   *Metadata       // meta data of sstable
 	footer            *Footer         // footer of sstable
 	currentBlockIndex uint32          // tracks current data block index
 	recordCount       uint64          // tracks number of records
@@ -173,7 +174,7 @@ func (sw *SSTableWriter) flushDataBlock() error {
 // Finalize FINALIZES THE SSTABLE IN GIVEN ORDER:
 // 1. Flush remaining block if not empty (one block is not flushed because it never got full)
 // 2. Build a merkle tree
-// 3. Fill footer metadata
+// 3. Fill metadata
 // next steps all update footer segment handler metadata -->>
 // 4. Write filter segment on disk
 // 5. Write index blocks on disk
@@ -198,12 +199,22 @@ func (sw *SSTableWriter) Finalize() error {
 	}
 
 	// step 3
-	sw.footer.NumDataBlocks = sw.currentBlockIndex
-	sw.footer.TotalRecords = sw.recordCount
-	sw.footer.MinTimeStamp = sw.minTimestamp
-	sw.footer.MaxTimeStamp = sw.maxTimestamp
-	sw.footer.MinKeyLength = sw.minKeyLength
-	sw.footer.MaxKeyLength = sw.maxKeyLength
+	meta := &Metadata{
+		Fields: make(map[MetadataFieldID][]byte),
+	}
+	meta.SetUint64(FieldNumDataBlocks, uint64(sw.currentBlockIndex))
+	meta.SetUint64(FieldTotalRecords, sw.recordCount)
+	meta.SetUint64(FieldBlockSize, uint64(sw.blockManager.BlockSize()))
+	meta.SetUint64(FieldRestartInterval, uint64(config.GetSettings().SSTable.DataSegment.RestartInterval))
+	meta.SetBytes(FieldMinKey, sw.minKey)
+	meta.SetBytes(FieldMaxKey, sw.maxKey)
+	meta.SetUint64(FieldMinTimestamp, sw.minTimestamp.Low)
+	meta.SetUint64(FieldMaxTimestamp, sw.maxTimestamp.Low)
+	meta.SetUint64(FieldMinKeyLength, uint64(sw.minKeyLength))
+	meta.SetUint64(FieldMaxKeyLength, uint64(sw.maxKeyLength))
+	meta.SetByte(FieldMergeStrategy, byte(enums.Heap))
+	meta.SetByte(FieldCompressionType, byte(config.GetSettings().SSTable.DataSegment.Compression))
+	sw.metadataSegment = meta
 	sw.footer.Format = config.GetSettings().SSTable.Format
 
 	// step 4
@@ -273,14 +284,23 @@ func (sw *SSTableWriter) Finalize() error {
 	}
 
 	// step 7
-	metadataData := sw.merkleTree.Encode()
-	metadataOffset, metadataSize, err := sw.storage.WriteSegment(enums.SegmentMetadata, metadataData)
+	merkleTreeData := sw.merkleTree.Encode()
+	merkleTreeOffset, merkleTreeSize, err := sw.storage.WriteSegment(enums.SegmentMerkleTree, merkleTreeData)
+	if err != nil {
+		return err
+	}
+	sw.footer.MerkleHandler = SegmentHandler{
+		Offset: merkleTreeOffset,
+		Size:   merkleTreeSize,
+	}
+	metaDataData := sw.metadataSegment.Encode()
+	metaDataOffset, metaDataSize, err := sw.storage.WriteSegment(enums.SegmentMetadata, metaDataData)
 	if err != nil {
 		return err
 	}
 	sw.footer.MetaDataHandler = SegmentHandler{
-		Offset: metadataOffset,
-		Size:   metadataSize,
+		Offset: metaDataOffset,
+		Size:   metaDataSize,
 	}
 
 	// step 8

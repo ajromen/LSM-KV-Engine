@@ -4,6 +4,7 @@ import (
 	"bytes"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/data_structures"
+	"github.com/ajromen/LSM-KV-Engine/internal/enums"
 	"github.com/ajromen/LSM-KV-Engine/internal/iterator"
 )
 
@@ -245,7 +246,7 @@ func (i *RawIterator) SeekToLast() {
 		it.SeekToLast()
 	}
 	reverseCmp := reverseComparator(i.structure.Cmp())
-	tempStructure := data_structures.NewMergeStructure(data_structures.Heap, i.structure.Iterators(), reverseCmp)
+	tempStructure := data_structures.NewMergeStructure(byte(enums.Heap), i.structure.Iterators(), reverseCmp)
 	winner := tempStructure.Winner()
 	if winner != nil && winner.Valid() {
 		entry := winner.Key()
@@ -305,7 +306,7 @@ func (i *RawIterator) Prev() {
 		return
 	}
 	reverseCmp := reverseComparator(i.structure.Cmp())
-	tempStructure := data_structures.NewMergeStructure(data_structures.Heap, i.structure.Iterators(), reverseCmp)
+	tempStructure := data_structures.NewMergeStructure(byte(enums.Heap), i.structure.Iterators(), reverseCmp)
 	winner := tempStructure.Winner()
 	if winner != nil && winner.Valid() {
 		entry := winner.Key()

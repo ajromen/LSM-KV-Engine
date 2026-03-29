@@ -9,7 +9,7 @@ import (
 
 	"github.com/ajromen/LSM-KV-Engine/internal/block"
 	"github.com/ajromen/LSM-KV-Engine/internal/config"
-	"github.com/ajromen/LSM-KV-Engine/internal/data_structures"
+	"github.com/ajromen/LSM-KV-Engine/internal/enums"
 	"github.com/ajromen/LSM-KV-Engine/internal/memtable"
 	"github.com/ajromen/LSM-KV-Engine/internal/utils"
 )
@@ -247,7 +247,8 @@ func (sm *SSTableManager) MergeSSTables(readers []*SSTableReader, toLayer int, s
 
 	expectedElems := uint64(0)
 	for _, reader := range readers {
-		expectedElems += reader.footer.TotalRecords
+		tr, _ := reader.meta.GetUint64(FieldTotalRecords)
+		expectedElems += tr
 	}
 
 	_, sstableID, writer, err := sm.createSSTable(expectedElems, toLayer)
@@ -256,7 +257,7 @@ func (sm *SSTableManager) MergeSSTables(readers []*SSTableReader, toLayer int, s
 	}
 
 	// 2. iterate through all elems and add to new sstable
-	iterator, err := NewSSTableMergeIterator(readers, data_structures.Heap)
+	iterator, err := NewSSTableMergeIterator(readers, byte(enums.Heap))
 	if err != nil {
 		return err
 	}

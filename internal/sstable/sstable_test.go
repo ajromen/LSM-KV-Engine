@@ -8,7 +8,6 @@ import (
 
 	"github.com/ajromen/LSM-KV-Engine/internal/block"
 	"github.com/ajromen/LSM-KV-Engine/internal/config"
-	"github.com/ajromen/LSM-KV-Engine/internal/data_structures"
 	"github.com/ajromen/LSM-KV-Engine/internal/enums"
 	"github.com/ajromen/LSM-KV-Engine/internal/utils"
 )
@@ -74,7 +73,6 @@ func TestSSTableWriterBasic(t *testing.T) {
 	fmt.Println("FILTER SIZE:", reader.footer.FilterHandler.Size)
 	fmt.Println("METADATA OFFSET:", reader.footer.MetaDataHandler.Offset)
 	fmt.Println("METADATA SIZE:", reader.footer.MetaDataHandler.Size)
-	fmt.Println("NUMBER OF BLOCKS: ", reader.footer.NumDataBlocks)
 	summaryF, _ := os.Open(tempFile)
 	defer summaryF.Close()
 	buf := make([]byte, reader.footer.SummaryHandler.Size)
@@ -91,7 +89,6 @@ func TestSSTableWriterBasic(t *testing.T) {
 		t.Fatalf("ReadAt failed: %v", err)
 	}
 	fmt.Println("INDEX RAW BYTES:", buf)
-	fmt.Println(reader.footer.TotalRecords)
 	indexSegment, _ := DecodeIndexBlock(buf)
 	fmt.Println()
 	fmt.Println([]byte("key001"))
@@ -173,7 +170,6 @@ func TestSSTableMultiFileFormat(t *testing.T) {
 	fmt.Println("FILTER SIZE:", reader.footer.FilterHandler.Size)
 	fmt.Println("METADATA OFFSET:", reader.footer.MetaDataHandler.Offset)
 	fmt.Println("METADATA SIZE:", reader.footer.MetaDataHandler.Size)
-	fmt.Println("NUMBER OF BLOCKS: ", reader.footer.NumDataBlocks)
 	summaryF, _ := os.Open(tempFile + ".summary")
 	defer summaryF.Close()
 	buf := make([]byte, reader.footer.SummaryHandler.Size)
@@ -190,7 +186,6 @@ func TestSSTableMultiFileFormat(t *testing.T) {
 		t.Fatalf("ReadAt failed: %v", err)
 	}
 	fmt.Println("INDEX RAW BYTES:", buf)
-	fmt.Println(reader.footer.TotalRecords)
 	indexSegment, _ := DecodeIndexBlock(buf)
 	fmt.Println()
 	fmt.Println([]byte("key001"))
@@ -412,7 +407,7 @@ func TestSSTableMergeIteratorRaw(t *testing.T) {
 		t.Fatalf("Failed to create reader2: %v", err)
 	}
 
-	iterator, err := NewSSTableMergeIteratorRaw([]*SSTableReader{reader1, reader2}, data_structures.Heap)
+	iterator, err := NewSSTableMergeIteratorRaw([]*SSTableReader{reader1, reader2}, byte(enums.Heap))
 	if err != nil {
 		t.Fatalf("Failed to create merge iterator: %v", err)
 	}
@@ -481,7 +476,7 @@ func TestSSTableMergeIteratorRawWithDuplicates(t *testing.T) {
 		t.Fatalf("Failed to create reader2: %v", err)
 	}
 	fmt.Println("=== MergeIteratorRaw: duplicates (both versions visible) ===")
-	iterRaw, err := NewSSTableMergeIteratorRaw([]*SSTableReader{reader1, reader2}, data_structures.Heap)
+	iterRaw, err := NewSSTableMergeIteratorRaw([]*SSTableReader{reader1, reader2}, byte(enums.Heap))
 	if err != nil {
 		t.Fatalf("Failed to create raw merge iterator: %v", err)
 	}
@@ -491,7 +486,7 @@ func TestSSTableMergeIteratorRawWithDuplicates(t *testing.T) {
 		iterRaw.Next()
 	}
 	fmt.Println("=== MergeIterator: duplicates (only newest visible) ===")
-	iterFiltered, err := NewSSTableMergeIterator([]*SSTableReader{reader1, reader2}, data_structures.Heap)
+	iterFiltered, err := NewSSTableMergeIterator([]*SSTableReader{reader1, reader2}, byte(enums.Heap))
 	if err != nil {
 		t.Fatalf("Failed to create filtered merge iterator: %v", err)
 	}
@@ -557,7 +552,7 @@ func TestSSTableMergeIteratorWithTombstones(t *testing.T) {
 		t.Fatalf("Failed to create reader2: %v", err)
 	}
 	fmt.Println("=== MergeIteratorRaw: tombstones visible ===")
-	iterRaw, err := NewSSTableMergeIteratorRaw([]*SSTableReader{reader1, reader2}, data_structures.Heap)
+	iterRaw, err := NewSSTableMergeIteratorRaw([]*SSTableReader{reader1, reader2}, byte(enums.Heap))
 	if err != nil {
 		t.Fatalf("Failed to create raw merge iterator: %v", err)
 	}
@@ -567,7 +562,7 @@ func TestSSTableMergeIteratorWithTombstones(t *testing.T) {
 		iterRaw.Next()
 	}
 	fmt.Println("=== MergeIterator: tombstones filtered out ===")
-	iterFiltered, err := NewSSTableMergeIterator([]*SSTableReader{reader1, reader2}, data_structures.Heap)
+	iterFiltered, err := NewSSTableMergeIterator([]*SSTableReader{reader1, reader2}, byte(enums.Heap))
 	if err != nil {
 		t.Fatalf("Failed to create filtered merge iterator: %v", err)
 	}

@@ -1,6 +1,9 @@
 package data_structures
 
-import "github.com/ajromen/LSM-KV-Engine/internal/iterator"
+import (
+	"github.com/ajromen/LSM-KV-Engine/internal/enums"
+	"github.com/ajromen/LSM-KV-Engine/internal/iterator"
+)
 
 type MergeStructure[T any] interface {
 	Winner() iterator.Iterator[T]
@@ -10,16 +13,11 @@ type MergeStructure[T any] interface {
 	Cmp() Comparator[T]
 }
 
-const (
-	Heap  byte = 0
-	WTree byte = 1
-)
-
 func NewMergeStructure[T any](t byte, iters []iterator.Iterator[T], cmp Comparator[T]) MergeStructure[T] {
 	switch t {
-	case Heap:
+	case byte(enums.Heap):
 		return NewHeapPriorityQueue(iters, cmp)
-	case WTree:
+	case byte(enums.WTree):
 		return NewWinnerTree(iters, cmp)
 	default:
 		return NewWinnerTree(iters, cmp)
