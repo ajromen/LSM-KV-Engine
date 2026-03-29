@@ -1,4 +1,4 @@
-package core
+package sequence
 
 import "sync/atomic"
 

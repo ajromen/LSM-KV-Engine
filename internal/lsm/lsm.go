@@ -2,7 +2,6 @@ package lsm
 
 import (
 	"fmt"
-	"time"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/config"
 	"github.com/ajromen/LSM-KV-Engine/internal/enums"
@@ -84,9 +83,4 @@ func (l *LSM) Delete(key []byte, seqId uint64) error {
 func (l *LSM) Finish() error {
 	l.memtableeManager.Close()
 	return nil
-}
-
-func currentTimestamp() uint64 {
-	now := time.Now().UnixNano()
-	return uint64(now)
 }
