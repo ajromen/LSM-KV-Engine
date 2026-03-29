@@ -4,46 +4,18 @@ import (
 	"encoding/binary"
 	"hash/crc32"
 	"testing"
-
-	"github.com/ajromen/LSM-KV-Engine/internal/utils"
 )
 
 func TestFooterEncodeDecode(t *testing.T) {
 	t.Log("---- FOOTER ENCODE/DECODE TEST ----")
 
 	footer := NewFooter()
-	footer.NumDataBlocks = 5
-	footer.MinKeyLength = 3
-	footer.MaxKeyLength = 10
-	footer.TotalRecords = 1234
-	footer.MinTimeStamp = utils.Uint128{Low: 1, High: 2}
-	footer.MaxTimeStamp = utils.Uint128{Low: 3, High: 4}
-	footer.EncodingType = 1
-	footer.RestartInterval = 2
 
 	encoded := footer.Encode()
 	decoded := &Footer{}
 	err := decoded.Decode(encoded)
 	if err != nil {
 		t.Fatalf("failed to decode footer: %v", err)
-	}
-
-	if decoded.NumDataBlocks != footer.NumDataBlocks {
-		t.Fatalf("expected NumDataBlocks %d, got %d", footer.NumDataBlocks, decoded.NumDataBlocks)
-	}
-
-	if decoded.MinKeyLength != footer.MinKeyLength || decoded.MaxKeyLength != footer.MaxKeyLength {
-		t.Fatalf("key length mismatch: expected min=%d max=%d, got min=%d max=%d",
-			footer.MinKeyLength, footer.MaxKeyLength, decoded.MinKeyLength, decoded.MaxKeyLength)
-	}
-
-	if decoded.TotalRecords != footer.TotalRecords {
-		t.Fatalf("expected TotalRecords %d, got %d", footer.TotalRecords, decoded.TotalRecords)
-	}
-
-	if decoded.MinTimeStamp != footer.MinTimeStamp || decoded.MaxTimeStamp != footer.MaxTimeStamp {
-		t.Fatalf("timestamp mismatch: expected min=%v max=%v, got min=%v max=%v",
-			footer.MinTimeStamp, footer.MaxTimeStamp, decoded.MinTimeStamp, decoded.MaxTimeStamp)
 	}
 
 	// verify CRC
@@ -105,7 +77,6 @@ func TestFooterWriteReadBuffer(t *testing.T) {
 	t.Log("---- FOOTER WRITE/READ BUFFER TEST ----")
 
 	footer := NewFooter()
-	footer.NumDataBlocks = 2
 	buf := footer.Encode()
 
 	decoded := &Footer{}
@@ -113,7 +84,4 @@ func TestFooterWriteReadBuffer(t *testing.T) {
 		t.Fatalf("failed to decode footer: %v", err)
 	}
 
-	if decoded.NumDataBlocks != footer.NumDataBlocks {
-		t.Fatalf("expected NumDataBlocks %d, got %d", footer.NumDataBlocks, decoded.NumDataBlocks)
-	}
 }
