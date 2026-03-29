@@ -14,6 +14,7 @@ import (
 type Engine struct {
 	config *config.Config
 	lsm    *lsm.LSM
+	seqGen *SequenceGenerator
 	//wal
 }
 
@@ -32,12 +33,20 @@ func NewEngine(flags *cli.FLags) (*Engine, error) {
 		return nil, err
 	}
 	engine := Engine{lsm: lsmTree}
+	engine.recoverFromWal()
 	return &engine, nil
 }
 
-func (engine *Engine) Put(key []byte, value []byte) error {
+func (engine *Engine) recoverFromWal() {
+	var maxSeq uint64
 	//wal
-	err := engine.lsm.Put(key, value)
+	engine.seqGen = NewSequenceGenerator(maxSeq)
+}
+
+func (engine *Engine) Put(key []byte, value []byte) error {
+	seqId := engine.seqGen.Next()
+	//wal
+	err := engine.lsm.Put(key, value, seqId)
 	if err != nil {
 		return err
 	}
@@ -50,6 +59,7 @@ func (engine *Engine) Get(key []byte) ([]byte, bool, error) {
 }
 
 func (engine *Engine) Delete(key []byte) error {
+	seqId := engine.seqGen.Next()
 	// wal
 	err := engine.lsm.Delete(key)
 	if err != nil {

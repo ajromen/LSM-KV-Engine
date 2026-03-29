@@ -16,28 +16,23 @@ import (
 // 4. RBTreeMemtable (uses Red-Black Tree)
 // 5. AVLTreeMemtable (uses AVL Tree)
 func NewMemtable(cfg config.MemtableConfig) Memtable {
-	// function for comparing two entries -> first compare keys and if they are equal higher timestamp wins
+	// function for comparing two entries -> first compare keys and if they are equal higher sequence id wins
 	cmp := func(a, b MemtableEntry) int {
 		if c := bytes.Compare(a.Key, b.Key); c != 0 {
 			return c
 		}
-		if a.Timestamp > b.Timestamp {
+		if a.SeqId > b.SeqId {
 			return -1
 		}
-		if a.Timestamp < b.Timestamp {
+		if a.SeqId < b.SeqId {
 			return 1
 		}
 		return 0
 	}
 
-	// function for comparing two entries but it ignores timestamp -> used for RBTree and AVLTree because of characteristics of these data-structs
-	cmpIgnoringTimestamp := func(a, b MemtableEntry) int {
-		c := bytes.Compare(a.Key, b.Key)
-		if c != 0 {
-			return c
-		} else {
-			return 0
-		}
+	// function for comparing two entries but it ignores seqId -> used for RBTree and AVLTree because of characteristics of these data-structs
+	cmpIgnoringSeqId := func(a, b MemtableEntry) int {
+		return bytes.Compare(a.Key, b.Key)
 	}
 
 	var store MemtableStore
@@ -58,9 +53,9 @@ func NewMemtable(cfg config.MemtableConfig) Memtable {
 	case enums.HashMapMemTable:
 		store = NewHashMapStore()
 	case enums.RBTreeMemTable:
-		store = NewRBTreeStore(cmp, cmpIgnoringTimestamp)
+		store = NewRBTreeStore(cmp, cmpIgnoringSeqId)
 	case enums.AVLTreeMemTable:
-		store = NewAVLTreeStore(cmp, cmpIgnoringTimestamp)
+		store = NewAVLTreeStore(cmp, cmpIgnoringSeqId)
 	}
 	return NewGenericMemtable(store, cfg.MemtableMaxEntries, cfg.MemtableMaxSizeBytes)
 }

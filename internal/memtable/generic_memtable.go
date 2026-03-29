@@ -25,12 +25,12 @@ func NewGenericMemtable(store MemtableStore, maxNumEntries int, maxSizeBytes uin
 }
 
 // Put adds entry to underlying data structure and updates number of entries and size of memtable in bytes
-func (m *GenericMemtable) Put(key []byte, value []byte, timeStamp uint64, tombstone bool) {
+func (m *GenericMemtable) Put(key []byte, value []byte, seqId uint64, tombstone bool) {
 	sizeEntry := len(key) + len(value) + 8 + 1
 	m.store.Insert(MemtableEntry{
 		Key:       key,
 		Value:     value,
-		Timestamp: timeStamp,
+		SeqId:     seqId,
 		Tombstone: tombstone,
 	})
 	m.numEntries++
@@ -40,8 +40,8 @@ func (m *GenericMemtable) Put(key []byte, value []byte, timeStamp uint64, tombst
 // Get retrieves the value for a given key
 func (m *GenericMemtable) Get(key []byte) ([]byte, bool) {
 	dummy := MemtableEntry{
-		Key:       key,
-		Timestamp: math.MaxUint64,
+		Key:   key,
+		SeqId: math.MaxUint64,
 	}
 	entry := m.store.Search(dummy)
 	if entry == nil {
@@ -57,8 +57,8 @@ func (m *GenericMemtable) Get(key []byte) ([]byte, bool) {
 }
 
 // Delete marks a key deleted by inserting a tombstone entry
-func (m *GenericMemtable) Delete(key []byte, timestamp uint64) {
-	m.Put(key, nil, timestamp, true)
+func (m *GenericMemtable) Delete(key []byte, seqId uint64) {
+	m.Put(key, nil, seqId, true)
 }
 
 // ShouldFlush determines whether the memtable has reached its capacity

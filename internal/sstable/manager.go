@@ -160,7 +160,7 @@ func (sm *SSTableManager) FlushToSSTable(entries []memtable.MemtableEntry) error
 		record := Record{
 			Key:       entry.Key,
 			Value:     entry.Value,
-			Timestamp: utils.Uint128{Low: entry.Timestamp},
+			Timestamp: utils.Uint128{Low: entry.SeqId},
 			Tombstone: entry.Tombstone,
 		}
 		if err := writer.AddRecord(record); err != nil {

@@ -4,11 +4,11 @@ import "github.com/ajromen/LSM-KV-Engine/internal/iterator"
 
 // this file contains all interfaces and abstractions of elements in core of a memtable
 
-// MemtableEntry is a single key-value record in a memtable with versioning timestamp and tombstone mark
+// MemtableEntry is a single key-value record in a memtable with versioning sequenceId and tombstone mark
 type MemtableEntry struct {
 	Key       []byte
 	Value     []byte
-	Timestamp uint64
+	SeqId     uint64
 	Tombstone bool
 }
 
@@ -31,9 +31,9 @@ type MemtableStore interface {
 
 // Memtable defines the high-level behavior of a memtable.
 type Memtable interface {
-	Put(key []byte, value []byte, timeStamp uint64, tombstone bool)
+	Put(key []byte, value []byte, seqId uint64, tombstone bool)
 	Get(key []byte) ([]byte, bool)
-	Delete(key []byte, timeStamp uint64)
+	Delete(key []byte, seqId uint64)
 	ShouldFlush() bool
 	Reset()
 	Flush() []MemtableEntry

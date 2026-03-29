@@ -181,10 +181,10 @@ func NewRawIterator(iterators []iterator.Iterator[MemtableEntry], mergeStructure
 		if c := bytes.Compare(a.Key, b.Key); c != 0 {
 			return c
 		}
-		if a.Timestamp > b.Timestamp {
+		if a.SeqId > b.SeqId {
 			return -1
 		}
-		if a.Timestamp < b.Timestamp {
+		if a.SeqId < b.SeqId {
 			return 1
 		}
 		return 0

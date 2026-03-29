@@ -28,7 +28,7 @@ const (
 │  │                        DATA SECTION                            │ │
 │  │                                                                │ │
 │  │  Record 0                                                      │ │
-│  │    - timestamp (Uint128 → 2x uvarint: low, high)               │ │
+│  │    - sequenceId (uvarint)                                      │ │
 │  │    - key (delta encoded):                                      │ │
 │  │         shared_prefix_len (uvarint)                            │ │
 │  │         suffix_len (uvarint)                                   │ │
@@ -37,7 +37,7 @@ const (
 │  │    - value bytes (RAW or DICT-ENCODED, without flag byte)      │ │
 │  │                                                                │ │
 │  │  Record 1                                                      │ │
-│  │    - timestamp                                                 │ │
+│  │    - sequenceId                                                │ │
 │  │    - key (delta encoded)                                       │ │
 │  │    - value_len                                                 │ │
 │  │    - value bytes                                               │ │
