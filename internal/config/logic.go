@@ -91,6 +91,9 @@ func (c *Config) applyFlags(flags *cli.FLags) error {
 		}
 		c.LSMTree.CompactionAlgorithm = algorithm
 	}
+	if flags.TTLInMemoryTTL != nil {
+		c.TTL.InMemoryTTL = *flags.TTLInMemoryTTL
+	}
 	return nil
 }
 
@@ -141,27 +144,6 @@ func (c *Config) loadFromFile(path string) error {
 	}
 	return nil
 }
-
-//func (c *SSTableConfig) SegmentPaths(basePath string) map[enums.SegmentType]string {
-//	paths := make(map[enums.SegmentType]string)
-//	if c.Format == enums.FormatSingleFile {
-//		for _, segType := range []enums.SegmentType{
-//			enums.SegmentData, enums.SegmentFilter, enums.SegmentIndex,
-//			enums.SegmentSummary, enums.SegmentMetadata, enums.SegmentFooter,
-//		} {
-//			paths[segType] = basePath
-//		}
-//	} else {
-//		// Each segment has its own file
-//		paths[enums.SegmentData] = basePath + string(sstable.DataSegmentExtension)
-//		paths[enums.SegmentFilter] = basePath + string(sstable.FilterSegmentExtension)
-//		paths[enums.SegmentIndex] = basePath + string(sstable.IndexSegmentExtension)
-//		paths[enums.SegmentSummary] = basePath + string(sstable.SummarySegmentExtension)
-//		paths[enums.SegmentMetadata] = basePath + string(sstable.MetadataSegmentExtension)
-//		paths[enums.SegmentFooter] = basePath + string(sstable.FooterSegmentExtension)
-//	}
-//	return paths
-//}
 
 func fileExists(filename string) bool {
 	_, err := os.Stat(filename)

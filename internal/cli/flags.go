@@ -16,6 +16,7 @@ type FLags struct {
 	SSTableFormat          *string
 	BlockCacheMaxBlocks    *int
 	LSMCompactionAlgorithm *string
+	TTLInMemoryTTL         *bool
 }
 
 func ParseFlags() *FLags {
@@ -28,6 +29,7 @@ func ParseFlags() *FLags {
 	var sstFormatOpt OptionalString
 	var BlockCacheMaxBlocksOpt OptionalInt
 	var LSMCompactionAlgorithmOpt OptionalString
+	var TTLInMemoryTTLOpt OptionalBool
 
 	flagString(&configPathOpt, "config", "Path to config file")
 	flagString(&configPathOpt, "c", "Path to config file")
@@ -40,6 +42,7 @@ func ParseFlags() *FLags {
 	flagString(&sstFormatOpt, "sst-format", "sst format (single-file / multi-file)")
 	flagInt(&BlockCacheMaxBlocksOpt, "block-cache-max-blocks", "Max number of blocks in the block cache")
 	flagString(&LSMCompactionAlgorithmOpt, "lsm-compaction", "LSM compaction algorithm: size-tiered, leveled")
+	flagBool(&TTLInMemoryTTLOpt, "ttl-in-memory", "Keep {Key,TTL} in memory and allow expiry notifications")
 
 	flag.Parse()
 
@@ -52,6 +55,7 @@ func ParseFlags() *FLags {
 		Instances:              instancesOpt.Get(),
 		SSTableFormat:          sstFormatOpt.Get(),
 		LSMCompactionAlgorithm: LSMCompactionAlgorithmOpt.Get(),
+		TTLInMemoryTTL:         TTLInMemoryTTLOpt.Get(),
 	}
 }
 

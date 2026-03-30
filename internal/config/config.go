@@ -9,6 +9,7 @@ type Config struct {
 	Memtable          MemtableConfig          `json:"memtable"`
 	SSTable           SSTableConfig           `json:"sstable"`
 	LSMTree           LSMTreeConfig           `json:"lsmtree"`
+	TTL               TTLConfig               `json:"ttl"`
 	BlockManager      BlockManagerConfig      `json:"blockmanager"`
 	Snapshot          SnapshotConfig          `json:"snapshot"`
 	Checkpoint        CheckpointConfig        `json:"checkpoint"`
@@ -100,7 +101,7 @@ type SimHashConfig struct {
 }
 
 type TTLConfig struct {
-	Duration int `json:"duration"`
+	InMemoryTTL bool `json:"in_memory_ttl"`
 }
 
 type SkipListConfig struct {
