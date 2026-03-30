@@ -18,11 +18,11 @@ type RBTreeNode[T any] struct {
 }
 
 type RBTree[T any] struct {
-	root                 *RBTreeNode[T]
-	sentinel             *RBTreeNode[T]
-	cmp                  Comparator[T]
-	cmpIgnoringTimestamp Comparator[T]
-	size                 int
+	root             *RBTreeNode[T]
+	sentinel         *RBTreeNode[T]
+	cmp              Comparator[T]
+	cmpIgnoringSeqId Comparator[T]
+	size             int
 }
 
 type RBTreeIterator[T any] struct {
@@ -30,16 +30,16 @@ type RBTreeIterator[T any] struct {
 	current *RBTreeNode[T]
 }
 
-func NewRBTree[T any](cmp Comparator[T], cmpIgnoringTimestamp Comparator[T]) *RBTree[T] {
+func NewRBTree[T any](cmp Comparator[T], cmpIgnoringSeqId Comparator[T]) *RBTree[T] {
 	nilNode := &RBTreeNode[T]{color: Black}
 	nilNode.left = nilNode
 	nilNode.right = nilNode
 	nilNode.parent = nilNode
 	return &RBTree[T]{
-		root:                 nilNode,
-		sentinel:             nilNode,
-		cmp:                  cmp,
-		cmpIgnoringTimestamp: cmpIgnoringTimestamp,
+		root:             nilNode,
+		sentinel:         nilNode,
+		cmp:              cmp,
+		cmpIgnoringSeqId: cmpIgnoringSeqId,
 	}
 }
 
@@ -83,7 +83,7 @@ func (t *RBTree[T]) LowerBound(key T) *RBTreeNode[T] {
 	node := t.root
 	var candidate *RBTreeNode[T]
 	for node != t.sentinel {
-		cmp := t.cmpIgnoringTimestamp(node.Key, key)
+		cmp := t.cmpIgnoringSeqId(node.Key, key)
 		if cmp >= 0 {
 			candidate = node
 			node = node.left
@@ -92,7 +92,7 @@ func (t *RBTree[T]) LowerBound(key T) *RBTreeNode[T] {
 		}
 	}
 	for candidate != nil && candidate.left != t.sentinel &&
-		t.cmpIgnoringTimestamp(candidate.left.Key, key) == 0 {
+		t.cmpIgnoringSeqId(candidate.left.Key, key) == 0 {
 		candidate = candidate.left
 	}
 	return candidate
@@ -358,7 +358,7 @@ func (it *RBTreeIterator[T]) Seek(key T) {
 	node := it.tree.root
 	var candidate *RBTreeNode[T]
 	for node != it.tree.sentinel {
-		cmp := it.tree.cmpIgnoringTimestamp(node.Key, key)
+		cmp := it.tree.cmpIgnoringSeqId(node.Key, key)
 		if cmp >= 0 {
 			candidate = node
 			node = node.left
@@ -367,7 +367,7 @@ func (it *RBTreeIterator[T]) Seek(key T) {
 		}
 	}
 	for candidate != nil && candidate.left != it.tree.sentinel &&
-		it.tree.cmpIgnoringTimestamp(candidate.left.Key, key) == 0 {
+		it.tree.cmpIgnoringSeqId(candidate.left.Key, key) == 0 {
 		candidate = candidate.left
 	}
 	it.current = candidate

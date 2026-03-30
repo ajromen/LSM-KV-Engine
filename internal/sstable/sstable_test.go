@@ -9,12 +9,11 @@ import (
 	"github.com/ajromen/LSM-KV-Engine/internal/block"
 	"github.com/ajromen/LSM-KV-Engine/internal/config"
 	"github.com/ajromen/LSM-KV-Engine/internal/enums"
-	"github.com/ajromen/LSM-KV-Engine/internal/utils"
 )
 
-func createTestRecord(key string, value string, timestamp uint64, tombstone bool) Record {
+func createTestRecord(key string, value string, seqId uint64, tombstone bool) Record {
 	return Record{
-		Timestamp: utils.Uint128{Low: timestamp, High: 0},
+		SeqId:     seqId,
 		Tombstone: tombstone,
 		Key:       []byte(key),
 		Value:     []byte(value),
@@ -482,7 +481,7 @@ func TestSSTableMergeIteratorRawWithDuplicates(t *testing.T) {
 	}
 	for iterRaw.Valid() {
 		rec := iterRaw.Key()
-		fmt.Println("RAW:", string(rec.Key), string(rec.Value), "ts:", rec.Timestamp.Low)
+		fmt.Println("RAW:", string(rec.Key), string(rec.Value), "seqId:", rec.SeqId)
 		iterRaw.Next()
 	}
 	fmt.Println("=== MergeIterator: duplicates (only newest visible) ===")
@@ -492,7 +491,7 @@ func TestSSTableMergeIteratorRawWithDuplicates(t *testing.T) {
 	}
 	for iterFiltered.Valid() {
 		rec := iterFiltered.Key()
-		fmt.Println("FILTERED:", string(rec.Key), string(rec.Value), "ts:", rec.Timestamp.Low)
+		fmt.Println("FILTERED:", string(rec.Key), string(rec.Value), "seqId:", rec.SeqId)
 		iterFiltered.Next()
 	}
 }
@@ -558,7 +557,7 @@ func TestSSTableMergeIteratorWithTombstones(t *testing.T) {
 	}
 	for iterRaw.Valid() {
 		rec := iterRaw.Key()
-		fmt.Println("RAW:", string(rec.Key), string(rec.Value), "tombstone:", rec.Tombstone, "ts:", rec.Timestamp.Low)
+		fmt.Println("RAW:", string(rec.Key), string(rec.Value), "tombstone:", rec.Tombstone, "seqId:", rec.SeqId)
 		iterRaw.Next()
 	}
 	fmt.Println("=== MergeIterator: tombstones filtered out ===")
@@ -568,7 +567,7 @@ func TestSSTableMergeIteratorWithTombstones(t *testing.T) {
 	}
 	for iterFiltered.Valid() {
 		rec := iterFiltered.Key()
-		fmt.Println("FILTERED:", string(rec.Key), string(rec.Value), "ts:", rec.Timestamp.Low)
+		fmt.Println("FILTERED:", string(rec.Key), string(rec.Value), "seqId:", rec.SeqId)
 		iterFiltered.Next()
 	}
 }

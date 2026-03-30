@@ -326,7 +326,7 @@ func (r *SSTableReader) Get(key []byte) (*Record, error) {
 		return nil, nil
 	}
 	return &Record{
-		Timestamp: rec.Timestamp,
+		SeqId:     rec.SeqId,
 		Tombstone: rec.Tombstone,
 		Key:       rec.Key,
 		Value:     rec.Value,

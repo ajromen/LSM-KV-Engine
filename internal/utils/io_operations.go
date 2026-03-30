@@ -69,7 +69,7 @@ func ReadUvarint(file *os.File) (uint64, error) {
 	return result, nil
 }
 
-// use this for writing uint128 (timestamp 16B)
+// use this for writing uint128
 func WriteUvarint128(file *os.File, value Uint128) error {
 	high := value.High
 	low := value.Low
@@ -93,7 +93,7 @@ func WriteUvarint128(file *os.File, value Uint128) error {
 	return nil
 }
 
-// use this for reading uint128 (timestamp 16B)
+// use this for reading uint128
 func ReadUvarint128(file *os.File) (Uint128, error) {
 	var value Uint128
 	var shift uint

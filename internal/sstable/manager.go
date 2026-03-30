@@ -11,7 +11,6 @@ import (
 	"github.com/ajromen/LSM-KV-Engine/internal/config"
 	"github.com/ajromen/LSM-KV-Engine/internal/enums"
 	"github.com/ajromen/LSM-KV-Engine/internal/memtable"
-	"github.com/ajromen/LSM-KV-Engine/internal/utils"
 )
 
 type Layer struct {
@@ -160,7 +159,7 @@ func (sm *SSTableManager) FlushToSSTable(entries []memtable.MemtableEntry) error
 		record := Record{
 			Key:       entry.Key,
 			Value:     entry.Value,
-			Timestamp: utils.Uint128{Low: entry.Timestamp},
+			SeqId:     entry.SeqId,
 			Tombstone: entry.Tombstone,
 		}
 		if err := writer.AddRecord(record); err != nil {

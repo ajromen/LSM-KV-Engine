@@ -169,10 +169,10 @@ type RBTreeStore struct {
 
 func NewRBTreeStore(
 	cmp data_structures.Comparator[MemtableEntry],
-	cmpIgnoringTimestamp data_structures.Comparator[MemtableEntry],
+	cmpIgnoringSeqId data_structures.Comparator[MemtableEntry],
 ) *RBTreeStore {
 	return &RBTreeStore{
-		tree: data_structures.NewRBTree[MemtableEntry](cmp, cmpIgnoringTimestamp),
+		tree: data_structures.NewRBTree[MemtableEntry](cmp, cmpIgnoringSeqId),
 	}
 }
 
@@ -223,10 +223,10 @@ type AVLTreeStore struct {
 
 func NewAVLTreeStore(
 	cmp data_structures.Comparator[MemtableEntry],
-	cmpIgnoringTimestamp data_structures.Comparator[MemtableEntry],
+	cmpIgnoringSeqId data_structures.Comparator[MemtableEntry],
 ) *AVLTreeStore {
 	return &AVLTreeStore{
-		tree: data_structures.NewAVLTree[MemtableEntry](cmp, cmpIgnoringTimestamp),
+		tree: data_structures.NewAVLTree[MemtableEntry](cmp, cmpIgnoringSeqId),
 	}
 }
 

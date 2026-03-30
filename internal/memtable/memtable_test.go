@@ -62,10 +62,10 @@ func TestGetMissing(t *testing.T) {
 }
 
 // ============================================================
-// Timestamp semantics
+// SeqId semantics
 // ============================================================
 
-func TestNewerTimestampWins(t *testing.T) {
+func TestNewerSeqIdWins(t *testing.T) {
 	for _, mt := range allTypes {
 		mt := mt
 		t.Run(string(mt), func(t *testing.T) {
@@ -83,7 +83,7 @@ func TestNewerTimestampWins(t *testing.T) {
 	}
 }
 
-func TestOlderTimestampDoesNotOverwrite(t *testing.T) {
+func TestOlderSeqIdDoesNotOverwrite(t *testing.T) {
 	allTypes = []enums.MemTableType{enums.BTreeMemTable, enums.SkiplistMemTable}
 	for _, mt := range allTypes {
 		mt := mt
@@ -294,7 +294,7 @@ func TestIteratorSeek(t *testing.T) {
 
 			globalRaw := NewRawIterator([]iterator.Iterator[MemtableEntry]{rawIt1, rawIt2}, 1)
 			globalIt := NewMergedMemtableIterator(globalRaw)
-			globalIt.Seek(MemtableEntry{Key: []byte("key3"), Timestamp: math.MaxInt64})
+			globalIt.Seek(MemtableEntry{Key: []byte("key3"), SeqId: math.MaxInt64})
 
 			var got []string
 			for globalIt.Valid() {
@@ -379,7 +379,7 @@ func TestConcurrency(t *testing.T) {
 
 		t.Logf(">>> flush #%d started — %d entries", current, len(entries))
 		for _, e := range entries {
-			t.Logf("    key=%s value=%s tombstone=%v ts=%d", e.Key, e.Value, e.Tombstone, e.Timestamp)
+			t.Logf("    key=%s value=%s tombstone=%v seqId=%d", e.Key, e.Value, e.SeqId, e.SeqId)
 		}
 
 		mu.Lock()
@@ -495,8 +495,8 @@ func TestMemtableLifecycle(t *testing.T) {
 	mem := NewMemtableManager(5, 0, factory, func(entries []MemtableEntry) {
 		fmt.Println("=== FLUSH START ===")
 		for _, e := range entries {
-			fmt.Printf("flush: key=%s value=%s ts=%d tomb=%v\n",
-				e.Key, e.Value, e.Timestamp, e.Tombstone)
+			fmt.Printf("flush: key=%s value=%s seqId=%d tomb=%v\n",
+				e.Key, e.Value, e.SeqId, e.Tombstone)
 		}
 		mu.Lock()
 		flushed = append(flushed, entries...)
@@ -518,8 +518,8 @@ func TestMemtableLifecycle(t *testing.T) {
 	it.SeekToFirst()
 	for it.Valid() {
 		e := it.Value()
-		fmt.Printf("iter: key=%s value=%s ts=%d\n",
-			e.Key, e.Value, e.Timestamp)
+		fmt.Printf("iter: key=%s value=%s seqID=%d\n",
+			e.Key, e.Value, e.SeqId)
 		it.Next()
 	}
 	fmt.Println("=== FLUSHED COUNT ===")

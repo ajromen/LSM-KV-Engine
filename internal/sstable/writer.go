@@ -9,7 +9,6 @@ import (
 	"github.com/ajromen/LSM-KV-Engine/internal/encoders"
 	"github.com/ajromen/LSM-KV-Engine/internal/enums"
 	"github.com/ajromen/LSM-KV-Engine/internal/probabilistics"
-	"github.com/ajromen/LSM-KV-Engine/internal/utils"
 )
 
 const SSTableFileExtension = ".sst"
@@ -30,8 +29,8 @@ type SSTableWriter struct {
 	footer            *Footer         // footer of sstable
 	currentBlockIndex uint32          // tracks current data block index
 	recordCount       uint64          // tracks number of records
-	minTimestamp      utils.Uint128   // min timestamp (newest record)
-	maxTimestamp      utils.Uint128   // max timestamp (oldest record)
+	minSeqId          uint64          // min seqId (newest record)
+	maxSeqId          uint64          // max seqId (newest record)
 	minKeyLength      uint32          // smallest key by length
 	maxKeyLength      uint32          // largest key by length
 	minKey            []byte          // smallest key in sorting order
@@ -77,7 +76,7 @@ func NewSSTableWriter(filePath string, blockManager *block.BlockManager, expecte
 }
 
 // AddRecord INSERTS A NEW RECORD INTO DataBlockBuilder OF GIVEN SSTableWriter IN GIVEN ORDER:
-// 1. Update min/max key timestamp metadata
+// 1. Update min/max key seqId metadata
 // 2. Update min/max keylength metadata
 // 3. Add key to bloom filter
 // 4. Add record to current data block -> block full? -> flush it
@@ -85,17 +84,17 @@ func (sw *SSTableWriter) AddRecord(record Record) error {
 	sw.recordCount++
 	// step 1
 	if sw.firstRecord {
-		sw.minTimestamp = record.Timestamp
-		sw.maxTimestamp = record.Timestamp
+		sw.minSeqId = record.SeqId
+		sw.maxSeqId = record.SeqId
 		sw.minKey = append([]byte(nil), record.Key...)
 		sw.maxKey = append([]byte(nil), record.Key...)
 		sw.firstRecord = false
 	} else {
-		if utils.Uint128LT(record.Timestamp, sw.minTimestamp) {
-			sw.minTimestamp = record.Timestamp
+		if record.SeqId < sw.minSeqId {
+			sw.minSeqId = record.SeqId
 		}
-		if utils.Uint128GT(record.Timestamp, sw.maxTimestamp) {
-			sw.maxTimestamp = record.Timestamp
+		if record.SeqId > sw.maxSeqId {
+			sw.maxSeqId = record.SeqId
 		}
 		if bytes.Compare(record.Key, sw.minKey) < 0 {
 			sw.minKey = append([]byte(nil), record.Key...)
@@ -208,8 +207,8 @@ func (sw *SSTableWriter) Finalize() error {
 	meta.SetUint64(FieldRestartInterval, uint64(config.GetSettings().SSTable.DataSegment.RestartInterval))
 	meta.SetBytes(FieldMinKey, sw.minKey)
 	meta.SetBytes(FieldMaxKey, sw.maxKey)
-	meta.SetUint64(FieldMinTimestamp, sw.minTimestamp.Low)
-	meta.SetUint64(FieldMaxTimestamp, sw.maxTimestamp.Low)
+	meta.SetUint64(FieldMinSeqId, sw.minSeqId)
+	meta.SetUint64(FieldMaxSeqId, sw.maxSeqId)
 	meta.SetUint64(FieldMinKeyLength, uint64(sw.minKeyLength))
 	meta.SetUint64(FieldMaxKeyLength, uint64(sw.maxKeyLength))
 	meta.SetByte(FieldMergeStrategy, byte(enums.Heap))

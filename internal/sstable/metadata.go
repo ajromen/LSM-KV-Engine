@@ -11,8 +11,8 @@ type MetadataFieldID uint16
 const (
 	FieldMinKey          MetadataFieldID = 1
 	FieldMaxKey          MetadataFieldID = 2
-	FieldMinTimestamp    MetadataFieldID = 3
-	FieldMaxTimestamp    MetadataFieldID = 4
+	FieldMinSeqId        MetadataFieldID = 3
+	FieldMaxSeqId        MetadataFieldID = 4
 	FieldBlockSize       MetadataFieldID = 5
 	FieldNumDataBlocks   MetadataFieldID = 6
 	FieldTotalRecords    MetadataFieldID = 7

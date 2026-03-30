@@ -35,9 +35,9 @@ func NewMemtableManager(maxTables int, mergeStructure byte, factory func() Memta
 }
 
 // Put inserts an entry into active memtable and if the memtable reaches max capacity, triggers rotation
-func (mm *MemtableManager) Put(key []byte, value []byte, timestamp uint64, tombstone bool) {
+func (mm *MemtableManager) Put(key []byte, value []byte, seqId uint64, tombstone bool) {
 	mm.mu.Lock()
-	mm.active.Put(key, value, timestamp, tombstone)
+	mm.active.Put(key, value, seqId, tombstone)
 	shouldRotate := mm.active.ShouldFlush()
 	mm.mu.Unlock()
 	if shouldRotate {
@@ -106,9 +106,9 @@ func (mm *MemtableManager) Get(key []byte) ([]byte, bool) {
 
 // Delete inserts a tombstone for a key into the active memtable
 // Works the same as Put, but marks entry as deleted
-func (mm *MemtableManager) Delete(key []byte, timestamp uint64) {
+func (mm *MemtableManager) Delete(key []byte, seqId uint64) {
 	mm.mu.Lock()
-	mm.active.Put(key, []byte{}, timestamp, true)
+	mm.active.Put(key, []byte{}, seqId, true)
 	shouldRotate := mm.active.ShouldFlush()
 	mm.mu.Unlock()
 	if shouldRotate {

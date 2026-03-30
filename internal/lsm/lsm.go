@@ -2,7 +2,6 @@ package lsm
 
 import (
 	"fmt"
-	"time"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/config"
 	"github.com/ajromen/LSM-KV-Engine/internal/enums"
@@ -53,9 +52,8 @@ func (l *LSM) onFlush(entries []memtable.MemtableEntry) {
 	}
 }
 
-func (l *LSM) Put(key []byte, value []byte) error {
-	ts := currentTimestamp()
-	l.memtableeManager.Put(key, value, ts, false)
+func (l *LSM) Put(key []byte, value []byte, seqId uint64) error {
+	l.memtableeManager.Put(key, value, seqId, false)
 	return nil
 }
 
@@ -77,18 +75,12 @@ func (l *LSM) Get(key []byte) ([]byte, bool, error) {
 	return nil, false, nil
 }
 
-func (l *LSM) Delete(key []byte) error {
-	ts := currentTimestamp()
-	l.memtableeManager.Put(key, nil, ts, true)
+func (l *LSM) Delete(key []byte, seqId uint64) error {
+	l.memtableeManager.Put(key, nil, seqId, true)
 	return nil
 }
 
 func (l *LSM) Finish() error {
 	l.memtableeManager.Close()
 	return nil
-}
-
-func currentTimestamp() uint64 {
-	now := time.Now().UnixNano()
-	return uint64(now)
 }
