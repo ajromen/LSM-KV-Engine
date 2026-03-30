@@ -152,3 +152,35 @@ func (mm *MemtableManager) Iterator() iterator.Iterator[MemtableEntry] {
 func (mm *MemtableManager) Close() {
 	//close(mm.flushChannel) mozda treba
 }
+
+// EntryIterator returns a MergedMemtableIterator adapted to iterator.Entry type
+// This is used by DBIterator which works at the Entry level
+func (mm *MemtableManager) EntryIterator() iterator.Iterator[iterator.Entry] {
+	typedIt := mm.Iterator() // Iterator[MemtableEntry]
+	return iterator.NewAdaptedIterator(
+		&memtableIteratorSeekWrapper{inner: typedIt},
+		func(e MemtableEntry) iterator.Entry {
+			return iterator.Entry{
+				Key:        append([]byte(nil), e.Key...),
+				Value:      append([]byte(nil), e.Value...),
+				Tombstone:  e.Tombstone,
+				SequenceID: e.SeqId,
+			}
+		},
+		func(key []byte) MemtableEntry {
+			return MemtableEntry{Key: key}
+		},
+	)
+}
+
+// memtableIteratorSeekWrapper wraps Iterator[MemtableEntry] to add TypedSeekIterator interface
+type memtableIteratorSeekWrapper struct {
+	inner iterator.Iterator[MemtableEntry]
+}
+
+func (w *memtableIteratorSeekWrapper) Valid() bool          { return w.inner.Valid() }
+func (w *memtableIteratorSeekWrapper) SeekToFirst()         { w.inner.SeekToFirst() }
+func (w *memtableIteratorSeekWrapper) SeekToLast()          { w.inner.SeekToLast() }
+func (w *memtableIteratorSeekWrapper) Next()                { w.inner.Next() }
+func (w *memtableIteratorSeekWrapper) Key() MemtableEntry   { return w.inner.Key() }
+func (w *memtableIteratorSeekWrapper) Seek(e MemtableEntry) { w.inner.Seek(e) }
