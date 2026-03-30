@@ -23,6 +23,7 @@ type SSTableManifest struct {
 type Manifest struct {
 	FileDir       string                    `json:"file_dir"`
 	NextSStableId int                       `json:"next_stable_id"`
+	MaxSeqId      uint64                    `json:"max_seq_id"`
 	Layers        map[int][]SSTableManifest `json:"layers"`
 }
 
@@ -46,6 +47,7 @@ func NewManifest(fileDir string) (*Manifest, error) {
 	return manifest, nil
 }
 
+// reconstructs manifest if deleted
 func (m *Manifest) reconstruct(fileDir string) error {
 	files, err := os.ReadDir(fileDir)
 	if err != nil {
@@ -105,7 +107,7 @@ func (m *Manifest) reconstruct(fileDir string) error {
 	}
 	err = m.Save()
 	if err != nil {
-		return fmt.Errorf("failed to save manifest: %w", err)
+		return fmt.Errorf("failed to save Manifest: %w", err)
 	}
 	return nil
 }

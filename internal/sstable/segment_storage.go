@@ -137,9 +137,10 @@ const (
 	IndexSegmentExtension      MultiFileSegmentExtensions = ".index"
 	FilterSegmentExtension     MultiFileSegmentExtensions = ".filter"
 	SummarySegmentExtension    MultiFileSegmentExtensions = ".summary"
-	MetadataSegmentExtension   MultiFileSegmentExtensions = ".metadata"
+	MerkletreeSegmentExtension MultiFileSegmentExtensions = ".merkle"
 	FooterSegmentExtension     MultiFileSegmentExtensions = ".footer"
 	DictionarySegmentExtension MultiFileSegmentExtensions = ".dictionary"
+	MetadataSegmentExtension   MultiFileSegmentExtensions = ".metadata"
 )
 
 // MultiFileStorage STORES EACH SSTABLE SEGMENT IN A SEPARATE FILE
@@ -160,6 +161,7 @@ func (m *MultiFileStorage) Delete() {
 		FilterSegmentExtension,
 		SummarySegmentExtension,
 		MetadataSegmentExtension,
+		MerkletreeSegmentExtension,
 		FooterSegmentExtension,
 		DictionarySegmentExtension,
 	}
@@ -227,6 +229,8 @@ func (m *MultiFileStorage) getFilePath(segType enums.SegmentType) string {
 		return m.basePath + string(SummarySegmentExtension)
 	case enums.SegmentMetadata:
 		return m.basePath + string(MetadataSegmentExtension)
+	case enums.SegmentMerkleTree:
+		return m.basePath + string(MerkletreeSegmentExtension)
 	case enums.SegmentFooter:
 		return m.basePath + string(FooterSegmentExtension)
 	case enums.SegmentDictionary:

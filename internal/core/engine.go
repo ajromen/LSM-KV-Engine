@@ -9,12 +9,14 @@ import (
 	"github.com/ajromen/LSM-KV-Engine/internal/cli"
 	"github.com/ajromen/LSM-KV-Engine/internal/config"
 	"github.com/ajromen/LSM-KV-Engine/internal/lsm"
+	"github.com/ajromen/LSM-KV-Engine/internal/sequence"
 	"github.com/ajromen/LSM-KV-Engine/internal/sstable"
 )
 
 type Engine struct {
 	config *config.Config
 	lsm    *lsm.LSM
+	seqGen *sequence.SequenceGenerator
 	//wal
 }
 
@@ -33,12 +35,23 @@ func NewEngine(flags *cli.FLags) (*Engine, error) {
 		return nil, err
 	}
 	engine := Engine{lsm: lsmTree}
+	engine.recover()
 	return &engine, nil
 }
 
-func (engine *Engine) Put(key []byte, value []byte) error {
+// check manifest
+// check wal
+func (engine *Engine) recover() {
+	var maxSeq uint64
+	maxSeq = engine.lsm.GetMaxSeqId()
 	//wal
-	err := engine.lsm.Put(key, value)
+	engine.seqGen = sequence.NewSequenceGenerator(maxSeq)
+}
+
+func (engine *Engine) Put(key []byte, value []byte) error {
+	seqId := engine.seqGen.Next()
+	//wal
+	err := engine.lsm.Put(key, value, seqId)
 	if err != nil {
 		return err
 	}
@@ -51,8 +64,9 @@ func (engine *Engine) Get(key []byte) ([]byte, bool, error) {
 }
 
 func (engine *Engine) Delete(key []byte) error {
+	seqId := engine.seqGen.Next()
 	// wal
-	err := engine.lsm.Delete(key)
+	err := engine.lsm.Delete(key, seqId)
 	if err != nil {
 		return err
 	}

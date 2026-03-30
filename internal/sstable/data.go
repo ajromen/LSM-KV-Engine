@@ -28,7 +28,7 @@ const (
 │  │                        DATA SECTION                            │ │
 │  │                                                                │ │
 │  │  Record 0                                                      │ │
-│  │    - timestamp (Uint128 → 2x uvarint: low, high)               │ │
+│  │    - sequenceId (uvarint)                                      │ │
 │  │    - key (delta encoded):                                      │ │
 │  │         shared_prefix_len (uvarint)                            │ │
 │  │         suffix_len (uvarint)                                   │ │
@@ -37,7 +37,7 @@ const (
 │  │    - value bytes (RAW or DICT-ENCODED, without flag byte)      │ │
 │  │                                                                │ │
 │  │  Record 1                                                      │ │
-│  │    - timestamp                                                 │ │
+│  │    - sequenceId                                                │ │
 │  │    - key (delta encoded)                                       │ │
 │  │    - value_len                                                 │ │
 │  │    - value bytes                                               │ │
@@ -87,6 +87,7 @@ type DataBlockBuilder struct {
 	restartInterval int                       // number of keys between delta restart points
 	recordCount     int                       // number of records added to block
 	firstKey        []byte                    // first key in the block (for index)
+	lastKey         []byte                    // last key in the block (for index)
 	tombstoneBits   *BitSet                   // bitmap for tombstones
 	isEncodedBits   *BitSet                   // bitmap for whether record value is encoded using adaptive encoder
 }
@@ -102,12 +103,6 @@ func NewDataBlockBuilder(t byte, restartInterval, blockSize int, valueEncoder *e
 	}
 }
 
-func AppendUvarint128ToSlice2(buf []byte, v utils.Uint128) []byte {
-	buf = binary.AppendUvarint(buf, v.Low)
-	buf = binary.AppendUvarint(buf, v.High)
-	return buf
-}
-
 // APPENDS A SINGLE RECORD TO THE CURRENT BLOCK -> RETURNS FALSE IF THE RECORD DOES NOT FIT IN THE REMAINING BLOCK CAPACITY
 
 func (builder *DataBlockBuilder) AddRecord(record Record) bool {
@@ -115,6 +110,8 @@ func (builder *DataBlockBuilder) AddRecord(record Record) bool {
 	if builder.recordCount == 0 {
 		builder.firstKey = append([]byte(nil), record.Key...)
 	}
+	// change last key to current key
+	builder.lastKey = append([]byte(nil), record.Key...)
 
 	// estimate size to see if record fits in current block
 	estimatedSize := len(record.Key)*2 + len(record.Value) + 32
@@ -124,9 +121,9 @@ func (builder *DataBlockBuilder) AddRecord(record Record) bool {
 		return false
 	}
 
-	// append timestamp
+	// append sequence Id
 	keyOffset := uint32(len(builder.data))
-	builder.data = AppendUvarint128ToSlice2(builder.data, record.Timestamp)
+	builder.data = binary.AppendUvarint(builder.data, record.SeqId)
 
 	// set tombstone bit if record has tombstone true
 	if record.Tombstone {
@@ -221,6 +218,10 @@ func (builder *DataBlockBuilder) FirstKey() []byte {
 	return builder.firstKey
 }
 
+func (builder *DataBlockBuilder) LastKey() []byte {
+	return builder.lastKey
+}
+
 func (builder *DataBlockBuilder) RecordCount() int {
 	return builder.recordCount
 }
@@ -254,7 +255,7 @@ func NewDataBlockReader(block []byte, restartInterval int, encodingType byte, va
 	expectedCRC := binary.LittleEndian.Uint32(block[crcPos:])
 	actualCRC := crc32.ChecksumIEEE(block[:crcPos])
 	if expectedCRC != actualCRC {
-		return nil, errors.New("CRC mismatch")
+		return nil, errors.New("CRC mismatch right here")
 	}
 
 	bitmapSize := binary.LittleEndian.Uint16(block[bitmapSizePos : bitmapSizePos+2])
@@ -312,21 +313,13 @@ func (r *DataBlockReader) ReadRecord() (*Record, error) {
 	if r.pos >= r.dataSize {
 		return nil, errors.New("out of data")
 	}
-	// read timestamp
-	low, n1 := binary.Uvarint(r.data[r.pos:])
-	if n1 <= 0 {
-		return nil, errors.New("invalid low uint64")
+
+	// read seqId
+	seqId, n := binary.Uvarint(r.data[r.pos:])
+	if n <= 0 {
+		return nil, errors.New("invalid seqId")
 	}
-	r.pos += n1
-	high, n2 := binary.Uvarint(r.data[r.pos:])
-	if n2 <= 0 {
-		return nil, errors.New("invalid high uint64")
-	}
-	r.pos += n2
-	timestamp := utils.Uint128{
-		High: high,
-		Low:  low,
-	}
+	r.pos += n
 	if r.pos >= r.dataSize {
 		return nil, errors.New("unexpected end")
 	}
@@ -365,7 +358,7 @@ func (r *DataBlockReader) ReadRecord() (*Record, error) {
 	}
 	r.recordIdx++
 	return &Record{
-		Timestamp: timestamp,
+		SeqId:     seqId,
 		Tombstone: tombstone,
 		Key:       key,
 		Value:     value,
@@ -508,7 +501,7 @@ func (it *DataBlockIteratorRaw) Prev() {
 		return
 	}
 	targetKey := it.current.Key
-	targetTS := it.current.Timestamp
+	targetSeqId := it.current.SeqId
 
 	if err := it.reader.SeekToRestart(0); err != nil {
 		it.valid = false
@@ -525,7 +518,7 @@ func (it *DataBlockIteratorRaw) Prev() {
 			prev = rec
 			continue
 		}
-		if cmp == 0 && utils.Uint128GE(targetTS, rec.Timestamp) {
+		if cmp == 0 && targetSeqId >= rec.SeqId {
 			prev = rec
 			continue
 		}
@@ -662,17 +655,13 @@ func recordComparator(a, b Record) int {
 	if c := bytes.Compare(a.Key, b.Key); c != 0 {
 		return c
 	}
-	if utils.Uint128GE(a.Timestamp, b.Timestamp) && !tsEqual(a.Timestamp, b.Timestamp) {
+	if a.SeqId > b.SeqId {
 		return -1
 	}
-	if utils.Uint128GE(b.Timestamp, a.Timestamp) && !tsEqual(a.Timestamp, b.Timestamp) {
+	if a.SeqId < b.SeqId {
 		return 1
 	}
 	return 0
-}
-
-func tsEqual(a, b utils.Uint128) bool {
-	return a.Low == b.Low && a.High == b.High
 }
 
 // MergeIteratorRaw iterates over more than one data blocks at raw level

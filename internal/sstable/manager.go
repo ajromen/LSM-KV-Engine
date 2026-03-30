@@ -9,9 +9,8 @@ import (
 
 	"github.com/ajromen/LSM-KV-Engine/internal/block"
 	"github.com/ajromen/LSM-KV-Engine/internal/config"
-	"github.com/ajromen/LSM-KV-Engine/internal/data_structures"
+	"github.com/ajromen/LSM-KV-Engine/internal/enums"
 	"github.com/ajromen/LSM-KV-Engine/internal/memtable"
-	"github.com/ajromen/LSM-KV-Engine/internal/utils"
 )
 
 type Layer struct {
@@ -55,7 +54,7 @@ func newLayer() *Layer {
 type SSTableManager struct {
 	Layers       []*Layer
 	blockManager *block.BlockManager
-	manifest     *Manifest
+	Manifest     *Manifest
 	dataDir      string
 }
 
@@ -70,7 +69,7 @@ func NewSSTableManager(dataDir string) *SSTableManager {
 	if err != nil {
 		panic(err)
 	}
-	manager.manifest = manifest
+	manager.Manifest = manifest
 	manager.blockManager = block.NewBlockManager(blockSize)
 	if err := manager.LoadExistingSSTables(); err != nil {
 		panic(fmt.Errorf("failed to load existing sstables: %v", err))
@@ -78,7 +77,8 @@ func NewSSTableManager(dataDir string) *SSTableManager {
 	return manager
 }
 
-// takes sstable names from manifest and loads them
+// takes sstable names from Manifest and loads them
+// finds max sequence id if not in Manifest
 func (sm *SSTableManager) LoadExistingSSTables() error {
 	_, err := os.Stat(sm.dataDir)
 	if os.IsNotExist(err) {
@@ -87,30 +87,47 @@ func (sm *SSTableManager) LoadExistingSSTables() error {
 			return fmt.Errorf("cant create data directory: %w", err)
 		}
 	}
-	keys := make([]int, 0, len(sm.manifest.Layers))
-	for k := range sm.manifest.Layers {
+	keys := make([]int, 0, len(sm.Manifest.Layers))
+	for k := range sm.Manifest.Layers {
 		keys = append(keys, k)
 	}
 	sort.Ints(keys)
 
+	var maxSeqId uint64
 	for _, i := range keys {
 		for len(sm.Layers) <= i {
 			sm.Layers = append(sm.Layers, newLayer())
 		}
-		for _, sstManifest := range sm.manifest.Layers[i] {
+		for _, sstManifest := range sm.Manifest.Layers[i] {
 			reader, err := NewSSTableReader(sstManifest.Id, sstManifest.BaseFileName, sstManifest.Format, int(sstManifest.Layer))
 			if err != nil {
 				return fmt.Errorf("cant create SSTable reader: %w", err)
 			}
+			if sm.Manifest.MaxSeqId == 0 {
+				seqId, ok := reader.Metadata.GetUint64(FieldMaxSeqId)
+				if !ok {
+					return fmt.Errorf("couldn't read metadata segment")
+				}
+				if maxSeqId < seqId {
+					maxSeqId = seqId
+				}
+			}
 			sm.Layers[i].AppendSSTable(reader)
+		}
+	}
+	if sm.Manifest.MaxSeqId == 0 {
+		sm.Manifest.MaxSeqId = maxSeqId
+		err := sm.Manifest.Save()
+		if err != nil {
+			return err
 		}
 	}
 	return nil
 }
 
 func (sm *SSTableManager) createSSTable(expectedElems uint64, toLayer int) (string, int, *SSTableWriter, error) {
-	sstableID := sm.manifest.NextSStableId
-	sm.manifest.IncrementId()
+	sstableID := sm.Manifest.NextSStableId
+	sm.Manifest.IncrementId()
 	filePath := filepath.Join(sm.dataDir, fmt.Sprintf("L%d_%06d%s", toLayer, sstableID, SSTableFileExtension))
 	writer, err := NewSSTableWriter(filePath, sm.blockManager, expectedElems, toLayer)
 	if err != nil {
@@ -131,9 +148,9 @@ func (sm *SSTableManager) addToLayers(reader *SSTableReader, toLayer int) error 
 		Format:       config.GetSettings().SSTable.Format,
 		BaseFileName: reader.filePath,
 	}
-	err := sm.manifest.AddSSTable(sstManifest)
+	err := sm.Manifest.AddSSTable(sstManifest)
 	if err != nil {
-		return fmt.Errorf("cant add sstable to manifest: %w", err)
+		return fmt.Errorf("cant add sstable to Manifest: %w", err)
 	}
 	return nil
 }
@@ -160,7 +177,7 @@ func (sm *SSTableManager) FlushToSSTable(entries []memtable.MemtableEntry) error
 		record := Record{
 			Key:       entry.Key,
 			Value:     entry.Value,
-			Timestamp: utils.Uint128{Low: entry.Timestamp},
+			SeqId:     entry.SeqId,
 			Tombstone: entry.Tombstone,
 		}
 		if err := writer.AddRecord(record); err != nil {
@@ -216,7 +233,7 @@ func (sm *SSTableManager) DeleteSSTable(layer, id int) error {
 		}
 	}
 
-	err := sm.manifest.RemoveSSTable(id, layer)
+	err := sm.Manifest.RemoveSSTable(id, layer)
 	if err != nil {
 		return err
 	}
@@ -271,7 +288,8 @@ func (sm *SSTableManager) MergeSSTables(readers []*SSTableReader, toLayer int, s
 
 	expectedElems := uint64(0)
 	for _, reader := range readers {
-		expectedElems += reader.footer.TotalRecords
+		tr, _ := reader.Metadata.GetUint64(FieldTotalRecords)
+		expectedElems += tr
 	}
 
 	_, sstableID, writer, err := sm.createSSTable(expectedElems, toLayer)
@@ -280,7 +298,7 @@ func (sm *SSTableManager) MergeSSTables(readers []*SSTableReader, toLayer int, s
 	}
 
 	// 2. iterate through all elems and add to new sstable
-	iterator, err := NewSSTableMergeIterator(readers, data_structures.Heap)
+	iterator, err := NewSSTableMergeIterator(readers, byte(enums.Heap))
 	if err != nil {
 		return err
 	}
@@ -344,7 +362,7 @@ func (sm *SSTableManager) MoveSSTable(current *SSTableReader, toLayer int) error
 	current.Layer = toLayer
 	sm.Layers[toLayer].AppendSSTable(current)
 
-	err := sm.manifest.MoveSSTable(current.Id, fromLayer, toLayer)
+	err := sm.Manifest.MoveSSTable(current.Id, fromLayer, toLayer)
 	if err != nil {
 		return err
 	}
