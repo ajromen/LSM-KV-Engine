@@ -12,14 +12,15 @@ import (
 )
 
 const helpText = `LSM-KV-Engine CLI
-
 Commands:
-  put <key> <value>   Store a key-value pair
-  get <key>           Retrieve the value of a key
-  del <key>           Delete a key
-  help                Show this help message
-  clear-all			  Delete all data
-  exit | quit | q     Close the engine and exit`
+  put <key> <value> [ttl]   Store a key-value pair 
+  get <key>                 Retrieve the value of a key
+  del <key> [ttl]           Delete a key
+  help                      Show this help message
+  clear-all                 Delete all data
+  exit | quit | q           Close the engine and exit
+Notes:
+  ttl: time-to-live in seconds`
 
 func main() {
 	flags := cli.ParseFlags()
@@ -74,17 +75,32 @@ func RunCli(engine *core.Engine) {
 }
 
 func handlePut(engine *core.Engine, parts []string) {
-	if len(parts) != 3 {
-		fmt.Println("Usage: put <key> <value>")
+	if len(parts) < 3 || len(parts) > 4 {
+		fmt.Println("Usage: put <key> <value> [ttl]")
 		return
 	}
+
 	key := parts[1]
-	value := strings.Join(parts[2:], " ")
-	if err := engine.Put([]byte(key), []byte(value)); err != nil {
-		fmt.Println("Put:", err)
-		return
+	value := parts[2]
+
+	if len(parts) == 4 {
+		ttl, err := strconv.ParseInt(parts[3], 10, 64)
+		if err != nil {
+			fmt.Println("TTL must be a number")
+			return
+		}
+		if err := engine.PutWithTTL([]byte(key), []byte(value), ttl); err != nil {
+			fmt.Println("Put:", err)
+			return
+		}
+	} else {
+		if err := engine.Put([]byte(key), []byte(value)); err != nil {
+			fmt.Println("Put:", err)
+			return
+		}
 	}
-	fmt.Println("Put:", key, " OK")
+
+	fmt.Println("Put:", key, "OK")
 }
 
 func handleGet(engine *core.Engine, parts []string) {
@@ -106,16 +122,26 @@ func handleGet(engine *core.Engine, parts []string) {
 }
 
 func handleDelete(engine *core.Engine, parts []string) {
-	if len(parts) != 2 {
-		fmt.Println("Usage: delete <key>")
-		return
-	}
 	key := parts[1]
-	if err := engine.Delete([]byte(key)); err != nil {
-		fmt.Println("Delete:", err)
-		return
+
+	if len(parts) == 3 {
+		ttl, err := strconv.ParseInt(parts[2], 10, 64)
+		if err != nil {
+			fmt.Println("TTL must be a number")
+			return
+		}
+		if err := engine.DeleteWithTTL([]byte(key), ttl); err != nil {
+			fmt.Println("Delete:", err)
+			return
+		}
+	} else {
+		if err := engine.Delete([]byte(key)); err != nil {
+			fmt.Println("Delete:", err)
+			return
+		}
 	}
-	fmt.Println("Delete:", key, " OK")
+
+	fmt.Println("Delete:", key, "OK")
 }
 
 func handleClear(engine *core.Engine, parts []string) {

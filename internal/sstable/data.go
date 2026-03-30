@@ -103,8 +103,7 @@ func NewDataBlockBuilder(t byte, restartInterval, blockSize int, valueEncoder *e
 	}
 }
 
-// APPENDS A SINGLE RECORD TO THE CURRENT BLOCK -> RETURNS FALSE IF THE RECORD DOES NOT FIT IN THE REMAINING BLOCK CAPACITY
-
+// AddRecord APPENDS A SINGLE RECORD TO THE CURRENT BLOCK -> RETURNS FALSE IF THE RECORD DOES NOT FIT IN THE REMAINING BLOCK CAPACITY
 func (builder *DataBlockBuilder) AddRecord(record Record) bool {
 	// if its the first key store it for index
 	if builder.recordCount == 0 {
@@ -114,7 +113,7 @@ func (builder *DataBlockBuilder) AddRecord(record Record) bool {
 	builder.lastKey = append([]byte(nil), record.Key...)
 
 	// estimate size to see if record fits in current block
-	estimatedSize := len(record.Key)*2 + len(record.Value) + 32
+	estimatedSize := len(record.Key)*2 + len(record.Value) + 32 + 8
 	bitmapSize := (builder.recordCount / 8) + 1
 	reserved := 12 + (builder.recordCount/builder.restartInterval+1)*4 + bitmapSize
 	if len(builder.data)+estimatedSize+reserved > cap(builder.data) && builder.recordCount > 0 {
@@ -124,6 +123,11 @@ func (builder *DataBlockBuilder) AddRecord(record Record) bool {
 	// append sequence Id
 	keyOffset := uint32(len(builder.data))
 	builder.data = binary.AppendUvarint(builder.data, record.SeqId)
+
+	//append ttl
+	var expBuf [8]byte
+	binary.LittleEndian.PutUint64(expBuf[:], uint64(record.ExpiresAt))
+	builder.data = append(builder.data, expBuf[:]...)
 
 	// set tombstone bit if record has tombstone true
 	if record.Tombstone {
@@ -153,7 +157,6 @@ func (builder *DataBlockBuilder) AddRecord(record Record) bool {
 }
 
 // FINALIZES THE DATA BLOCK BY APPENDING RESTART ARRAY, METADATA AND CRC ON ACTUAL DATA
-
 func (builder *DataBlockBuilder) Finish(blockSize int) ([]byte, error) {
 	if builder.recordCount == 0 {
 		return nil, errors.New("empty block")
@@ -240,7 +243,6 @@ type DataBlockReader struct {
 }
 
 // VERIFIES CRC AND INITIALIZES A BLOCK READER FOR GIVEN BLOCK
-
 func NewDataBlockReader(block []byte, restartInterval int, encodingType byte, valueDecoder *encoders.AdaptiveEncoder) (*DataBlockReader, error) {
 	if len(block) < 12 {
 		return nil, errors.New("block too small")
@@ -308,7 +310,6 @@ func (r *DataBlockReader) Restart() {
 }
 
 // READS AND DECODES THE NEXT RECORD FROM THE BLOCK
-
 func (r *DataBlockReader) ReadRecord() (*Record, error) {
 	if r.pos >= r.dataSize {
 		return nil, errors.New("out of data")
@@ -323,13 +324,23 @@ func (r *DataBlockReader) ReadRecord() (*Record, error) {
 	if r.pos >= r.dataSize {
 		return nil, errors.New("unexpected end")
 	}
+
 	// read tombstone
 	tombstone := r.tombstoneBits.Get(r.recordIdx)
+
+	// read Expiry Time
+	expiresAt := int64(binary.LittleEndian.Uint64(r.data[r.pos:]))
+	r.pos += 8
+	if r.pos >= r.dataSize {
+		return nil, errors.New("unexpected end")
+	}
+
 	// read key
 	key, err := r.decoder.Decode(r.data, &r.pos)
 	if err != nil {
 		return nil, err
 	}
+
 	// read value len
 	valLen, n := binary.Uvarint(r.data[r.pos:])
 	if n <= 0 {
@@ -339,6 +350,7 @@ func (r *DataBlockReader) ReadRecord() (*Record, error) {
 	if r.pos+int(valLen) > len(r.data) {
 		return nil, errors.New("value exceeds block bounds")
 	}
+
 	// read value
 	isEncoded := r.isEncodedBits.Get(r.recordIdx)
 	rawValue := r.data[r.pos : r.pos+int(valLen)]
@@ -356,10 +368,12 @@ func (r *DataBlockReader) ReadRecord() (*Record, error) {
 	} else {
 		value = append([]byte(nil), rawValue...)
 	}
+
 	r.recordIdx++
 	return &Record{
 		SeqId:     seqId,
 		Tombstone: tombstone,
+		ExpiresAt: expiresAt,
 		Key:       key,
 		Value:     value,
 	}, nil

@@ -3,6 +3,7 @@ package memtable
 import (
 	"bytes"
 	"math"
+	"time"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/iterator"
 )
@@ -31,6 +32,21 @@ func (m *GenericMemtable) Put(key []byte, value []byte, seqId uint64, tombstone 
 		Key:       key,
 		Value:     value,
 		SeqId:     seqId,
+		ExpiresAt: 0,
+		Tombstone: tombstone,
+	})
+	m.numEntries++
+	m.sizeBytes += uint64(sizeEntry)
+}
+
+func (m *GenericMemtable) PutWithTTL(key []byte, value []byte, seqId uint64, tombstone bool, ttl int64) {
+	expiresAt := time.Now().Unix() + ttl
+	sizeEntry := len(key) + len(value) + 8 + 1
+	m.store.Insert(MemtableEntry{
+		Key:       key,
+		Value:     value,
+		SeqId:     seqId,
+		ExpiresAt: expiresAt,
 		Tombstone: tombstone,
 	})
 	m.numEntries++
@@ -56,10 +72,14 @@ func (m *GenericMemtable) Get(key []byte) ([]byte, bool) {
 	return entry.Value, true
 }
 
-// Delete marks a key deleted by inserting a tombstone entry
-func (m *GenericMemtable) Delete(key []byte, seqId uint64) {
-	m.Put(key, nil, seqId, true)
-}
+//// Delete marks a key deleted by inserting a tombstone entry
+//func (m *GenericMemtable) Delete(key []byte, seqId uint64) {
+//	m.Put(key, nil, seqId, true)
+//}
+//
+//func (m *GenericMemtable) DeleteWithTTL(key []byte, seqId uint64, ttl int64) {
+//	m.PutWithTTL(key, nil, seqId, true, ttl)
+//}
 
 // ShouldFlush determines whether the memtable has reached its capacity
 func (m *GenericMemtable) ShouldFlush() bool {

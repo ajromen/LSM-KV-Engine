@@ -51,7 +51,17 @@ func (engine *Engine) recover() {
 func (engine *Engine) Put(key []byte, value []byte) error {
 	seqId := engine.seqGen.Next()
 	//wal
-	err := engine.lsm.Put(key, value, seqId)
+	err := engine.lsm.Put(key, value, seqId, false)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (engine *Engine) PutWithTTL(key []byte, value []byte, ttl int64) error {
+	seqId := engine.seqGen.Next()
+	//wal
+	err := engine.lsm.PutWithTTL(key, value, seqId, false, ttl)
 	if err != nil {
 		return err
 	}
@@ -66,7 +76,17 @@ func (engine *Engine) Get(key []byte) ([]byte, bool, error) {
 func (engine *Engine) Delete(key []byte) error {
 	seqId := engine.seqGen.Next()
 	// wal
-	err := engine.lsm.Delete(key, seqId)
+	err := engine.lsm.Put(key, nil, seqId, true)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (engine *Engine) DeleteWithTTL(key []byte, ttl int64) error {
+	seqId := engine.seqGen.Next()
+	//wal
+	err := engine.lsm.PutWithTTL(key, nil, seqId, true, ttl)
 	if err != nil {
 		return err
 	}

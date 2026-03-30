@@ -9,6 +9,7 @@ type MemtableEntry struct {
 	Key       []byte
 	Value     []byte
 	SeqId     uint64
+	ExpiresAt int64
 	Tombstone bool
 }
 
@@ -32,8 +33,10 @@ type MemtableStore interface {
 // Memtable defines the high-level behavior of a memtable.
 type Memtable interface {
 	Put(key []byte, value []byte, seqId uint64, tombstone bool)
+	PutWithTTL(key []byte, value []byte, seqId uint64, tombstone bool, ttl int64)
 	Get(key []byte) ([]byte, bool)
-	Delete(key []byte, seqId uint64)
+	//Delete(key []byte, seqId uint64)
+	//DeleteWithTTL(key []byte, seqId uint64, ttl int64)
 	ShouldFlush() bool
 	Reset()
 	Flush() []MemtableEntry

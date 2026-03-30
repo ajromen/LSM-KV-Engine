@@ -52,8 +52,13 @@ func (l *LSM) onFlush(entries []memtable.MemtableEntry) {
 	}
 }
 
-func (l *LSM) Put(key []byte, value []byte, seqId uint64) error {
-	l.memtableeManager.Put(key, value, seqId, false)
+func (l *LSM) Put(key []byte, value []byte, seqId uint64, tombstone bool) error {
+	l.memtableeManager.Put(key, value, seqId, tombstone)
+	return nil
+}
+
+func (l *LSM) PutWithTTL(key []byte, value []byte, seqId uint64, tombstone bool, ttl int64) error {
+	l.memtableeManager.PutWithTTL(key, value, seqId, tombstone, ttl)
 	return nil
 }
 
@@ -73,11 +78,6 @@ func (l *LSM) Get(key []byte) ([]byte, bool, error) {
 		return entry, true, nil
 	}
 	return nil, false, nil
-}
-
-func (l *LSM) Delete(key []byte, seqId uint64) error {
-	l.memtableeManager.Put(key, nil, seqId, true)
-	return nil
 }
 
 func (l *LSM) Finish() error {

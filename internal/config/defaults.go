@@ -45,6 +45,9 @@ const (
 	DefaultLSMMinMergeThreshold   = 4
 	DefaultLSMLevelSizeMultiplier = 10
 	DefaultMaxLSMHeight           = 5
+
+	//TTL
+	DefaultTTLInMemoryTTL = true
 )
 
 func NewDefaultConfig() *Config {
@@ -100,6 +103,9 @@ func NewDefaultConfig() *Config {
 		BlockManager: BlockManagerConfig{
 			BlockSize:           DefaultBlockSize,
 			BlockCacheMaxBlocks: DefaultBlockCacheMaxBlocks,
+		},
+		TTL: TTLConfig{
+			InMemoryTTL: DefaultTTLInMemoryTTL,
 		},
 	}
 }
