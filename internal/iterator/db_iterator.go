@@ -3,11 +3,10 @@ package iterator
 import "bytes"
 
 type Entry struct {
-	Key           []byte
-	Value         []byte
-	Tombstone     bool
-	TimestampHigh uint64
-	TimestampLow  uint64
+	Key        []byte
+	Value      []byte
+	Tombstone  bool
+	SequenceID uint64
 }
 
 type DBIterator struct {
@@ -106,11 +105,10 @@ func (it *DBIterator) advance() {
 			}
 
 			it.current = &Entry{
-				Key:           keyCopy,
-				Value:         valCopy,
-				Tombstone:     false,
-				TimestampHigh: entry.TimestampHigh,
-				TimestampLow:  entry.TimestampLow,
+				Key:        keyCopy,
+				Value:      valCopy,
+				Tombstone:  false,
+				SequenceID: entry.SequenceID,
 			}
 			it.valid = true
 			return
@@ -127,11 +125,10 @@ func (it *DBIterator) advance() {
 			}
 
 			it.current = &Entry{
-				Key:           keyCopy,
-				Value:         valCopy,
-				Tombstone:     false,
-				TimestampHigh: entry.TimestampHigh,
-				TimestampLow:  entry.TimestampLow,
+				Key:        keyCopy,
+				Value:      valCopy,
+				Tombstone:  false,
+				SequenceID: entry.SequenceID,
 			}
 			it.valid = true
 			return
@@ -176,38 +173,21 @@ func compareEntries(a, b Entry) int {
 		return c
 	}
 
-	switch compareUint128(a.TimestampHigh, a.TimestampLow, b.TimestampHigh, b.TimestampLow) {
-	case 1:
-		return -1
-	case -1:
-		return 1
-	default:
-		return 0
-	}
-}
-
-func compareUint128(aHigh, aLow, bHigh, bLow uint64) int {
-	if aHigh > bHigh {
-		return 1
-	}
-	if aHigh < bHigh {
+	// veći sequence_id = noviji → ide prvi
+	if a.SequenceID > b.SequenceID {
 		return -1
 	}
-	if aLow > bLow {
+	if a.SequenceID < b.SequenceID {
 		return 1
-	}
-	if aLow < bLow {
-		return -1
 	}
 	return 0
 }
 
 func copyEntry(e Entry) Entry {
 	return Entry{
-		Key:           append([]byte(nil), e.Key...),
-		Value:         append([]byte(nil), e.Value...),
-		Tombstone:     e.Tombstone,
-		TimestampHigh: e.TimestampHigh,
-		TimestampLow:  e.TimestampLow,
+		Key:        append([]byte(nil), e.Key...),
+		Value:      append([]byte(nil), e.Value...),
+		Tombstone:  e.Tombstone,
+		SequenceID: e.SequenceID,
 	}
 }
