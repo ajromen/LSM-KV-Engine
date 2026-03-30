@@ -68,8 +68,8 @@ func (l LeveledCompaction) pickFromCurrent(records []*sstable.SSTableReader) *ss
 }
 
 func (l LeveledCompaction) pickFromNext(currRecord *sstable.SSTableReader, nextLayer []*sstable.SSTableReader) []*sstable.SSTableReader {
-	minKey := currRecord.SummarySegment.MinKey
-	maxKey := currRecord.SummarySegment.MaxKey
+	minKey := currRecord.Metadata.GetBytes(sstable.FieldMinKey)
+	maxKey := currRecord.Metadata.GetBytes(sstable.FieldMaxKey)
 
 	overlapping := make([]*sstable.SSTableReader, 0)
 	for _, sst := range nextLayer {

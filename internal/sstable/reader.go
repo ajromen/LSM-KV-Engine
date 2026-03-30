@@ -27,7 +27,7 @@ type SSTableReader struct {
 	storage        SegmentStorage      // low-level reading of segments
 	blockManager   *block.BlockManager // reading and decoding data blocks
 	footer         *Footer             // footer of given sstable
-	meta           *Metadata
+	Metadata       *Metadata
 	SummarySegment *SummarySegment // summary segment (read into RAM)
 	filterSegment  *FilterSegment  // filter segment (read into RAM)
 	merkleTree     *MerkleTree     // merkle tree - metadata segment (read into RAM)
@@ -103,7 +103,7 @@ func NewSSTableReader(id int, filePath string, format enums.SSTableFormat, layer
 		filePath:     filePath,
 		footer:       footer,
 		Layer:        layer,
-		meta:         meta,
+		Metadata:     meta,
 		Id:           id,
 		SizeBytes:    fileSize,
 	}
@@ -130,7 +130,7 @@ func NewSSTableReaderFromWriter(w *SSTableWriter, id int) (*SSTableReader, error
 		footer:         w.footer,
 		SummarySegment: w.summarySegment,
 		valueDecoder:   w.valueEncoder, // TODO check encoder is decoder
-		meta:           w.metadataSegment,
+		Metadata:       w.metadataSegment,
 		Id:             id,
 	}
 	switch s := r.storage.(type) {
@@ -257,8 +257,8 @@ func (r *SSTableReader) Get(key []byte) (*Record, error) {
 	}
 
 	// check whether the key is in given range of sstable keys
-	minKey := r.meta.GetBytes(FieldMinKey)
-	maxKey := r.meta.GetBytes(FieldMaxKey)
+	minKey := r.Metadata.GetBytes(FieldMinKey)
+	maxKey := r.Metadata.GetBytes(FieldMaxKey)
 	if bytes.Compare(minKey, key) > 0 || bytes.Compare(maxKey, key) < 0 {
 		return nil, nil
 	}
@@ -311,7 +311,7 @@ func (r *SSTableReader) Get(key []byte) (*Record, error) {
 	}
 
 	// step 5
-	restartInterval, _ := r.meta.GetUint64(FieldRestartInterval)
+	restartInterval, _ := r.Metadata.GetUint64(FieldRestartInterval)
 
 	iterator, err := NewDataBlockIteratorRaw(blockData, int(restartInterval), encoders.PrefixCompression, r.valueDecoder)
 	if err != nil {
