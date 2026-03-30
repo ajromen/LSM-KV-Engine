@@ -67,9 +67,15 @@ func (mm *MemtableManager) rotate() {
 func (mm *MemtableManager) flushWorker(flushHandler func([]MemtableEntry)) {
 	for mem := range mm.flushChannel {
 		mm.mu.Lock()
+		shouldFlush := mm.containsImmutable(mem)
 		mm.removeImmutable(mem)
 		mm.cond.Signal()
 		mm.mu.Unlock()
+
+		if !shouldFlush {
+			continue
+		}
+
 		entries := mem.Flush()
 		if flushHandler != nil {
 			flushHandler(entries)
@@ -88,7 +94,15 @@ func (mm *MemtableManager) removeImmutable(target Memtable) {
 	mm.immutable = newList
 }
 
-// Get searches for a key across all memtables
+func (mm *MemtableManager) containsImmutable(target Memtable) bool {
+	for _, m := range mm.immutable {
+		if m == target {
+			return true
+		}
+	}
+	return false
+}
+
 func (mm *MemtableManager) Get(key []byte) ([]byte, bool) {
 	mm.mu.Lock()
 	defer mm.mu.Unlock()
@@ -147,6 +161,14 @@ func (mm *MemtableManager) Iterator() iterator.Iterator[MemtableEntry] {
 
 	rawMerge := NewRawIterator(rawIters, mm.mergeStructure)
 	return NewMergedMemtableIterator(rawMerge)
+}
+
+func (mm *MemtableManager) ResetAll() {
+	mm.mu.Lock()
+	defer mm.mu.Unlock()
+
+	mm.active = mm.factory()
+	mm.immutable = nil
 }
 
 func (mm *MemtableManager) Close() {

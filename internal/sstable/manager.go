@@ -253,6 +253,30 @@ func (sm *SSTableManager) DeleteSSTables(readers []*SSTableReader) error {
 	return nil
 }
 
+func (sm *SSTableManager) ClearAll() error {
+	for _, layer := range sm.Layers {
+		for _, reader := range layer.SSTables {
+			if reader != nil && reader.storage != nil {
+				reader.storage.Delete()
+			}
+		}
+	}
+
+	sm.Layers = []*Layer{newLayer()}
+
+	if sm.blockManager != nil {
+		sm.blockManager.ClearCache()
+	}
+
+	sm.manifest = &Manifest{
+		FileDir:       sm.dataDir,
+		NextSStableId: 0,
+		Layers:        make(map[int][]SSTableManifest),
+	}
+
+	return sm.manifest.Save()
+}
+
 // MergeSSTables pass in sstables to merge them into a single sstable and delete old ones
 // skipTombstones if it's the last layer
 // 1. create new sstable

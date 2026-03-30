@@ -85,6 +85,11 @@ func (l *LSM) Finish() error {
 	return nil
 }
 
+func (l *LSM) ClearAll() error {
+	l.memtableeManager.ResetAll()
+	return l.sstableManager.ClearAll()
+}
+
 func (l *LSM) GetMaxSeqId() uint64 {
 	return l.sstableManager.Manifest.MaxSeqId
 }

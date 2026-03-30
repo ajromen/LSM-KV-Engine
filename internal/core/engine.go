@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/cli"
 	"github.com/ajromen/LSM-KV-Engine/internal/config"
@@ -82,8 +83,17 @@ func (engine *Engine) Close() error {
 }
 
 func (engine *Engine) ClearAll() error {
-	//wal
-	print("TODO delete everything")
+	if err := engine.lsm.ClearAll(); err != nil {
+		return fmt.Errorf("clear-all: lsm clear failed: %w", err)
+	}
+
+	dataDir := config.GetSettings().SavePath
+	manifestPath := filepath.Join(dataDir, "MANIFEST")
+
+	if err := os.Remove(manifestPath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("clear-all: failed to remove manifest: %w", err)
+	}
+
 	return nil
 }
 
