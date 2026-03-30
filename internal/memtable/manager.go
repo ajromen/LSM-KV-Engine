@@ -45,6 +45,16 @@ func (mm *MemtableManager) Put(key []byte, value []byte, seqId uint64, tombstone
 	}
 }
 
+func (mm *MemtableManager) PutWithTTL(key []byte, value []byte, seqId uint64, tombstone bool, ttl int64) {
+	mm.mu.Lock()
+	mm.active.PutWithTTL(key, value, seqId, tombstone, ttl)
+	shouldRotate := mm.active.ShouldFlush()
+	mm.mu.Unlock()
+	if shouldRotate {
+		mm.rotate()
+	}
+}
+
 // rotate moves the active memtable to immutable list and creates a new one
 // if too many immutable instances of memtable exist, it blocks new puts until space is available
 func (mm *MemtableManager) rotate() {
@@ -104,17 +114,27 @@ func (mm *MemtableManager) Get(key []byte) ([]byte, bool) {
 	return nil, false
 }
 
-// Delete inserts a tombstone for a key into the active memtable
-// Works the same as Put, but marks entry as deleted
-func (mm *MemtableManager) Delete(key []byte, seqId uint64) {
-	mm.mu.Lock()
-	mm.active.Put(key, []byte{}, seqId, true)
-	shouldRotate := mm.active.ShouldFlush()
-	mm.mu.Unlock()
-	if shouldRotate {
-		mm.rotate()
-	}
-}
+//// Delete inserts a tombstone for a key into the active memtable
+//// Works the same as Put, but marks entry as deleted
+//func (mm *MemtableManager) Delete(key []byte, seqId uint64) {
+//	mm.mu.Lock()
+//	mm.active.Put(key, []byte{}, seqId, true)
+//	shouldRotate := mm.active.ShouldFlush()
+//	mm.mu.Unlock()
+//	if shouldRotate {
+//		mm.rotate()
+//	}
+//}
+//
+//func (mm *MemtableManager) DeleteWithTTL(key []byte, seqId uint64, ttl int64) {
+//	mm.mu.Lock()
+//	mm.active.PutWithTTL(key, []byte{}, seqId, true, ttl)
+//	shouldRotate := mm.active.ShouldFlush()
+//	mm.mu.Unlock()
+//	if shouldRotate {
+//		mm.rotate()
+//	}
+//}
 
 // RawIterator returns a merged iterator over all memtables without higher-level filtering.
 func (mm *MemtableManager) RawIterator() iterator.Iterator[MemtableEntry] {

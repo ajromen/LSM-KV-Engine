@@ -58,6 +58,7 @@ func (l *LSM) Put(key []byte, value []byte, seqId uint64, tombstone bool) error 
 }
 
 func (l *LSM) PutWithTTL(key []byte, value []byte, seqId uint64, tombstone bool, ttl int64) error {
+	l.memtableeManager.PutWithTTL(key, value, seqId, tombstone, ttl)
 	return nil
 }
 
