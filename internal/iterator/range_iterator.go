@@ -43,3 +43,46 @@ func (it *RangeIterator) SeekToFirst() {
 	}
 	it.db.Seek(Entry{Key: append([]byte(nil), it.lower...)})
 }
+
+func (it *RangeIterator) SeekToLast() {
+	panic("RangeIterator: SeekToLast not implemented")
+}
+
+func (it *RangeIterator) Seek(key Entry) {
+	if it.db == nil {
+		return
+	}
+
+	target := copyEntry(key)
+	if len(it.lower) > 0 && (len(target.Key) == 0 || bytes.Compare(target.Key, it.lower) < 0) {
+		target.Key = append([]byte(nil), it.lower...)
+	}
+
+	it.db.Seek(target)
+}
+
+func (it *RangeIterator) Next() {
+	if it.db == nil {
+		return
+	}
+	it.db.Next()
+}
+
+func (it *RangeIterator) Prev() {
+	panic("RangeIterator: Prev not implemented")
+}
+
+func (it *RangeIterator) Key() Entry {
+	return it.Current()
+}
+
+func (it *RangeIterator) Value() Entry {
+	return it.Current()
+}
+
+func (it *RangeIterator) Current() Entry {
+	if it.db == nil {
+		return Entry{}
+	}
+	return it.db.Current()
+}
