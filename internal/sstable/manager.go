@@ -345,3 +345,39 @@ func (sm *SSTableManager) MoveSSTable(current *SSTableReader, toLayer int) error
 	//TODO update footer
 	return nil
 }
+
+func (sm *SSTableManager) ReadersForRange(start, end []byte) []*SSTableReader {
+	readers := make([]*SSTableReader, 0)
+
+	for _, layer := range sm.Layers {
+		for _, reader := range layer.SSTables {
+			if sstableOverlapsRange(reader, start, end) {
+				readers = append(readers, reader)
+			}
+		}
+	}
+
+	return readers
+}
+
+func sstableOverlapsRange(reader *SSTableReader, start, end []byte) bool {
+	if reader == nil || reader.SummarySegment == nil {
+		return true
+	}
+
+	minKey := reader.SummarySegment.MinKey
+	maxKey := reader.SummarySegment.MaxKey
+
+	if len(minKey) == 0 || len(maxKey) == 0 {
+		return true
+	}
+
+	if len(end) > 0 && bytes.Compare(minKey, end) > 0 {
+		return false
+	}
+	if len(start) > 0 && bytes.Compare(maxKey, start) < 0 {
+		return false
+	}
+
+	return true
+}
