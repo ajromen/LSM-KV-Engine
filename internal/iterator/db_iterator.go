@@ -60,6 +60,32 @@ func (it *DBIterator) Seek(key Entry) {
 	it.advance()
 }
 
+func (it *DBIterator) Next() {
+	if !it.valid {
+		return
+	}
+	it.advance()
+}
+
+func (it *DBIterator) Prev() {
+	panic("DBIterator: Prev not implemented")
+}
+
+func (it *DBIterator) Key() Entry {
+	return it.Current()
+}
+
+func (it *DBIterator) Value() Entry {
+	return it.Current()
+}
+
+func (it *DBIterator) Current() Entry {
+	if !it.valid || it.current == nil {
+		return Entry{}
+	}
+	return copyEntry(*it.current)
+}
+
 func (it *DBIterator) advance() {
 	for {
 		switch it.selectWinner() {
