@@ -22,7 +22,7 @@ type sstableBlockSource struct {
 
 // newSSTableBlockSource constructs a block source from an SSTableReader
 func newSSTableBlockSource(reader *SSTableReader) *sstableBlockSource {
-	numdb, _ := reader.meta.GetUint64(FieldNumDataBlocks)
+	numdb, _ := reader.Metadata.GetUint64(FieldNumDataBlocks)
 	return &sstableBlockSource{
 		reader:     reader,
 		numBlocks:  int(numdb),
@@ -58,7 +58,7 @@ func (s *sstableBlockSource) blockIteratorRaw(n int) (*DataBlockIteratorRaw, err
 	if err != nil {
 		return nil, err
 	}
-	ri, _ := s.reader.meta.GetUint64(FieldRestartInterval)
+	ri, _ := s.reader.Metadata.GetUint64(FieldRestartInterval)
 	return NewDataBlockIteratorRaw(data, int(ri), encoders.PrefixCompression, s.reader.valueDecoder)
 }
 

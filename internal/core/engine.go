@@ -34,12 +34,15 @@ func NewEngine(flags *cli.FLags) (*Engine, error) {
 		return nil, err
 	}
 	engine := Engine{lsm: lsmTree}
-	engine.recoverFromWal()
+	engine.recover()
 	return &engine, nil
 }
 
-func (engine *Engine) recoverFromWal() {
+// check manifest
+// check wal
+func (engine *Engine) recover() {
 	var maxSeq uint64
+	maxSeq = engine.lsm.GetMaxSeqId()
 	//wal
 	engine.seqGen = sequence.NewSequenceGenerator(maxSeq)
 }

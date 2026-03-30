@@ -84,3 +84,7 @@ func (l *LSM) Finish() error {
 	l.memtableeManager.Close()
 	return nil
 }
+
+func (l *LSM) GetMaxSeqId() uint64 {
+	return l.sstableManager.Manifest.MaxSeqId
+}
