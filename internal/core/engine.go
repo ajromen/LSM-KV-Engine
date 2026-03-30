@@ -72,7 +72,7 @@ func (engine *Engine) Get(key []byte) ([]byte, bool, error) {
 func (engine *Engine) Delete(key []byte) error {
 	seqId := engine.seqGen.Next()
 	// wal
-	err := engine.lsm.Put(key, nil, seqId, false)
+	err := engine.lsm.Put(key, nil, seqId, true)
 	if err != nil {
 		return err
 	}
