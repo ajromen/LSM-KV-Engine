@@ -61,6 +61,8 @@ func RunCli(engine *core.Engine) {
 			handleExpire(engine, parts)
 		case "ttl":
 			handleTTL(engine, parts)
+		case "rangedel":
+			handleRangeDel(engine, parts)
 		case "clear-all":
 			handleClear(engine, parts)
 		case "exit", "quit", "q":
@@ -178,6 +180,16 @@ func handleDelete(engine *core.Engine, parts []string) {
 	}
 
 	fmt.Println("Delete:", key, "OK")
+}
+
+func handleRangeDel(engine *core.Engine, parts []string) {
+	startKey := parts[1]
+	endKey := parts[2]
+	if err := engine.RangeDelete([]byte(startKey), []byte(endKey)); err != nil {
+		fmt.Println("RangeDel:", err)
+		return
+	}
+	fmt.Println("RangeDel:", startKey, endKey)
 }
 
 func handleClear(engine *core.Engine, parts []string) {

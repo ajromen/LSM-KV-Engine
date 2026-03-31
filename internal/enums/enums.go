@@ -46,6 +46,15 @@ const (
 	AVLTreeMemTable  MemTableType = 4
 )
 
+type OpType byte
+
+const (
+	OpTypePut      OpType = 0
+	OpTypeDel      OpType = 1
+	OpTypeMerge    OpType = 2
+	OpTypeRangeDel OpType = 3
+)
+
 type MergeStructureType byte
 
 const (

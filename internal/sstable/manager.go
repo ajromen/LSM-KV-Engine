@@ -178,8 +178,8 @@ func (sm *SSTableManager) FlushToSSTable(entries []memtable.MemtableEntry) error
 			Key:       entry.Key,
 			Value:     entry.Value,
 			SeqId:     entry.SeqId,
+			Tombstone: entry.OpType == enums.OpTypeDel,
 			ExpiresAt: entry.ExpiresAt,
-			Tombstone: entry.Tombstone,
 		}
 		if err := writer.AddRecord(record); err != nil {
 			return fmt.Errorf("cant add record: %w", err)
@@ -367,6 +367,5 @@ func (sm *SSTableManager) MoveSSTable(current *SSTableReader, toLayer int) error
 	if err != nil {
 		return err
 	}
-	//TODO update footer
 	return nil
 }
