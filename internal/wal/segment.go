@@ -43,6 +43,11 @@ func OpenSegment(id uint64, path string, maxBlocks int, bm *block.BlockManager) 
 	}
 }
 
+func (s *Segment) Append(r Record) error {
+
+	return fmt.Errorf("Not implemented yet")
+}
+
 func (s *Segment) ReadBlock(index uint32) ([]byte, error) {
 	bk := block.BlockKey{
 		FilePath: s.Path,
@@ -53,6 +58,34 @@ func (s *Segment) ReadBlock(index uint32) ([]byte, error) {
 		return nil, err
 	}
 	return buff, nil
+}
+
+func (s *Segment) FlushCurrentBlock() error {
+	if s.CurrentBlock == nil {
+		return fmt.Errorf("current block is nil")
+	}
+	bk := block.BlockKey{
+		FilePath: s.Path,
+		Offset:   s.CurrentBlockIndex,
+	}
+	err := s.BM.WriteNoCache(bk, s.CurrentBlock.Data)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *Segment) MoveToNextBlock() error {
+	if s.CurrentBlockIndex+1 >= uint32(s.MaxBlocks) {
+		return fmt.Errorf("segment is full")
+	}
+	err := s.FlushCurrentBlock()
+	if err != nil {
+		return err
+	}
+	s.CurrentBlockIndex++
+	s.CurrentBlock = NewBlock(s.BlockSize)
+	return nil
 }
 
 // Helper function, should be moved to block manager?
