@@ -141,7 +141,7 @@ func (s *SingleMemtableIterator) advanceToNextUnique(prevKey []byte) {
 			continue
 		}
 		// 2. skip tombstones
-		if entry.Tombstone {
+		if entry.OpType == enums.OpTypeDel {
 			prevKey = entry.Key
 			s.rawIt.Next()
 			continue
@@ -403,7 +403,7 @@ func (m *MergedMemtableIterator) Prev() {
 func (m *MergedMemtableIterator) advance() {
 	for m.rawIterator.Valid() {
 		entry := m.rawIterator.Key()
-		if entry.Tombstone {
+		if entry.OpType == enums.OpTypeDel {
 			m.rawIterator.Next()
 			continue
 		}

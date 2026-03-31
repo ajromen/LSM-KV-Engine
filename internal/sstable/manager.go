@@ -178,7 +178,7 @@ func (sm *SSTableManager) FlushToSSTable(entries []memtable.MemtableEntry) error
 			Key:       entry.Key,
 			Value:     entry.Value,
 			SeqId:     entry.SeqId,
-			Tombstone: entry.Tombstone,
+			Tombstone: entry.OpType == enums.OpTypeDel,
 		}
 		if err := writer.AddRecord(record); err != nil {
 			return fmt.Errorf("cant add record: %w", err)
@@ -268,13 +268,13 @@ func (sm *SSTableManager) ClearAll() error {
 		sm.blockManager.ClearCache()
 	}
 
-	sm.manifest = &Manifest{
+	sm.Manifest = &Manifest{
 		FileDir:       sm.dataDir,
 		NextSStableId: 0,
 		Layers:        make(map[int][]SSTableManifest),
 	}
 
-	return sm.manifest.Save()
+	return sm.Manifest.Save()
 }
 
 // MergeSSTables pass in sstables to merge them into a single sstable and delete old ones

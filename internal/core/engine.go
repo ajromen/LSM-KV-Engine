@@ -8,6 +8,7 @@ import (
 
 	"github.com/ajromen/LSM-KV-Engine/internal/cli"
 	"github.com/ajromen/LSM-KV-Engine/internal/config"
+	"github.com/ajromen/LSM-KV-Engine/internal/enums"
 	"github.com/ajromen/LSM-KV-Engine/internal/lsm"
 	"github.com/ajromen/LSM-KV-Engine/internal/sequence"
 	"github.com/ajromen/LSM-KV-Engine/internal/sstable"
@@ -51,7 +52,7 @@ func (engine *Engine) recover() {
 func (engine *Engine) Put(key []byte, value []byte) error {
 	seqId := engine.seqGen.Next()
 	//wal
-	err := engine.lsm.Put(key, value, seqId, false)
+	err := engine.lsm.Put(key, value, seqId, enums.OpTypePut)
 	if err != nil {
 		return err
 	}
@@ -61,7 +62,7 @@ func (engine *Engine) Put(key []byte, value []byte) error {
 func (engine *Engine) PutWithTTL(key []byte, value []byte, ttl int64) error {
 	seqId := engine.seqGen.Next()
 	//wal
-	err := engine.lsm.PutWithTTL(key, value, seqId, false, ttl)
+	err := engine.lsm.PutWithTTL(key, value, seqId, enums.OpTypePut, ttl)
 	if err != nil {
 		return err
 	}
@@ -76,7 +77,7 @@ func (engine *Engine) Get(key []byte) ([]byte, bool, error) {
 func (engine *Engine) Delete(key []byte) error {
 	seqId := engine.seqGen.Next()
 	// wal
-	err := engine.lsm.Put(key, nil, seqId, true)
+	err := engine.lsm.Put(key, nil, seqId, enums.OpTypeDel)
 	if err != nil {
 		return err
 	}
@@ -86,7 +87,16 @@ func (engine *Engine) Delete(key []byte) error {
 func (engine *Engine) DeleteWithTTL(key []byte, ttl int64) error {
 	seqId := engine.seqGen.Next()
 	//wal
-	err := engine.lsm.PutWithTTL(key, nil, seqId, true, ttl)
+	err := engine.lsm.PutWithTTL(key, nil, seqId, enums.OpTypeDel, ttl)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (engine *Engine) RangeDelete(startKey []byte, endKey []byte) error {
+	seqId := engine.seqGen.Next()
+	err := engine.lsm.Put(startKey, endKey, seqId, enums.OpTypeRangeDel)
 	if err != nil {
 		return err
 	}

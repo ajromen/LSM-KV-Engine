@@ -3,6 +3,7 @@ package memtable
 import (
 	"sync"
 
+	"github.com/ajromen/LSM-KV-Engine/internal/enums"
 	"github.com/ajromen/LSM-KV-Engine/internal/iterator"
 )
 
@@ -35,9 +36,9 @@ func NewMemtableManager(maxTables int, mergeStructure byte, factory func() Memta
 }
 
 // Put inserts an entry into active memtable and if the memtable reaches max capacity, triggers rotation
-func (mm *MemtableManager) Put(key []byte, value []byte, seqId uint64, tombstone bool) {
+func (mm *MemtableManager) Put(key []byte, value []byte, seqId uint64, opType enums.OpType) {
 	mm.mu.Lock()
-	mm.active.Put(key, value, seqId, tombstone)
+	mm.active.Put(key, value, seqId, opType)
 	shouldRotate := mm.active.ShouldFlush()
 	mm.mu.Unlock()
 	if shouldRotate {
@@ -45,9 +46,9 @@ func (mm *MemtableManager) Put(key []byte, value []byte, seqId uint64, tombstone
 	}
 }
 
-func (mm *MemtableManager) PutWithTTL(key []byte, value []byte, seqId uint64, tombstone bool, ttl int64) {
+func (mm *MemtableManager) PutWithTTL(key []byte, value []byte, seqId uint64, opType enums.OpType, ttl int64) {
 	mm.mu.Lock()
-	mm.active.PutWithTTL(key, value, seqId, tombstone, ttl)
+	mm.active.PutWithTTL(key, value, seqId, opType, ttl)
 	shouldRotate := mm.active.ShouldFlush()
 	mm.mu.Unlock()
 	if shouldRotate {

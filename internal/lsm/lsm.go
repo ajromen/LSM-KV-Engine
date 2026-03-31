@@ -52,13 +52,13 @@ func (l *LSM) onFlush(entries []memtable.MemtableEntry) {
 	}
 }
 
-func (l *LSM) Put(key []byte, value []byte, seqId uint64, tombstone bool) error {
-	l.memtableeManager.Put(key, value, seqId, tombstone)
+func (l *LSM) Put(key []byte, value []byte, seqId uint64, opType enums.OpType) error {
+	l.memtableeManager.Put(key, value, seqId, opType)
 	return nil
 }
 
-func (l *LSM) PutWithTTL(key []byte, value []byte, seqId uint64, tombstone bool, ttl int64) error {
-	l.memtableeManager.PutWithTTL(key, value, seqId, tombstone, ttl)
+func (l *LSM) PutWithTTL(key []byte, value []byte, seqId uint64, opType enums.OpType, ttl int64) error {
+	l.memtableeManager.PutWithTTL(key, value, seqId, opType, ttl)
 	return nil
 }
 
