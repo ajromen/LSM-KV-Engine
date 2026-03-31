@@ -366,8 +366,8 @@ func sstableOverlapsRange(reader *SSTableReader, start, end []byte) bool {
 		return true
 	}
 
-	minKey := reader.SummarySegment.MinKey
-	maxKey := reader.SummarySegment.MaxKey
+	minKey := reader.Metadata.GetBytes(FieldMinKey)
+	maxKey := reader.Metadata.GetBytes(FieldMaxKey)
 
 	if len(minKey) == 0 || len(maxKey) == 0 {
 		return true
