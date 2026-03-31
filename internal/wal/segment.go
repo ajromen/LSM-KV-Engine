@@ -35,7 +35,10 @@ func OpenSegment(id uint64, path string, maxBlocks int, bm *block.BlockManager) 
 			CurrentBlock:      NewBlock(bm.BlockSize()),
 			BM:                bm,
 		}
-		bm.EnsureSize(path, int64(bm.BlockSize()*maxBlocks))
+		err := bm.EnsureSize(path, int64(bm.BlockSize()*maxBlocks))
+		if err != nil {
+			return nil, err
+		}
 		return &s, nil
 	}
 }
@@ -52,7 +55,7 @@ func (s *Segment) ReadBlock(index uint32) ([]byte, error) {
 	return buff, nil
 }
 
-// Helper function, should be moved to block manager
+// Helper function, should be moved to block manager?
 func FileExists(path string) (bool, error) {
 	_, err := os.Stat(path)
 	if err == nil {
