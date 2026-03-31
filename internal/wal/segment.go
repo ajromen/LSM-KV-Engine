@@ -40,6 +40,18 @@ func OpenSegment(id uint64, path string, maxBlocks int, bm *block.BlockManager) 
 	}
 }
 
+func (s *Segment) ReadBlock(index uint32) ([]byte, error) {
+	bk := block.BlockKey{
+		FilePath: s.Path,
+		Offset:   index,
+	}
+	buff, err := s.BM.ReadNoCache(bk)
+	if err != nil {
+		return nil, err
+	}
+	return buff, nil
+}
+
 // Helper function, should be moved to block manager
 func FileExists(path string) (bool, error) {
 	_, err := os.Stat(path)
