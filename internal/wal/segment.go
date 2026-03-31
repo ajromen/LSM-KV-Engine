@@ -1,6 +1,11 @@
 package wal
 
-import "github.com/ajromen/LSM-KV-Engine/internal/block"
+import (
+	"fmt"
+	"os"
+
+	"github.com/ajromen/LSM-KV-Engine/internal/block"
+)
 
 type Segment struct {
 	ID                uint64
@@ -13,14 +18,36 @@ type Segment struct {
 }
 
 func OpenSegment(id uint64, path string, maxBlocks int, bm *block.BlockManager) (*Segment, error) {
-	s := Segment{
-		ID:                id,
-		Path:              path,
-		BlockSize:         bm.BlockSize(),
-		MaxBlocks:         maxBlocks,
-		CurrentBlockIndex: 0,
-		CurrentBlock:      NewBlock(bm.BlockSize()),
-		BM:                bm,
+	exists, err := FileExists(path)
+	if err != nil {
+		return nil, err
 	}
-	return &s, nil
+	if exists {
+		// to do
+		return nil, fmt.Errorf("not implemented yet")
+	} else {
+		s := Segment{
+			ID:                id,
+			Path:              path,
+			BlockSize:         bm.BlockSize(),
+			MaxBlocks:         maxBlocks,
+			CurrentBlockIndex: 0,
+			CurrentBlock:      NewBlock(bm.BlockSize()),
+			BM:                bm,
+		}
+		bm.EnsureSize(path, int64(bm.BlockSize()*maxBlocks))
+		return &s, nil
+	}
+}
+
+// Helper function, should be moved to block manager
+func FileExists(path string) (bool, error) {
+	_, err := os.Stat(path)
+	if err == nil {
+		return true, nil
+	}
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	return false, err
 }
