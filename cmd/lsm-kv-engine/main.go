@@ -14,14 +14,18 @@ import (
 
 const helpText = `LSM-KV-Engine CLI
 Commands:
-  put <key> <value> [ttl]   Store a key-value pair
-  get <key>                 Retrieve the value of a key
-  del <key>                 Delete a key
-  expire <key> <ttl>        Set TTL for a key
-  ttl <key>                 Prints remaining TTL for a key (O(1) only if InMemoryTTL=true)
-  help                      Show this help message
-  clear-all                 Delete all data
-  exit | quit | q           Close the engine and exit
+  help   Show this help message
+  Basic:
+    put <key> <value> [ttl]   Store a key-value pair
+    get <key>                 Retrieve the value of a key
+    del <key>                 Delete a key
+    exit | quit | q           Close the engine and exit
+  TTL:
+    expire <key> <ttl>   Set TTL for a key
+    ttl <key>            Prints remaining TTL for a key (O(1) only if InMemoryTTL=true)
+  Aditional:
+    del-range <key1> <key2>   Delete a range of keys 
+    clear-all                 Delete all data
 Notes:
   ttl: time-to-live in seconds`
 
@@ -61,7 +65,7 @@ func RunCli(engine *core.Engine) {
 			handleExpire(engine, parts)
 		case "ttl":
 			handleTTL(engine, parts)
-		case "rangedel":
+		case "del-range":
 			handleRangeDel(engine, parts)
 		case "clear-all":
 			handleClear(engine, parts)
