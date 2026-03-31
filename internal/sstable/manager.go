@@ -268,13 +268,13 @@ func (sm *SSTableManager) ClearAll() error {
 		sm.blockManager.ClearCache()
 	}
 
-	sm.manifest = &Manifest{
+	sm.Manifest = &Manifest{
 		FileDir:       sm.dataDir,
 		NextSStableId: 0,
 		Layers:        make(map[int][]SSTableManifest),
 	}
 
-	return sm.manifest.Save()
+	return sm.Manifest.Save()
 }
 
 // MergeSSTables pass in sstables to merge them into a single sstable and delete old ones

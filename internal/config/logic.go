@@ -35,8 +35,8 @@ func (c *Config) applyFlags(flags *cli.FLags) error {
 	if flags.MemtableMaxSize != nil {
 		c.Memtable.MemtableMaxEntries = *flags.MemtableMaxSize
 	}
-	if flags.MemtableMaxSizeKb != nil {
-		c.Memtable.MemtableMaxSizeBytes = *flags.MemtableMaxSizeKb
+	if flags.MemtableMaxSizeB != nil {
+		c.Memtable.MemtableMaxSizeBytes = *flags.MemtableMaxSizeB
 	}
 	if flags.MemtableType != nil {
 		memType := strings.TrimSpace(*flags.MemtableType)

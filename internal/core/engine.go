@@ -83,16 +83,6 @@ func (engine *Engine) Delete(key []byte) error {
 	return nil
 }
 
-func (engine *Engine) DeleteWithTTL(key []byte, ttl int64) error {
-	seqId := engine.seqGen.Next()
-	//wal
-	err := engine.lsm.PutWithTTL(key, nil, seqId, true, ttl)
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
 func (engine *Engine) Close() error {
 	//wal finish write
 	err := engine.lsm.Finish()

@@ -13,9 +13,11 @@ import (
 
 const helpText = `LSM-KV-Engine CLI
 Commands:
-  put <key> <value> [ttl]   Store a key-value pair 
+  put <key> <value> [ttl]   Store a key-value pair
   get <key>                 Retrieve the value of a key
-  del <key> [ttl]           Delete a key
+  del <key>                 Delete a key
+  expire <key> <ttl>        Set TTL for a key
+  ttl <key>                 Prints remaining TTL for a key (O(1) only if InMemoryTTL=true)
   help                      Show this help message
   clear-all                 Delete all data
   exit | quit | q           Close the engine and exit
@@ -122,23 +124,14 @@ func handleGet(engine *core.Engine, parts []string) {
 }
 
 func handleDelete(engine *core.Engine, parts []string) {
+	if len(parts) != 2 {
+		fmt.Println("Usage: delete <key>")
+		return
+	}
 	key := parts[1]
-
-	if len(parts) == 3 {
-		ttl, err := strconv.ParseInt(parts[2], 10, 64)
-		if err != nil {
-			fmt.Println("TTL must be a number")
-			return
-		}
-		if err := engine.DeleteWithTTL([]byte(key), ttl); err != nil {
-			fmt.Println("Delete:", err)
-			return
-		}
-	} else {
-		if err := engine.Delete([]byte(key)); err != nil {
-			fmt.Println("Delete:", err)
-			return
-		}
+	if err := engine.Delete([]byte(key)); err != nil {
+		fmt.Println("Delete:", err)
+		return
 	}
 
 	fmt.Println("Delete:", key, "OK")

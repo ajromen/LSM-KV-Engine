@@ -27,7 +27,7 @@ func NewGenericMemtable(store MemtableStore, maxNumEntries int, maxSizeBytes uin
 
 // Put adds entry to underlying data structure and updates number of entries and size of memtable in bytes
 func (m *GenericMemtable) Put(key []byte, value []byte, seqId uint64, tombstone bool) {
-	sizeEntry := len(key) + len(value) + 8 + 1
+	sizeEntry := len(key) + len(value) + 8 + 8 + 1
 	m.store.Insert(MemtableEntry{
 		Key:       key,
 		Value:     value,
@@ -41,7 +41,7 @@ func (m *GenericMemtable) Put(key []byte, value []byte, seqId uint64, tombstone 
 
 func (m *GenericMemtable) PutWithTTL(key []byte, value []byte, seqId uint64, tombstone bool, ttl int64) {
 	expiresAt := time.Now().Unix() + ttl
-	sizeEntry := len(key) + len(value) + 8 + 1
+	sizeEntry := len(key) + len(value) + 8 + 8 + 1
 	m.store.Insert(MemtableEntry{
 		Key:       key,
 		Value:     value,
