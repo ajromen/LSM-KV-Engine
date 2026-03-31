@@ -20,6 +20,7 @@ type SSTableWriter struct {
 	filePath          string              // file path where sstable is written (base path if multi file format)
 	dataBlockBuilder  *DataBlockBuilder   // data block builder for building data block from records being written into sstable
 	indexSegment      *IndexSegment       // index segment of sstable : references data blocks
+	ttlIndexSegment   *TTLIndexSegment    // ttl index segment of sstable : contains keys and their ttl
 	currentIndexBlock *IndexBlock
 	valueEncoder      *encoders.AdaptiveEncoder
 	summarySegment    *SummarySegment // summary segment of sstable : references index blocks
@@ -61,6 +62,7 @@ func NewSSTableWriter(filePath string, blockManager *block.BlockManager, expecte
 		valueEncoder:      valueEncoder,
 		dataBlockBuilder:  NewDataBlockBuilder(1, cfg.SSTable.DataSegment.RestartInterval, blockManager.BlockSize(), valueEncoder),
 		indexSegment:      NewIndexSegment(uint64(blockManager.BlockSize())),
+		ttlIndexSegment:   NewTTLIndexSegment(uint64(blockManager.BlockSize())),
 		currentIndexBlock: NewIndexBlock(),
 		summarySegment:    NewSummarySegment(1),
 		filterSegment:     filterSegment,
@@ -79,7 +81,8 @@ func NewSSTableWriter(filePath string, blockManager *block.BlockManager, expecte
 // 1. Update min/max key seqId metadata
 // 2. Update min/max keylength metadata
 // 3. Add key to bloom filter
-// 4. Add record to current data block -> block full? -> flush it
+// 4. Add to TTL index
+// 5. Add record to current data block -> block full? -> flush it
 func (sw *SSTableWriter) AddRecord(record Record) error {
 	sw.recordCount++
 	// step 1
@@ -119,6 +122,15 @@ func (sw *SSTableWriter) AddRecord(record Record) error {
 	}
 
 	// step 4
+	if record.ExpiresAt != 0 {
+		ttlEntry := TTLEntry{
+			Key:       record.Key,
+			ExpiresAt: record.ExpiresAt,
+		}
+		sw.ttlIndexSegment.AddEntryToBlock(ttlEntry, config.GetSettings().SSTable.DataSegment.BlockSize)
+	}
+
+	// step 5
 	if !sw.dataBlockBuilder.AddRecord(record) {
 		if err := sw.flushDataBlock(); err != nil {
 			return err
@@ -159,7 +171,7 @@ func (sw *SSTableWriter) flushDataBlock() error {
 
 	// step 4
 	sw.currentIndexBlock.AddFromDataBlock(sw.dataBlockBuilder, sw.currentBlockIndex)
-	if sw.currentIndexBlock.RealSize >= uint32(config.GetSettings().SSTable.IndexSegment.IndexBlockSize) {
+	if sw.currentIndexBlock.RealSize >= uint32(config.GetSettings().SSTable.DataSegment.BlockSize) {
 		sw.indexSegment.AddBlock(sw.currentIndexBlock)
 		sw.currentIndexBlock = NewIndexBlock()
 	}
@@ -242,7 +254,7 @@ func (sw *SSTableWriter) Finalize() error {
 		var lastOffsetPlusSize uint64
 
 		for i, indexBlock := range sw.indexSegment.Blocks {
-			blockData := indexBlock.EncodeIndexBlock(config.DefaultIndexBlockSize)
+			blockData := indexBlock.EncodeIndexBlock(uint64(config.GetSettings().SSTable.DataSegment.BlockSize))
 			offset, size, err := sw.storage.WriteSegment(enums.SegmentIndex, blockData)
 			if err != nil {
 				return err
@@ -281,6 +293,35 @@ func (sw *SSTableWriter) Finalize() error {
 			Offset: 0,
 			Size:   0,
 		}
+	}
+
+	// step 7
+	var ttlOffsets []uint64
+	if len(sw.ttlIndexSegment.Blocks) > 0 {
+		ttlOffsets = make([]uint64, len(sw.ttlIndexSegment.Blocks))
+		var firstOffset uint64
+		var lastOffsetPlusSize uint64
+
+		for i, ttlBlock := range sw.ttlIndexSegment.Blocks {
+			blockData := ttlBlock.Encode(uint64(config.GetSettings().SSTable.DataSegment.BlockSize))
+			offset, size, err := sw.storage.WriteSegment(enums.SegmentTTLIndex, blockData)
+			if err != nil {
+				return err
+			}
+			ttlOffsets[i] = offset
+
+			if i == 0 {
+				firstOffset = offset
+			}
+			lastOffsetPlusSize = offset + uint64(size)
+		}
+
+		sw.footer.TTLIndexHandler.Offset = firstOffset
+		sw.footer.TTLIndexHandler.Size = uint32(lastOffsetPlusSize - firstOffset)
+	} else {
+		sw.footer.TTLIndexHandler.Offset = 0
+		sw.footer.TTLIndexHandler.Size = 0
+		ttlOffsets = []uint64{}
 	}
 
 	// step 8

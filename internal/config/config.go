@@ -46,8 +46,7 @@ type DataSegmentConfig struct {
 }
 
 type IndexSegmentConfig struct {
-	IndexBlockSize int `json:"index_block_size"`
-	MaxCache       int `json:"max_cache_size"`
+	MaxCache int `json:"max_cache_size"`
 }
 
 type LSMTreeConfig struct {

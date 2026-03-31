@@ -111,6 +111,9 @@ func NewSSTableReader(id int, filePath string, format enums.SSTableFormat, layer
 	if err := reader.loadFilter(); err != nil {
 		reader.filterSegment = nil
 	}
+	if err := reader.loadDictionary(); err != nil {
+		return nil, fmt.Errorf("failed to load dictionary: %w", err)
+	}
 	return reader, nil
 }
 
@@ -200,7 +203,7 @@ func (r *SSTableReader) loadMerkleTree() error {
 // loadIndexBlock reads a specific index block from index segment -> NEEDS TO BE FIXED!
 func (r *SSTableReader) loadIndexBlock(blockNumber int) (*IndexBlock, error) {
 
-	indexBlockSize := config.GetSettings().SSTable.IndexSegment.IndexBlockSize
+	indexBlockSize := config.GetSettings().SSTable.DataSegment.BlockSize
 
 	offset := r.footer.IndexHandler.Offset +
 		uint64(blockNumber)*uint64(indexBlockSize)

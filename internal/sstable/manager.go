@@ -178,6 +178,7 @@ func (sm *SSTableManager) FlushToSSTable(entries []memtable.MemtableEntry) error
 			Key:       entry.Key,
 			Value:     entry.Value,
 			SeqId:     entry.SeqId,
+			ExpiresAt: entry.ExpiresAt,
 			Tombstone: entry.Tombstone,
 		}
 		if err := writer.AddRecord(record); err != nil {
