@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/cli"
+	"github.com/ajromen/LSM-KV-Engine/internal/config"
 	"github.com/ajromen/LSM-KV-Engine/internal/core"
 )
 
@@ -27,13 +28,18 @@ Commands:
     del-range <key1> <key2>   Delete a range of keys 
     clear-all                 Delete all data
 Notes:
-  ttl: time-to-live in seconds`
+  ttl: time-to-live in seconds,
+  unit suffixes: ms, s (default), min, h, D, M, Y`
 
 func main() {
 	flags := cli.ParseFlags()
-	engine, err := core.NewEngine(flags)
+	err := config.LoadConfig(flags)
 	if err != nil {
-		fmt.Println("Greska: ", err)
+		panic(err)
+	}
+	engine, err := core.NewEngine()
+	if err != nil {
+		fmt.Println("Error: ", err)
 		return
 	}
 	RunCli(engine)
@@ -97,20 +103,14 @@ func handlePut(engine *core.Engine, parts []string) {
 	value := parts[2]
 
 	if len(parts) == 4 {
-		ttl, err := strconv.ParseInt(parts[3], 10, 64)
+		ttl, err := parseTTL(parts[3])
 		if err != nil {
 			fmt.Println("TTL must be a number")
 			return
 		}
-		if err := engine.PutWithTTL([]byte(key), []byte(value), ttl); err != nil {
-			fmt.Println("Put:", err)
-			return
-		}
+		engine.PutWithTTL([]byte(key), []byte(value), ttl)
 	} else {
-		if err := engine.Put([]byte(key), []byte(value)); err != nil {
-			fmt.Println("Put:", err)
-			return
-		}
+		engine.Put([]byte(key), []byte(value))
 	}
 
 	fmt.Println("Put:", key, "OK")
@@ -122,17 +122,13 @@ func handleExpire(engine *core.Engine, parts []string) {
 		return
 	}
 	key := parts[1]
-	ttl, err := strconv.ParseInt(parts[2], 10, 64)
+	ttl, err := parseTTL(parts[2])
 	if err != nil {
 		fmt.Println("TTL must be a number")
 		return
 	}
-	err = engine.PutWithTTL([]byte(key), nil, ttl)
-	if err != nil {
-		fmt.Println("EXPIRE:", err)
-		return
-	}
-	fmt.Printf("Expire: '%s', %ds OK\n", key, ttl)
+	engine.PutWithTTL([]byte(key), nil, ttl)
+	fmt.Printf("Expire: '%s', %dms OK\n", key, ttl)
 }
 
 func handleGet(engine *core.Engine, parts []string) {
@@ -158,6 +154,7 @@ func handleTTL(engine *core.Engine, parts []string) {
 		fmt.Println("Usage: ttl <key>")
 		return
 	}
+
 	key := parts[1]
 	value, found, err := engine.GetTTL([]byte(key))
 	if err != nil {
@@ -168,8 +165,39 @@ func handleTTL(engine *core.Engine, parts []string) {
 		fmt.Println("TTL: key '" + key + "' not found")
 		return
 	}
-	t := time.Unix(value, 0)
-	fmt.Printf("Key: '%s', TTL: %ds, Expires At: %s\n", key, t.Unix()-time.Now().Unix(), t.Format("15:04:05 02 Jan 2006 "))
+	t := time.UnixMilli(value)
+	fmt.Printf("Key: '%s', TTL: %dms, Expires At: %s\n", key, t.UnixMilli()-time.Now().UnixMilli(), t.Format("15:04:05 02 Jan 2006 "))
+}
+
+func parseTTL(s string) (int64, error) {
+	units := []struct {
+		suffix string
+		millis int64
+	}{
+		{"ms", 1},
+		{"min", 60_000},
+		{"h", 3_600_000},
+		{"D", 86_400_000},
+		{"M", 2_592_000_000},
+		{"Y", 31_536_000_000},
+		{"s", 1_000},
+	}
+
+	for _, u := range units {
+		if strings.HasSuffix(s, u.suffix) {
+			n, err := strconv.ParseInt(strings.TrimSuffix(s, u.suffix), 10, 64)
+			if err != nil {
+				return 0, fmt.Errorf("invalid TTL: %s", s)
+			}
+			return n * u.millis, nil
+		}
+	}
+
+	n, err := strconv.ParseInt(s, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("invalid TTL: %s", s)
+	}
+	return n * 1_000, nil
 }
 
 func handleDelete(engine *core.Engine, parts []string) {
@@ -178,22 +206,19 @@ func handleDelete(engine *core.Engine, parts []string) {
 		return
 	}
 	key := parts[1]
-	if err := engine.Delete([]byte(key)); err != nil {
-		fmt.Println("Delete:", err)
-		return
-	}
+	engine.Delete([]byte(key))
 
 	fmt.Println("Delete:", key, "OK")
 }
 
 func handleRangeDel(engine *core.Engine, parts []string) {
+	if len(parts) != 3 {
+		fmt.Println("Usage: del-range <key1> <key2>")
+	}
 	startKey := parts[1]
 	endKey := parts[2]
-	if err := engine.RangeDelete([]byte(startKey), []byte(endKey)); err != nil {
-		fmt.Println("RangeDel:", err)
-		return
-	}
-	fmt.Println("RangeDel:", startKey, endKey)
+	engine.RangeDelete([]byte(startKey), []byte(endKey))
+	fmt.Println("RangeDel:", startKey, endKey, "OK")
 }
 
 func handleClear(engine *core.Engine, parts []string) {

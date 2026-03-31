@@ -52,14 +52,12 @@ func (l *LSM) onFlush(entries []memtable.MemtableEntry) {
 	}
 }
 
-func (l *LSM) Put(key []byte, value []byte, seqId uint64, opType enums.OpType) error {
+func (l *LSM) Put(key []byte, value []byte, seqId uint64, opType enums.OpType) {
 	l.memtableeManager.Put(key, value, seqId, opType)
-	return nil
 }
 
-func (l *LSM) PutWithTTL(key []byte, value []byte, seqId uint64, opType enums.OpType, ttl int64) error {
+func (l *LSM) PutWithTTL(key []byte, value []byte, seqId uint64, opType enums.OpType, ttl int64) {
 	l.memtableeManager.PutWithTTL(key, value, seqId, opType, ttl)
-	return nil
 }
 
 func (l *LSM) Get(key []byte) ([]byte, bool, error) {
@@ -110,4 +108,8 @@ func (l *LSM) ClearAll() error {
 
 func (l *LSM) GetMaxSeqId() uint64 {
 	return l.sstableManager.Manifest.MaxSeqId
+}
+
+func (l *LSM) GetAllTTLFomSST() ([]sstable.TTLEntry, error) {
+	return l.sstableManager.GetAllTTL()
 }

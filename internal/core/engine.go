@@ -7,36 +7,42 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/ajromen/LSM-KV-Engine/internal/cli"
 	"github.com/ajromen/LSM-KV-Engine/internal/config"
 	"github.com/ajromen/LSM-KV-Engine/internal/enums"
 	"github.com/ajromen/LSM-KV-Engine/internal/lsm"
 	"github.com/ajromen/LSM-KV-Engine/internal/sequence"
 	"github.com/ajromen/LSM-KV-Engine/internal/sstable"
+	"github.com/ajromen/LSM-KV-Engine/internal/ttl"
 )
 
 type Engine struct {
-	config *config.Config
-	lsm    *lsm.LSM
-	seqGen *sequence.SequenceGenerator
+	config     *config.Config
+	lsm        *lsm.LSM
+	seqGen     *sequence.SequenceGenerator
+	ttlJanitor *ttl.Janitor
 	//wal
 }
 
-func NewEngine(flags *cli.FLags) (*Engine, error) {
-	err := config.LoadConfig(flags)
-	if err != nil {
-		return nil, err
-	}
+func NewEngine() (*Engine, error) {
 	dataDir := config.GetSettings().SavePath
 	if err := os.MkdirAll(dataDir, 0755); err != nil {
 		return nil, err
 	}
-
 	lsmTree, err := lsm.NewLSM(dataDir)
 	if err != nil {
 		return nil, err
 	}
 	engine := Engine{lsm: lsmTree}
+
+	if config.GetSettings().TTL.InMemoryTTL {
+		engine.ttlJanitor = ttl.NewTTLJanitor(engine.Delete)
+		entries, err := engine.lsm.GetAllTTLFomSST()
+		if err != nil {
+			return nil, err
+		}
+		engine.ttlJanitor.Init(entries)
+	}
+
 	engine.recover()
 	return &engine, nil
 }
@@ -50,24 +56,16 @@ func (engine *Engine) recover() {
 	engine.seqGen = sequence.NewSequenceGenerator(maxSeq)
 }
 
-func (engine *Engine) Put(key []byte, value []byte) error {
+func (engine *Engine) Put(key []byte, value []byte) {
 	seqId := engine.seqGen.Next()
 	//wal
-	err := engine.lsm.Put(key, value, seqId, enums.OpTypePut)
-	if err != nil {
-		return err
-	}
-	return nil
+	engine.lsm.Put(key, value, seqId, enums.OpTypePut)
 }
 
-func (engine *Engine) PutWithTTL(key []byte, value []byte, ttl int64) error {
+func (engine *Engine) PutWithTTL(key []byte, value []byte, ttl int64) {
 	seqId := engine.seqGen.Next()
 	//wal
-	err := engine.lsm.PutWithTTL(key, value, seqId, enums.OpTypePut, ttl)
-	if err != nil {
-		return err
-	}
-	return nil
+	engine.lsm.PutWithTTL(key, value, seqId, enums.OpTypePut, ttl)
 }
 
 func (engine *Engine) Get(key []byte) ([]byte, bool, error) {
@@ -81,36 +79,24 @@ func (engine *Engine) GetTTL(key []byte) (int64, bool, error) {
 		value, found, err := engine.lsm.GetTTL(key)
 		return value, found, err
 	}
-	return time.Now().Unix(), true, nil
+	return time.Now().UnixMilli(), true, nil
 }
 
-func (engine *Engine) Delete(key []byte) error {
+func (engine *Engine) Delete(key []byte) {
 	seqId := engine.seqGen.Next()
 	// wal
-	err := engine.lsm.Put(key, nil, seqId, enums.OpTypeDel)
-	if err != nil {
-		return err
-	}
-	return nil
+	engine.lsm.Put(key, nil, seqId, enums.OpTypeDel)
 }
 
-func (engine *Engine) DeleteWithTTL(key []byte, ttl int64) error {
+func (engine *Engine) DeleteWithTTL(key []byte, ttl int64) {
 	seqId := engine.seqGen.Next()
 	//wal
-	err := engine.lsm.PutWithTTL(key, nil, seqId, enums.OpTypeDel, ttl)
-	if err != nil {
-		return err
-	}
-	return nil
+	engine.lsm.PutWithTTL(key, nil, seqId, enums.OpTypeDel, ttl)
 }
 
-func (engine *Engine) RangeDelete(startKey []byte, endKey []byte) error {
+func (engine *Engine) RangeDelete(startKey []byte, endKey []byte) {
 	seqId := engine.seqGen.Next()
-	err := engine.lsm.Put(startKey, endKey, seqId, enums.OpTypeRangeDel)
-	if err != nil {
-		return err
-	}
-	return nil
+	engine.lsm.Put(startKey, endKey, seqId, enums.OpTypeRangeDel)
 }
 
 func (engine *Engine) Close() error {

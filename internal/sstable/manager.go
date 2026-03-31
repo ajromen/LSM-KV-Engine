@@ -369,3 +369,19 @@ func (sm *SSTableManager) MoveSSTable(current *SSTableReader, toLayer int) error
 	}
 	return nil
 }
+
+func (sm *SSTableManager) GetAllTTL() ([]TTLEntry, error) {
+	entries := make([]TTLEntry, 0)
+	for _, layer := range sm.Layers {
+		for i := len(layer.SSTables) - 1; i >= 0; i-- {
+			e, err := layer.SSTables[i].GetTTLEntries()
+			if err != nil {
+				return nil, err
+			}
+			entries = append(entries, e...)
+			//TODO create expiry heap
+
+		}
+	}
+	return entries, nil
+}

@@ -52,7 +52,7 @@ func (m *GenericMemtable) Put(key []byte, value []byte, seqId uint64, opType enu
 }
 
 func (m *GenericMemtable) PutWithTTL(key []byte, value []byte, seqId uint64, opType enums.OpType, ttl int64) {
-	expiresAt := time.Now().Unix() + ttl
+	expiresAt := time.Now().UnixMilli() + ttl
 	sizeEntry := len(key) + len(value) + 8 + 8 + 1
 	m.store.Insert(MemtableEntry{
 		Key:       key,

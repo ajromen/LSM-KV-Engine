@@ -97,7 +97,7 @@ func (s *SingleFileStorage) WriteSegment(segType enums.SegmentType, data []byte)
 
 // ReadSegment READS SEGMENT FROM A FILE (OFFSET AND SIZE ARE FORWARDED FROM FOOTER)
 func (s *SingleFileStorage) ReadSegment(segType enums.SegmentType, offset uint64, size uint32) ([]byte, error) {
-	if (segType == enums.SegmentData || segType == enums.SegmentIndex) && s.BlockManager != nil {
+	if (segType == enums.SegmentData || segType == enums.SegmentIndex || segType == enums.SegmentTTLIndex) && s.BlockManager != nil {
 		blockSize := uint64(s.BlockManager.BlockSize())
 		blockKey := block.BlockKey{
 			FilePath: s.file.Name(),
@@ -282,7 +282,7 @@ func (m *MultiFileStorage) ReadSegment(segType enums.SegmentType, offset uint64,
 	if err != nil {
 		return nil, err
 	}
-	if (segType == enums.SegmentData || segType == enums.SegmentIndex) && m.BlockManager != nil {
+	if (segType == enums.SegmentData || segType == enums.SegmentIndex || segType == enums.SegmentTTLIndex) && m.BlockManager != nil {
 		blockSize := uint64(m.BlockManager.BlockSize())
 		blockKey := block.BlockKey{
 			FilePath: file.Name(),
