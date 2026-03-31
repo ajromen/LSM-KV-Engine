@@ -68,16 +68,34 @@ func (l *LSM) Get(key []byte) ([]byte, bool, error) {
 		if entry == nil {
 			return nil, false, nil // tombstone
 		}
-		return entry, true, nil
+		return entry.Value, true, nil
 	}
-	entry, found, err := l.sstableManager.Get(key)
+	record, found, err := l.sstableManager.Get(key)
 	if err != nil {
 		return nil, false, err
 	}
 	if found {
-		return entry, true, nil
+		return record.Value, true, nil
 	}
 	return nil, false, nil
+}
+
+func (l *LSM) GetTTL(key []byte) (int64, bool, error) {
+	entry, found := l.memtableeManager.Get(key)
+	if found {
+		if entry == nil {
+			return 0, false, nil // tombstone
+		}
+		return entry.ExpiresAt, true, nil
+	}
+	record, found, err := l.sstableManager.Get(key)
+	if err != nil {
+		return 0, false, err
+	}
+	if found {
+		return record.ExpiresAt, true, nil
+	}
+	return 0, false, nil
 }
 
 func (l *LSM) Finish() error {

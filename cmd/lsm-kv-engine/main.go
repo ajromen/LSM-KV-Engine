@@ -6,6 +6,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/cli"
 	"github.com/ajromen/LSM-KV-Engine/internal/core"
@@ -56,6 +57,10 @@ func RunCli(engine *core.Engine) {
 			handleDelete(engine, parts)
 		case "get":
 			handleGet(engine, parts)
+		case "expire":
+			handleExpire(engine, parts)
+		case "ttl":
+			handleTTL(engine, parts)
 		case "clear-all":
 			handleClear(engine, parts)
 		case "exit", "quit", "q":
@@ -105,6 +110,25 @@ func handlePut(engine *core.Engine, parts []string) {
 	fmt.Println("Put:", key, "OK")
 }
 
+func handleExpire(engine *core.Engine, parts []string) {
+	if len(parts) < 3 {
+		fmt.Println("Usage: expire <key> <ttl>")
+		return
+	}
+	key := parts[1]
+	ttl, err := strconv.ParseInt(parts[2], 10, 64)
+	if err != nil {
+		fmt.Println("TTL must be a number")
+		return
+	}
+	err = engine.PutWithTTL([]byte(key), nil, ttl)
+	if err != nil {
+		fmt.Println("EXPIRE:", err)
+		return
+	}
+	fmt.Printf("Expire: '%s', %ds OK\n", key, ttl)
+}
+
 func handleGet(engine *core.Engine, parts []string) {
 	if len(parts) != 2 {
 		fmt.Println("Usage: get <key>")
@@ -121,6 +145,25 @@ func handleGet(engine *core.Engine, parts []string) {
 		return
 	}
 	fmt.Println(string(value))
+}
+
+func handleTTL(engine *core.Engine, parts []string) {
+	if len(parts) != 2 {
+		fmt.Println("Usage: ttl <key>")
+		return
+	}
+	key := parts[1]
+	value, found, err := engine.GetTTL([]byte(key))
+	if err != nil {
+		fmt.Println("TTL:", err)
+		return
+	}
+	if !found {
+		fmt.Println("TTL: key '" + key + "' not found")
+		return
+	}
+	t := time.Unix(value, 0)
+	fmt.Printf("Key: '%s', TTL: %ds, Expires At: %s\n", key, t.Unix()-time.Now().Unix(), t.Format("15:04:05 02 Jan 2006 "))
 }
 
 func handleDelete(engine *core.Engine, parts []string) {

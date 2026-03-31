@@ -54,7 +54,7 @@ func (m *GenericMemtable) PutWithTTL(key []byte, value []byte, seqId uint64, tom
 }
 
 // Get retrieves the value for a given key
-func (m *GenericMemtable) Get(key []byte) ([]byte, bool) {
+func (m *GenericMemtable) Get(key []byte) (*MemtableEntry, bool) {
 	dummy := MemtableEntry{
 		Key:   key,
 		SeqId: math.MaxUint64,
@@ -69,7 +69,7 @@ func (m *GenericMemtable) Get(key []byte) ([]byte, bool) {
 	if entry.Tombstone {
 		return nil, true
 	}
-	return entry.Value, true
+	return entry, true
 }
 
 //// Delete marks a key deleted by inserting a tombstone entry

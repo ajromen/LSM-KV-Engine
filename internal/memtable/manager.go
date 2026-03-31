@@ -113,7 +113,7 @@ func (mm *MemtableManager) containsImmutable(target Memtable) bool {
 	return false
 }
 
-func (mm *MemtableManager) Get(key []byte) ([]byte, bool) {
+func (mm *MemtableManager) Get(key []byte) (*MemtableEntry, bool) {
 	mm.mu.Lock()
 	defer mm.mu.Unlock()
 	if v, ok := mm.active.Get(key); ok {

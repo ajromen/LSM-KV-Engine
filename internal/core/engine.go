@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/cli"
 	"github.com/ajromen/LSM-KV-Engine/internal/config"
@@ -71,6 +72,15 @@ func (engine *Engine) PutWithTTL(key []byte, value []byte, ttl int64) error {
 func (engine *Engine) Get(key []byte) ([]byte, bool, error) {
 	value, found, err := engine.lsm.Get(key)
 	return value, found, err
+}
+
+func (engine *Engine) GetTTL(key []byte) (int64, bool, error) {
+	if !config.GetSettings().TTL.InMemoryTTL {
+
+		value, found, err := engine.lsm.GetTTL(key)
+		return value, found, err
+	}
+	return time.Now().Unix(), true, nil
 }
 
 func (engine *Engine) Delete(key []byte) error {

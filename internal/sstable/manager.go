@@ -204,7 +204,7 @@ func (sm *SSTableManager) FlushToSSTable(entries []memtable.MemtableEntry) error
 	return nil
 }
 
-func (sm *SSTableManager) Get(key []byte) ([]byte, bool, error) {
+func (sm *SSTableManager) Get(key []byte) (*Record, bool, error) {
 	for _, layer := range sm.Layers {
 		for i := len(layer.SSTables) - 1; i >= 0; i-- {
 			record, err := layer.SSTables[i].Get(key)
@@ -217,7 +217,7 @@ func (sm *SSTableManager) Get(key []byte) ([]byte, bool, error) {
 			if record.Tombstone {
 				return nil, false, nil
 			}
-			return record.Value, true, nil
+			return record, true, nil
 		}
 	}
 	return nil, false, nil
