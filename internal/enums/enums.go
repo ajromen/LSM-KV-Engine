@@ -11,6 +11,7 @@ const (
 	SegmentMetadata   SegmentType = 5
 	SegmentFooter     SegmentType = 6
 	SegmentDictionary SegmentType = 7
+	SegmentTTLIndex   SegmentType = 8
 )
 
 type SSTableCompression byte

@@ -178,8 +178,9 @@ func (sw *SSTableWriter) flushDataBlock() error {
 // 4. Write filter segment on disk
 // 5. Write index blocks on disk
 // 6. Write summary segment on disk
-// 7. Write metadata (merkle tree) segment on disk
-// 8. Write footer and sync storage
+// 7. TODO Write TTL index on disk
+// 8. Write metadata (merkle tree) segment on disk
+// 9. Write footer and sync storage
 func (sw *SSTableWriter) Finalize() error {
 	// add remaining unfinished index block
 	// step 1
@@ -282,7 +283,7 @@ func (sw *SSTableWriter) Finalize() error {
 		}
 	}
 
-	// step 7
+	// step 8
 	merkleTreeData := sw.merkleTree.Encode()
 	merkleTreeOffset, merkleTreeSize, err := sw.storage.WriteSegment(enums.SegmentMerkleTree, merkleTreeData)
 	if err != nil {
@@ -302,7 +303,7 @@ func (sw *SSTableWriter) Finalize() error {
 		Size:   metaDataSize,
 	}
 
-	// step 8
+	// step 9
 	dictData := sw.valueEncoder.SaveDict()
 	dictOffset, dictSize, err := sw.storage.WriteSegment(enums.SegmentDictionary, dictData)
 	if err != nil {
