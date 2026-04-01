@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"time"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/block"
 	"github.com/ajromen/LSM-KV-Engine/internal/config"
@@ -218,10 +219,17 @@ func (sm *SSTableManager) Get(key []byte) (*Record, bool, error) {
 			if record.Tombstone {
 				return nil, false, nil
 			}
-			return record, true, nil
+			return sm.checkTTL(record)
 		}
 	}
 	return nil, false, nil
+}
+
+func (sm *SSTableManager) checkTTL(r *Record) (*Record, bool, error) {
+	if r.ExpiresAt != 0 && time.UnixMilli(r.ExpiresAt).Before(time.Now()) {
+		return nil, false, nil
+	}
+	return r, true, nil
 }
 
 // DeleteSSTable deletes at specified layer/index

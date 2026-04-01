@@ -2,6 +2,7 @@ package memtable
 
 import (
 	"sync"
+	"time"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/enums"
 	"github.com/ajromen/LSM-KV-Engine/internal/iterator"
@@ -118,38 +119,23 @@ func (mm *MemtableManager) Get(key []byte) (*MemtableEntry, bool) {
 	mm.mu.Lock()
 	defer mm.mu.Unlock()
 	if v, ok := mm.active.Get(key); ok {
-		return v, true
+		return mm.checkTTL(v)
 	}
 	for i := len(mm.immutable) - 1; i >= 0; i-- {
 		if v, ok := mm.immutable[i].Get(key); ok {
-			return v, true
+			return mm.checkTTL(v)
 		}
 	}
 
 	return nil, false
 }
 
-//// Delete inserts a tombstone for a key into the active memtable
-//// Works the same as Put, but marks entry as deleted
-//func (mm *MemtableManager) Delete(key []byte, seqId uint64) {
-//	mm.mu.Lock()
-//	mm.active.Put(key, []byte{}, seqId, true)
-//	shouldRotate := mm.active.ShouldFlush()
-//	mm.mu.Unlock()
-//	if shouldRotate {
-//		mm.rotate()
-//	}
-//}
-//
-//func (mm *MemtableManager) DeleteWithTTL(key []byte, seqId uint64, ttl int64) {
-//	mm.mu.Lock()
-//	mm.active.PutWithTTL(key, []byte{}, seqId, true, ttl)
-//	shouldRotate := mm.active.ShouldFlush()
-//	mm.mu.Unlock()
-//	if shouldRotate {
-//		mm.rotate()
-//	}
-//}
+func (mm *MemtableManager) checkTTL(entry *MemtableEntry) (*MemtableEntry, bool) {
+	if entry.ExpiresAt != 0 && time.UnixMilli(entry.ExpiresAt).Before(time.Now()) {
+		return nil, false
+	}
+	return entry, true
+}
 
 // RawIterator returns a merged iterator over all memtables without higher-level filtering.
 func (mm *MemtableManager) RawIterator() iterator.Iterator[MemtableEntry] {
