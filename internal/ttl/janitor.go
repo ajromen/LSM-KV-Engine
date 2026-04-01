@@ -1,6 +1,7 @@
 package ttl
 
 import (
+	"fmt"
 	"sync"
 	"time"
 
@@ -27,6 +28,9 @@ func NewTTLJanitor(delFn func([]byte)) *Janitor {
 func (j *Janitor) Init(heap *ExpiryHeap, index map[string]int64) {
 	j.heap = heap
 	j.index = index
+	if config.GetSettings().Debug {
+		fmt.Printf("Janitor loaded %d ttls \n", len(j.index))
+	}
 }
 
 func (j *Janitor) AddTTL(entry shared.TTLEntry) {

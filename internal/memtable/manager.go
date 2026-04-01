@@ -119,22 +119,21 @@ func (mm *MemtableManager) Get(key []byte) (*MemtableEntry, bool) {
 	mm.mu.Lock()
 	defer mm.mu.Unlock()
 	if v, ok := mm.active.Get(key); ok {
-		return mm.checkTTL(v)
+		return mm.checkTTL(v, ok)
 	}
 	for i := len(mm.immutable) - 1; i >= 0; i-- {
 		if v, ok := mm.immutable[i].Get(key); ok {
-			return mm.checkTTL(v)
+			return mm.checkTTL(v, ok)
 		}
 	}
-
 	return nil, false
 }
 
-func (mm *MemtableManager) checkTTL(entry *MemtableEntry) (*MemtableEntry, bool) {
+func (mm *MemtableManager) checkTTL(entry *MemtableEntry, ok bool) (*MemtableEntry, bool) {
 	if entry.ExpiresAt != 0 && time.UnixMilli(entry.ExpiresAt).Before(time.Now()) {
 		return nil, false
 	}
-	return entry, true
+	return entry, ok
 }
 
 // RawIterator returns a merged iterator over all memtables without higher-level filtering.

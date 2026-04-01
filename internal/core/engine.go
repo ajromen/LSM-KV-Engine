@@ -47,7 +47,9 @@ func NewEngine() (*Engine, error) {
 		engine.ttlJanitor.Init(heap, index)
 		go engine.ttlJanitor.Run()
 	}
-
+	if config.GetSettings().Debug {
+		print("Engine created\n")
+	}
 	return &engine, nil
 }
 
@@ -82,7 +84,6 @@ func (engine *Engine) Get(key []byte) ([]byte, bool, error) {
 
 func (engine *Engine) GetTTL(key []byte) (int64, bool, error) {
 	if !config.GetSettings().TTL.InMemoryTTL {
-
 		value, found, err := engine.lsm.GetTTL(key)
 		return value, found, err
 	}
@@ -92,7 +93,7 @@ func (engine *Engine) GetTTL(key []byte) (int64, bool, error) {
 
 func (engine *Engine) Delete(key []byte) {
 	if config.GetSettings().Debug {
-
+		fmt.Printf("\nDeleting key %s\n", string(key))
 	}
 	seqId := engine.seqGen.Next()
 	// wal

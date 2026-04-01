@@ -32,6 +32,9 @@ func LoadConfig(flags *cli.FLags) error {
 }
 
 func (c *Config) applyFlags(flags *cli.FLags) error {
+	if flags.Debug != nil {
+		c.Debug = *flags.Debug
+	}
 	if flags.MemtableMaxSize != nil {
 		c.Memtable.MemtableMaxEntries = *flags.MemtableMaxSize
 	}
