@@ -6,9 +6,9 @@ import (
 	"errors"
 	"hash/crc32"
 
-	"github.com/ajromen/LSM-KV-Engine/internal/data_structures"
 	"github.com/ajromen/LSM-KV-Engine/internal/encoders"
 	"github.com/ajromen/LSM-KV-Engine/internal/iterator"
+	"github.com/ajromen/LSM-KV-Engine/internal/structures"
 	"github.com/ajromen/LSM-KV-Engine/internal/utils"
 )
 
@@ -682,7 +682,7 @@ func recordComparator(a, b Record) int {
 // exposing all records including tombstones and older versions of same key
 // it uses merge structure to quickly determine the smallest entry in all raw iterators provided -> O(log n)
 type MergeIteratorRaw struct {
-	structure data_structures.MergeStructure[Record]
+	structure structures.MergeStructure[Record]
 	current   *Record
 	valid     bool
 }
@@ -702,7 +702,7 @@ func NewMergeIteratorRaw(iters []*DataBlockIteratorRaw, mergeStructure byte) *Me
 	if len(wrapped) == 0 {
 		return &MergeIteratorRaw{valid: false}
 	}
-	structure := data_structures.NewMergeStructure(mergeStructure, wrapped, recordComparator)
+	structure := structures.NewMergeStructure(mergeStructure, wrapped, recordComparator)
 	m := &MergeIteratorRaw{structure: structure}
 	m.syncFromWinner()
 	return m

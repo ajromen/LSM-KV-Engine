@@ -7,6 +7,7 @@ import (
 	"github.com/ajromen/LSM-KV-Engine/internal/enums"
 	"github.com/ajromen/LSM-KV-Engine/internal/memtable"
 	"github.com/ajromen/LSM-KV-Engine/internal/sstable"
+	"github.com/ajromen/LSM-KV-Engine/internal/ttl"
 )
 
 type LSM struct {
@@ -52,14 +53,12 @@ func (l *LSM) onFlush(entries []memtable.MemtableEntry) {
 	}
 }
 
-func (l *LSM) Put(key []byte, value []byte, seqId uint64, tombstone bool) error {
-	l.memtableeManager.Put(key, value, seqId, tombstone)
-	return nil
+func (l *LSM) Put(key []byte, value []byte, seqId uint64, opType enums.OpType) {
+	l.memtableeManager.Put(key, value, seqId, opType)
 }
 
-func (l *LSM) PutWithTTL(key []byte, value []byte, seqId uint64, tombstone bool, ttl int64) error {
-	l.memtableeManager.PutWithTTL(key, value, seqId, tombstone, ttl)
-	return nil
+func (l *LSM) PutWithTTL(key []byte, value []byte, seqId uint64, opType enums.OpType, ttl int64) {
+	l.memtableeManager.PutWithTTL(key, value, seqId, opType, ttl)
 }
 
 func (l *LSM) Get(key []byte) ([]byte, bool, error) {
@@ -68,16 +67,34 @@ func (l *LSM) Get(key []byte) ([]byte, bool, error) {
 		if entry == nil {
 			return nil, false, nil // tombstone
 		}
-		return entry, true, nil
+		return entry.Value, true, nil
 	}
-	entry, found, err := l.sstableManager.Get(key)
+	record, found, err := l.sstableManager.Get(key)
 	if err != nil {
 		return nil, false, err
 	}
 	if found {
-		return entry, true, nil
+		return record.Value, true, nil
 	}
 	return nil, false, nil
+}
+
+func (l *LSM) GetTTL(key []byte) (int64, bool, error) {
+	entry, found := l.memtableeManager.Get(key)
+	if found {
+		if entry == nil {
+			return 0, false, nil // tombstone
+		}
+		return entry.ExpiresAt, true, nil
+	}
+	record, found, err := l.sstableManager.Get(key)
+	if err != nil {
+		return 0, false, err
+	}
+	if found {
+		return record.ExpiresAt, true, nil
+	}
+	return 0, false, nil
 }
 
 func (l *LSM) Finish() error {
@@ -92,4 +109,8 @@ func (l *LSM) ClearAll() error {
 
 func (l *LSM) GetMaxSeqId() uint64 {
 	return l.sstableManager.Manifest.MaxSeqId
+}
+
+func (l *LSM) GetAllTTLFomSST() (*ttl.ExpiryHeap, map[string]int64, error) {
+	return l.sstableManager.GetAllTTL()
 }

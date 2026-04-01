@@ -36,6 +36,7 @@ func NewMemtable(cfg config.MemtableConfig) Memtable {
 	}
 
 	var store MemtableStore
+	var rangeDelStore MemtableStore
 	t := cfg.MemtableType
 	switch t {
 	case enums.BTreeMemTable:
@@ -44,20 +45,25 @@ func NewMemtable(cfg config.MemtableConfig) Memtable {
 			degree = 3
 		}
 		store = NewBTreeStore(degree, cmp)
+		rangeDelStore = NewBTreeStore(degree, cmp)
 	case enums.SkiplistMemTable:
 		level := cfg.SkipListConfig.MaxLevel
 		if level == 0 {
 			level = 16
 		}
 		store = NewSkipListStore(level, cmp)
+		rangeDelStore = NewSkipListStore(level, cmp)
 	case enums.HashMapMemTable:
 		store = NewHashMapStore()
+		rangeDelStore = NewHashMapStore()
 	case enums.RBTreeMemTable:
 		store = NewRBTreeStore(cmp, cmpIgnoringSeqId)
+		rangeDelStore = NewRBTreeStore(cmp, cmpIgnoringSeqId)
 	case enums.AVLTreeMemTable:
 		store = NewAVLTreeStore(cmp, cmpIgnoringSeqId)
+		rangeDelStore = NewAVLTreeStore(cmp, cmpIgnoringSeqId)
 	}
-	return NewGenericMemtable(store, cfg.MemtableMaxEntries, cfg.MemtableMaxSizeBytes)
+	return NewGenericMemtable(store, rangeDelStore, cfg.MemtableMaxEntries, cfg.MemtableMaxSizeBytes)
 }
 
 // NewFactory is used to generate memtables inside memtable manager (callback)

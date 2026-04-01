@@ -11,6 +11,7 @@ import (
 	"github.com/ajromen/LSM-KV-Engine/internal/config"
 	"github.com/ajromen/LSM-KV-Engine/internal/enums"
 	"github.com/ajromen/LSM-KV-Engine/internal/memtable"
+	"github.com/ajromen/LSM-KV-Engine/internal/ttl"
 )
 
 type Layer struct {
@@ -178,7 +179,8 @@ func (sm *SSTableManager) FlushToSSTable(entries []memtable.MemtableEntry) error
 			Key:       entry.Key,
 			Value:     entry.Value,
 			SeqId:     entry.SeqId,
-			Tombstone: entry.Tombstone,
+			Tombstone: entry.OpType == enums.OpTypeDel,
+			ExpiresAt: entry.ExpiresAt,
 		}
 		if err := writer.AddRecord(record); err != nil {
 			return fmt.Errorf("cant add record: %w", err)
@@ -203,7 +205,7 @@ func (sm *SSTableManager) FlushToSSTable(entries []memtable.MemtableEntry) error
 	return nil
 }
 
-func (sm *SSTableManager) Get(key []byte) ([]byte, bool, error) {
+func (sm *SSTableManager) Get(key []byte) (*Record, bool, error) {
 	for _, layer := range sm.Layers {
 		for i := len(layer.SSTables) - 1; i >= 0; i-- {
 			record, err := layer.SSTables[i].Get(key)
@@ -216,7 +218,7 @@ func (sm *SSTableManager) Get(key []byte) ([]byte, bool, error) {
 			if record.Tombstone {
 				return nil, false, nil
 			}
-			return record.Value, true, nil
+			return record, true, nil
 		}
 	}
 	return nil, false, nil
@@ -268,13 +270,13 @@ func (sm *SSTableManager) ClearAll() error {
 		sm.blockManager.ClearCache()
 	}
 
-	sm.manifest = &Manifest{
+	sm.Manifest = &Manifest{
 		FileDir:       sm.dataDir,
 		NextSStableId: 0,
 		Layers:        make(map[int][]SSTableManifest),
 	}
 
-	return sm.manifest.Save()
+	return sm.Manifest.Save()
 }
 
 // MergeSSTables pass in sstables to merge them into a single sstable and delete old ones
@@ -366,6 +368,24 @@ func (sm *SSTableManager) MoveSSTable(current *SSTableReader, toLayer int) error
 	if err != nil {
 		return err
 	}
-	//TODO update footer
 	return nil
+}
+
+func (sm *SSTableManager) GetAllTTL() (*ttl.ExpiryHeap, map[string]int64, error) {
+	heap := ttl.NewExpiryHeap()
+	index := make(map[string]int64)
+	for _, layer := range sm.Layers {
+		for i := len(layer.SSTables) - 1; i >= 0; i-- {
+			e, err := layer.SSTables[i].GetTTLEntries()
+			if err != nil {
+				return nil, nil, err
+			}
+			for _, entry := range e {
+				heap.Push(entry)
+				index[string(entry.Key)] = entry.ExpiresAt
+			}
+
+		}
+	}
+	return heap, index, nil
 }

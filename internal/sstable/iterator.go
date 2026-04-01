@@ -5,9 +5,9 @@ import (
 	"os"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/block"
-	"github.com/ajromen/LSM-KV-Engine/internal/data_structures"
 	"github.com/ajromen/LSM-KV-Engine/internal/encoders"
 	"github.com/ajromen/LSM-KV-Engine/internal/iterator"
+	"github.com/ajromen/LSM-KV-Engine/internal/structures"
 )
 
 // sstableBlockSource provides block-level acces to an SSTable
@@ -310,7 +310,7 @@ func (it *SSTableIterator) Value() Record { return *it.current }
 // SSTableMergeIteratorRaw merges multiple SSTableIteratorRaw instances using a merge structure
 // it produces records in sorted order across all SSTables
 type SSTableMergeIteratorRaw struct {
-	structure data_structures.MergeStructure[Record]
+	structure structures.MergeStructure[Record]
 	current   *Record
 	valid     bool
 }
@@ -331,7 +331,7 @@ func NewSSTableMergeIteratorRaw(readers []*SSTableReader, mergeStructure byte) (
 	if len(wrapped) == 0 {
 		return &SSTableMergeIteratorRaw{valid: false}, nil
 	}
-	structure := data_structures.NewMergeStructure(mergeStructure, wrapped, recordComparator)
+	structure := structures.NewMergeStructure(mergeStructure, wrapped, recordComparator)
 	m := &SSTableMergeIteratorRaw{structure: structure}
 	m.syncFromWinner()
 	return m, nil

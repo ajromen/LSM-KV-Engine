@@ -13,25 +13,26 @@ import (
 	"os"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/block"
-	"github.com/ajromen/LSM-KV-Engine/internal/config"
 	"github.com/ajromen/LSM-KV-Engine/internal/encoders"
 	"github.com/ajromen/LSM-KV-Engine/internal/enums"
+	"github.com/ajromen/LSM-KV-Engine/internal/shared"
 )
 
 // SSTableReader allows reading an SSTable file, accesing singular records and validating data integrity
 type SSTableReader struct {
-	filePath       string              // file path of given sstable file (base path if multi file format)
-	Id             int                 // SSTable segment id
-	Layer          int                 // number of the lsm layer
-	SizeBytes      int64               //file size in bytes
-	storage        SegmentStorage      // low-level reading of segments
-	blockManager   *block.BlockManager // reading and decoding data blocks
-	footer         *Footer             // footer of given sstable
-	Metadata       *Metadata
-	SummarySegment *SummarySegment // summary segment (read into RAM)
-	filterSegment  *FilterSegment  // filter segment (read into RAM)
-	merkleTree     *MerkleTree     // merkle tree - metadata segment (read into RAM)
-	valueDecoder   *encoders.AdaptiveEncoder
+	filePath        string              // file path of given sstable file (base path if multi file format)
+	Id              int                 // SSTable segment id
+	Layer           int                 // number of the lsm layer
+	SizeBytes       int64               //file size in bytes
+	storage         SegmentStorage      // low-level reading of segments
+	blockManager    *block.BlockManager // reading and decoding data blocks
+	footer          *Footer             // footer of given sstable
+	Metadata        *Metadata
+	SummarySegment  *SummarySegment  // summary segment (read into RAM)
+	filterSegment   *FilterSegment   // filter segment (read into RAM)
+	merkleTree      *MerkleTree      // merkle tree - metadata segment (read into RAM)
+	TTLIndexSegment *TTLIndexSegment // read once
+	valueDecoder    *encoders.AdaptiveEncoder
 }
 
 type ReaderOptions struct {
@@ -98,18 +99,22 @@ func NewSSTableReader(id int, filePath string, format enums.SSTableFormat, layer
 	storage.SetBlockManager(blockManager)
 	// initialize reader
 	reader := &SSTableReader{
-		storage:      storage,
-		blockManager: blockManager,
-		filePath:     filePath,
-		footer:       footer,
-		Layer:        layer,
-		Metadata:     meta,
-		Id:           id,
-		SizeBytes:    fileSize,
+		storage:         storage,
+		blockManager:    blockManager,
+		filePath:        filePath,
+		footer:          footer,
+		Layer:           layer,
+		Metadata:        meta,
+		Id:              id,
+		SizeBytes:       fileSize,
+		TTLIndexSegment: NewTTLIndexSegment(blockSize),
 	}
 	// load filter into RAM
 	if err := reader.loadFilter(); err != nil {
 		reader.filterSegment = nil
+	}
+	if err := reader.loadDictionary(); err != nil {
+		return nil, fmt.Errorf("failed to load dictionary: %w", err)
 	}
 	return reader, nil
 }
@@ -165,6 +170,26 @@ func (r *SSTableReader) loadSummary() error {
 	return nil
 }
 
+func (r *SSTableReader) GetTTLEntries() ([]shared.TTLEntry, error) {
+	entries := make([]shared.TTLEntry, 0)
+
+	blockSize := uint64(r.blockManager.BlockSize())
+
+	for off := uint64(0); uint32(off) < r.footer.TTLIndexHandler.Size; off += blockSize { // ovo je pakao sta je ovo sto se ni jedan int ne poklapa
+		buf, err := r.storage.ReadSegment(enums.SegmentTTLIndex, 0, uint32(blockSize))
+		if err != nil {
+			return nil, err
+		}
+		b, err := DecodeTTLIndexBlock(buf)
+		if err != nil {
+			return nil, err
+		}
+		entries = append(b.Entries)
+	}
+
+	return entries, nil
+}
+
 // loadFilter reads and decodes the filter segment -> filter allows quickly checking whether a key exists or nott
 func (r *SSTableReader) loadFilter() error {
 	if r.footer.FilterHandler.Size == 0 {
@@ -200,7 +225,7 @@ func (r *SSTableReader) loadMerkleTree() error {
 // loadIndexBlock reads a specific index block from index segment -> NEEDS TO BE FIXED!
 func (r *SSTableReader) loadIndexBlock(blockNumber int) (*IndexBlock, error) {
 
-	indexBlockSize := config.GetSettings().SSTable.IndexSegment.IndexBlockSize
+	indexBlockSize := r.blockManager.BlockSize()
 
 	offset := r.footer.IndexHandler.Offset +
 		uint64(blockNumber)*uint64(indexBlockSize)
