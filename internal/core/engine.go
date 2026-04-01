@@ -5,21 +5,22 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"time"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/config"
 	"github.com/ajromen/LSM-KV-Engine/internal/enums"
 	"github.com/ajromen/LSM-KV-Engine/internal/lsm"
 	"github.com/ajromen/LSM-KV-Engine/internal/sequence"
+	"github.com/ajromen/LSM-KV-Engine/internal/shared"
 	"github.com/ajromen/LSM-KV-Engine/internal/sstable"
 	"github.com/ajromen/LSM-KV-Engine/internal/ttl"
 )
 
 type Engine struct {
-	config     *config.Config
-	lsm        *lsm.LSM
-	seqGen     *sequence.SequenceGenerator
-	ttlJanitor *ttl.Janitor
+	config      *config.Config
+	lsm         *lsm.LSM
+	seqGen      *sequence.SequenceGenerator
+	ttlJanitor  *ttl.Janitor
+	inMemoryTTL bool
 	//wal
 }
 
@@ -32,15 +33,15 @@ func NewEngine() (*Engine, error) {
 	if err != nil {
 		return nil, err
 	}
-	engine := Engine{lsm: lsmTree}
+	engine := Engine{lsm: lsmTree, inMemoryTTL: config.GetSettings().TTL.InMemoryTTL}
 
-	if config.GetSettings().TTL.InMemoryTTL {
+	if engine.inMemoryTTL {
 		engine.ttlJanitor = ttl.NewTTLJanitor(engine.Delete)
-		entries, err := engine.lsm.GetAllTTLFomSST()
+		heap, index, err := engine.lsm.GetAllTTLFomSST()
 		if err != nil {
 			return nil, err
 		}
-		engine.ttlJanitor.Init(entries)
+		engine.ttlJanitor.Init(heap, index)
 	}
 
 	engine.recover()
@@ -65,6 +66,9 @@ func (engine *Engine) Put(key []byte, value []byte) {
 func (engine *Engine) PutWithTTL(key []byte, value []byte, ttl int64) {
 	seqId := engine.seqGen.Next()
 	//wal
+	if engine.inMemoryTTL {
+		engine.ttlJanitor.AddTTL(shared.TTLEntry{ExpiresAt: ttl, Key: key})
+	}
 	engine.lsm.PutWithTTL(key, value, seqId, enums.OpTypePut, ttl)
 }
 
@@ -79,19 +83,14 @@ func (engine *Engine) GetTTL(key []byte) (int64, bool, error) {
 		value, found, err := engine.lsm.GetTTL(key)
 		return value, found, err
 	}
-	return time.Now().UnixMilli(), true, nil
+	ttl, found := engine.ttlJanitor.GetTTL(string(key))
+	return ttl, found, nil
 }
 
 func (engine *Engine) Delete(key []byte) {
 	seqId := engine.seqGen.Next()
 	// wal
 	engine.lsm.Put(key, nil, seqId, enums.OpTypeDel)
-}
-
-func (engine *Engine) DeleteWithTTL(key []byte, ttl int64) {
-	seqId := engine.seqGen.Next()
-	//wal
-	engine.lsm.PutWithTTL(key, nil, seqId, enums.OpTypeDel, ttl)
 }
 
 func (engine *Engine) RangeDelete(startKey []byte, endKey []byte) {
@@ -119,6 +118,7 @@ func (engine *Engine) ClearAll() error {
 	if err := os.Remove(manifestPath); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("clear-all: failed to remove manifest: %w", err)
 	}
+	engine.ttlJanitor.ClearAll()
 
 	return nil
 }

@@ -7,6 +7,7 @@ import (
 	"github.com/ajromen/LSM-KV-Engine/internal/enums"
 	"github.com/ajromen/LSM-KV-Engine/internal/memtable"
 	"github.com/ajromen/LSM-KV-Engine/internal/sstable"
+	"github.com/ajromen/LSM-KV-Engine/internal/ttl"
 )
 
 type LSM struct {
@@ -110,6 +111,6 @@ func (l *LSM) GetMaxSeqId() uint64 {
 	return l.sstableManager.Manifest.MaxSeqId
 }
 
-func (l *LSM) GetAllTTLFomSST() ([]sstable.TTLEntry, error) {
+func (l *LSM) GetAllTTLFomSST() (*ttl.ExpiryHeap, map[string]int64, error) {
 	return l.sstableManager.GetAllTTL()
 }

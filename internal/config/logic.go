@@ -94,6 +94,9 @@ func (c *Config) applyFlags(flags *cli.FLags) error {
 	if flags.TTLInMemoryTTL != nil {
 		c.TTL.InMemoryTTL = *flags.TTLInMemoryTTL
 	}
+	if flags.TTLRefreshRate != nil {
+		c.TTL.RefreshRate = int64(*flags.TTLRefreshRate)
+	}
 	return nil
 }
 

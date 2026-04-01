@@ -44,6 +44,7 @@ const (
 
 	//TTL
 	defaultTTLInMemoryTTL = true
+	defaultTTLRefreshRate = 1000 // 1s
 )
 
 func NewDefaultConfig() *Config {
@@ -100,6 +101,7 @@ func NewDefaultConfig() *Config {
 		},
 		TTL: TTLConfig{
 			InMemoryTTL: defaultTTLInMemoryTTL,
+			RefreshRate: defaultTTLRefreshRate,
 		},
 	}
 }

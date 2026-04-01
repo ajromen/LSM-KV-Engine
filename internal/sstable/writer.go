@@ -9,6 +9,7 @@ import (
 	"github.com/ajromen/LSM-KV-Engine/internal/encoders"
 	"github.com/ajromen/LSM-KV-Engine/internal/enums"
 	"github.com/ajromen/LSM-KV-Engine/internal/probabilistics"
+	"github.com/ajromen/LSM-KV-Engine/internal/shared"
 )
 
 const SSTableFileExtension = ".sst"
@@ -123,7 +124,7 @@ func (sw *SSTableWriter) AddRecord(record Record) error {
 
 	// step 4
 	if record.ExpiresAt != 0 {
-		ttlEntry := TTLEntry{
+		ttlEntry := shared.TTLEntry{
 			Key:       record.Key,
 			ExpiresAt: record.ExpiresAt,
 		}

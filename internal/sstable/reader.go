@@ -15,6 +15,7 @@ import (
 	"github.com/ajromen/LSM-KV-Engine/internal/block"
 	"github.com/ajromen/LSM-KV-Engine/internal/encoders"
 	"github.com/ajromen/LSM-KV-Engine/internal/enums"
+	"github.com/ajromen/LSM-KV-Engine/internal/shared"
 )
 
 // SSTableReader allows reading an SSTable file, accesing singular records and validating data integrity
@@ -169,8 +170,8 @@ func (r *SSTableReader) loadSummary() error {
 	return nil
 }
 
-func (r *SSTableReader) GetTTLEntries() ([]TTLEntry, error) {
-	entries := make([]TTLEntry, 0)
+func (r *SSTableReader) GetTTLEntries() ([]shared.TTLEntry, error) {
+	entries := make([]shared.TTLEntry, 0)
 
 	blockSize := uint64(r.blockManager.BlockSize())
 

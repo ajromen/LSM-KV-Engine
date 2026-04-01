@@ -11,6 +11,7 @@ import (
 	"github.com/ajromen/LSM-KV-Engine/internal/config"
 	"github.com/ajromen/LSM-KV-Engine/internal/enums"
 	"github.com/ajromen/LSM-KV-Engine/internal/memtable"
+	"github.com/ajromen/LSM-KV-Engine/internal/ttl"
 )
 
 type Layer struct {
@@ -370,18 +371,21 @@ func (sm *SSTableManager) MoveSSTable(current *SSTableReader, toLayer int) error
 	return nil
 }
 
-func (sm *SSTableManager) GetAllTTL() ([]TTLEntry, error) {
-	entries := make([]TTLEntry, 0)
+func (sm *SSTableManager) GetAllTTL() (*ttl.ExpiryHeap, map[string]int64, error) {
+	heap := ttl.NewExpiryHeap()
+	index := make(map[string]int64)
 	for _, layer := range sm.Layers {
 		for i := len(layer.SSTables) - 1; i >= 0; i-- {
 			e, err := layer.SSTables[i].GetTTLEntries()
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
-			entries = append(entries, e...)
-			//TODO create expiry heap
+			for _, entry := range e {
+				heap.Push(entry)
+				index[string(entry.Key)] = entry.ExpiresAt
+			}
 
 		}
 	}
-	return entries, nil
+	return heap, index, nil
 }
