@@ -14,12 +14,16 @@ import (
 const helpText = `LSM-KV-Engine CLI
 
 Commands:
-  put <key> <value>   Store a key-value pair
-  get <key>           Retrieve the value of a key
-  del <key>           Delete a key
-  help                Show this help message
-  clear-all			  Delete all data
-  exit | quit | q     Close the engine and exit`
+  put <key> <value>                               Store a key-value pair
+  get <key>                                       Retrieve the value of a key
+  del <key>                                       Delete a key
+  range_scan <lower> <upper> <pageNum> <pageSize> Range scan with pagination (pageNum 0-based)
+  prefix_scan <prefix> <pageNum> <pageSize>       Prefix scan with pagination (pageNum 0-based)
+  range_iterate <lower> <upper>                   Start interactive range iterator
+  prefix_iterate <prefix>                         Start interactive prefix iterator
+  help                                            Show this help message
+  clear-all                                       Delete all data
+  exit | quit | q                                 Close the engine and exit`
 
 func main() {
 	flags := cli.ParseFlags()
