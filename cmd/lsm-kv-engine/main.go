@@ -162,10 +162,14 @@ func handleTTL(engine *core.Engine, parts []string) {
 		return
 	}
 	if !found {
-		fmt.Println("TTL: key '" + key + "' not found")
+		fmt.Println("TTL: key '" + key + "' not found or doesnt have ttl")
 		return
 	}
 	t := time.UnixMilli(value)
+	if t.Before(time.Now()) {
+		fmt.Println("TTL: key '" + key + "' expired")
+		return
+	}
 	fmt.Printf("Key: '%s', TTL: %dms, Expires At: %s\n", key, t.UnixMilli()-time.Now().UnixMilli(), t.Format("15:04:05 02 Jan 2006 "))
 }
 

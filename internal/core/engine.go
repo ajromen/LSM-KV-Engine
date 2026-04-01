@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/config"
 	"github.com/ajromen/LSM-KV-Engine/internal/enums"
@@ -67,7 +68,7 @@ func (engine *Engine) PutWithTTL(key []byte, value []byte, ttl int64) {
 	seqId := engine.seqGen.Next()
 	//wal
 	if engine.inMemoryTTL {
-		engine.ttlJanitor.AddTTL(shared.TTLEntry{ExpiresAt: ttl, Key: key})
+		engine.ttlJanitor.AddTTL(shared.TTLEntry{ExpiresAt: time.Now().UnixMilli() + ttl, Key: key})
 	}
 	engine.lsm.PutWithTTL(key, value, seqId, enums.OpTypePut, ttl)
 }
@@ -83,8 +84,8 @@ func (engine *Engine) GetTTL(key []byte) (int64, bool, error) {
 		value, found, err := engine.lsm.GetTTL(key)
 		return value, found, err
 	}
-	ttl, found := engine.ttlJanitor.GetTTL(string(key))
-	return ttl, found, nil
+	t, found := engine.ttlJanitor.GetTTL(string(key))
+	return t, found, nil
 }
 
 func (engine *Engine) Delete(key []byte) {
