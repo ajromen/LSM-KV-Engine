@@ -9,6 +9,7 @@ type Config struct {
 	Memtable          MemtableConfig          `json:"memtable"`
 	SSTable           SSTableConfig           `json:"sstable"`
 	LSMTree           LSMTreeConfig           `json:"lsmtree"`
+	TTL               TTLConfig               `json:"ttl"`
 	BlockManager      BlockManagerConfig      `json:"blockmanager"`
 	Snapshot          SnapshotConfig          `json:"snapshot"`
 	Checkpoint        CheckpointConfig        `json:"checkpoint"`
@@ -53,11 +54,11 @@ type DataSegmentConfig struct {
 }
 
 type IndexSegmentConfig struct {
-	IndexBlockSize int `json:"index_block_size"`
-	MaxCache       int `json:"max_cache_size"`
+	MaxCache int `json:"max_cache_size"`
 }
 
 type LSMTreeConfig struct {
+	MaxHeight           int                 `json:"max_height"`
 	MinMergeThreshold   int                 `json:"min_merge_threshold"`
 	LevelSizeMultiplier int                 `json:"level_size_multiplier"`
 	CompactionAlgorithm enums.LSMCompaction `json:"compaction_algorithm"`
@@ -91,28 +92,24 @@ type ProbabilisticTypeConfig struct {
 }
 
 type BloomFilterConfig struct {
-	Enabled           bool    `json:"enabled"`
 	FalsePositiveRate float32 `json:"false_positive_rate"`
 }
 
 type CountMinSketchConfig struct {
-	Enabled    bool     `json:"enabled"`
 	Accuracy   float64  `json:"accuracy"`
 	Confidence float64  `json:"confidence"`
 	Seeds      [][]byte `json:"seeds"`
 }
 
 type HyperLogLogConfig struct {
-	Enabled bool `json:"enabled"`
 }
 
 type SimHashConfig struct {
-	Enabled bool `json:"enabled"`
 }
 
 type TTLConfig struct {
-	Enabled  bool `json:"enabled"`
-	Duration int  `json:"duration"`
+	InMemoryTTL bool  `json:"in_memory_ttl"`
+	RefreshRate int64 `json:"refresh_rate"`
 }
 
 type SkipListConfig struct {

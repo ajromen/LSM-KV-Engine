@@ -1,18 +1,23 @@
 package memtable
 
 import (
-	"github.com/ajromen/LSM-KV-Engine/internal/data_structures"
 	"github.com/ajromen/LSM-KV-Engine/internal/iterator"
+	"github.com/ajromen/LSM-KV-Engine/internal/structures"
 )
+
+// Memtable Store Adapters -> set of adapter types that wrap different in-memory data structures for storing memtable entries
+// Adapters provide an interface for basic operations over those in-memory data structures and provide generic look on memtable itself
+// Adapters allow the memtable layer to remain data-structure-agnostic,so different in-memory structures can be swapped without changing the upper layers.
+// All adapters must implement MemtableStore interface
 
 // ---- BTree Store Adapter ----
 
 type BTreeStore struct {
-	tree *data_structures.BTree[MemtableEntry]
+	tree *structures.BTree[MemtableEntry]
 }
 
-func NewBTreeStore(t int, cmp data_structures.Comparator[MemtableEntry]) *BTreeStore {
-	return &BTreeStore{tree: data_structures.NewBTree[MemtableEntry](t, cmp)}
+func NewBTreeStore(t int, cmp structures.Comparator[MemtableEntry]) *BTreeStore {
+	return &BTreeStore{tree: structures.NewBTree[MemtableEntry](t, cmp)}
 }
 
 func (s *BTreeStore) Insert(entry MemtableEntry) {
@@ -55,11 +60,11 @@ func (s *BTreeStore) Iterator() iterator.Iterator[MemtableEntry] {
 // ---- Skiplist store adapter ----
 
 type SkipListStore struct {
-	list *data_structures.SkipList[MemtableEntry]
+	list *structures.SkipList[MemtableEntry]
 }
 
-func NewSkipListStore(maxLevel int, cmp data_structures.Comparator[MemtableEntry]) *SkipListStore {
-	return &SkipListStore{list: data_structures.NewSkipList[MemtableEntry](maxLevel, cmp)}
+func NewSkipListStore(maxLevel int, cmp structures.Comparator[MemtableEntry]) *SkipListStore {
+	return &SkipListStore{list: structures.NewSkipList[MemtableEntry](maxLevel, cmp)}
 }
 
 func (s *SkipListStore) Insert(entry MemtableEntry) {
@@ -102,12 +107,12 @@ func (s *SkipListStore) Iterator() iterator.Iterator[MemtableEntry] {
 // ---- Hashmap store adapter ----
 
 type HashMapStore struct {
-	hmap *data_structures.HackMap[MemtableEntry]
+	hmap *structures.HackMap[MemtableEntry]
 }
 
 func NewHashMapStore() *HashMapStore {
 	return &HashMapStore{
-		hmap: data_structures.NewHackMap[MemtableEntry](),
+		hmap: structures.NewHackMap[MemtableEntry](),
 	}
 }
 
@@ -132,7 +137,7 @@ func (s *HashMapStore) EntriesInOrder() []MemtableEntry {
 }
 
 func (s *HashMapStore) Reset() {
-	s.hmap = data_structures.NewHackMap[MemtableEntry]()
+	s.hmap = structures.NewHackMap[MemtableEntry]()
 }
 
 func (s *HashMapStore) Size() int {
@@ -159,15 +164,15 @@ func (s *HashMapStore) Iterator() iterator.Iterator[MemtableEntry] {
 // ---- RBTree store adapter ----
 
 type RBTreeStore struct {
-	tree *data_structures.RBTree[MemtableEntry]
+	tree *structures.RBTree[MemtableEntry]
 }
 
 func NewRBTreeStore(
-	cmp data_structures.Comparator[MemtableEntry],
-	cmpIgnoringTimestamp data_structures.Comparator[MemtableEntry],
+	cmp structures.Comparator[MemtableEntry],
+	cmpIgnoringSeqId structures.Comparator[MemtableEntry],
 ) *RBTreeStore {
 	return &RBTreeStore{
-		tree: data_structures.NewRBTree[MemtableEntry](cmp, cmpIgnoringTimestamp),
+		tree: structures.NewRBTree[MemtableEntry](cmp, cmpIgnoringSeqId),
 	}
 }
 
@@ -213,15 +218,15 @@ func (s *RBTreeStore) Iterator() iterator.Iterator[MemtableEntry] {
 // ---- AVLTree store adapter ----
 
 type AVLTreeStore struct {
-	tree *data_structures.AVLTree[MemtableEntry]
+	tree *structures.AVLTree[MemtableEntry]
 }
 
 func NewAVLTreeStore(
-	cmp data_structures.Comparator[MemtableEntry],
-	cmpIgnoringTimestamp data_structures.Comparator[MemtableEntry],
+	cmp structures.Comparator[MemtableEntry],
+	cmpIgnoringSeqId structures.Comparator[MemtableEntry],
 ) *AVLTreeStore {
 	return &AVLTreeStore{
-		tree: data_structures.NewAVLTree[MemtableEntry](cmp, cmpIgnoringTimestamp),
+		tree: structures.NewAVLTree[MemtableEntry](cmp, cmpIgnoringSeqId),
 	}
 }
 

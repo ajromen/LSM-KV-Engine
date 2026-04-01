@@ -14,9 +14,9 @@ import (
 // ON TESTIRA ADD I ESTIMATE FUNKCIJE
 func TestAccuracy(t *testing.T) {
 	log.SetOutput(os.Stdout)
-
-	// PRAVIMO CMS KAO NA KODU SA GITHUBA
+	conf := config.NewDefaultConfig()
 	cfg := config.CountMinSketchConfig{
+		// PRAVIMO CMS KAO NA KODU SA GITHUBA
 		Accuracy:   0.0001,
 		Confidence: 0.9999,
 		Seeds: [][]byte{
@@ -33,7 +33,9 @@ func TestAccuracy(t *testing.T) {
 		},
 	}
 
+	conf.ProbabilisticType.CountMinSketch = cfg
 	cms := NewCountMinSketch(cfg)
+	config.TESTSetSettings(conf)
 
 	// ITERIRAMO MNOGO VREDNOSTI
 	iterations := 5500
@@ -71,6 +73,8 @@ func TestAccuracy(t *testing.T) {
 
 // OVO JE BRACO BENCHMARK ZA ADD FUNKCIJU
 func BenchmarkAdd(b *testing.B) {
+	conf := config.NewDefaultConfig()
+
 	cfg := config.CountMinSketchConfig{
 		Accuracy:   0.001,
 		Confidence: 0.999,
@@ -88,7 +92,9 @@ func BenchmarkAdd(b *testing.B) {
 		},
 	}
 
+	conf.ProbabilisticType.CountMinSketch = cfg
 	cms := NewCountMinSketch(cfg)
+	config.TESTSetSettings(conf)
 
 	for i := 0; i < b.N; i++ {
 		cms.Add([]byte(strconv.Itoa(rand.Int())), uint(rand.Int()%100)) // DODAJ RANDOM VREDNOST
@@ -97,6 +103,8 @@ func BenchmarkAdd(b *testing.B) {
 
 // OVO JE BRACO BENCHMARK ZA ESTIMATE FUNKCIJU
 func BenchmarkEstimate(b *testing.B) {
+	conf := config.NewDefaultConfig()
+
 	cfg := config.CountMinSketchConfig{
 		Accuracy:   0.001,
 		Confidence: 0.999,
@@ -114,7 +122,9 @@ func BenchmarkEstimate(b *testing.B) {
 		},
 	}
 
+	conf.ProbabilisticType.CountMinSketch = cfg
 	cms := NewCountMinSketch(cfg)
+	config.TESTSetSettings(conf)
 
 	for i := 0; i < b.N; i++ {
 		cms.Estimate([]byte(strconv.Itoa(rand.Int()))) // PROCENJUJ RANDOM KEY

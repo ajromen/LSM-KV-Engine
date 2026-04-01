@@ -8,11 +8,10 @@ import (
 
 	"github.com/ajromen/LSM-KV-Engine/internal/config"
 	"github.com/ajromen/LSM-KV-Engine/internal/enums"
-	"github.com/ajromen/LSM-KV-Engine/internal/utils"
 )
 
 const (
-	FooterSize  = 137
+	FooterSize  = 94
 	MagicNumber = 0x53535442
 )
 
@@ -22,38 +21,25 @@ type SegmentHandler struct {
 }
 
 type Footer struct {
-	FilterHandler          SegmentHandler // handler for filter segment
-	IndexHandler           SegmentHandler // handler for index segment
-	SummaryHandler         SegmentHandler // handler for summary segment
-	MetaDataHandler        SegmentHandler // handler for metadatahandler
-	DictionaryHandler      SegmentHandler
-	NumDataBlocks          uint32                   // number of data blocks in sstable
-	BlockSize              uint64                   // block size in sstable
-	MinTimeStamp           utils.Uint128            // min timestamp in sstable
-	MaxTimeStamp           utils.Uint128            // max timestamp in sstable
-	MinKeyLength           uint32                   // min keylength in sstable
-	MaxKeyLength           uint32                   // max keylength in sstable
-	TotalRecords           uint64                   // number of records in sstable
-	RestartInterval        uint32                   // restart interval
-	EncodingType           byte                     // encoding type - 0 - delta encoding / 1 - dict delta encoding
-	CompressionType        enums.SSTableCompression // type of compression = 0 always
-	MergeIteratorStructure byte                     // 0 - heap / 1 - winner-tree
-	Version                byte                     // version = 1 always
-	Format                 enums.SSTableFormat      // format (0 - singlefile / 1 - multifile)
-	MagicNumber            uint32                   // SSTB in hex
-	CRC                    uint32                   // crc over the whole footer segment
+	FilterHandler     SegmentHandler      // handler for filter segment
+	IndexHandler      SegmentHandler      // handler for index segment
+	TTLIndexHandler   SegmentHandler      // handler for index segment
+	SummaryHandler    SegmentHandler      // handler for summary segment
+	MerkleHandler     SegmentHandler      // handler for merkle tree segment
+	MetaDataHandler   SegmentHandler      // handler for metadata segment
+	DictionaryHandler SegmentHandler      // handler for dictionary segment
+	Version           byte                // version = 1 always
+	Format            enums.SSTableFormat // format (0 - singlefile / 1 - multifile)
+	MagicNumber       uint32              // SSTB in hex
+	CRC               uint32              // crc over the whole footer segment
 }
 
-func NewFooter(config config.SSTableConfig) *Footer {
+func NewFooter() *Footer {
+	cfg := config.GetSettings().SSTable
 	return &Footer{
-		CompressionType:        config.DataSegment.Compression,
-		Version:                1,
-		Format:                 config.Format,
-		MagicNumber:            MagicNumber,
-		RestartInterval:        uint32(config.DataSegment.RestartInterval),
-		EncodingType:           1,
-		MergeIteratorStructure: 1,
-		BlockSize:              uint64(config.DataSegment.BlockSize),
+		Version:     1,
+		Format:      cfg.Format,
+		MagicNumber: MagicNumber,
 	}
 }
 
@@ -73,9 +59,19 @@ func (f *Footer) Encode() []byte {
 	binary.LittleEndian.PutUint32(buf[pos:], f.IndexHandler.Size)
 	pos += 4
 
+	binary.LittleEndian.PutUint64(buf[pos:], f.TTLIndexHandler.Offset)
+	pos += 8
+	binary.LittleEndian.PutUint32(buf[pos:], f.TTLIndexHandler.Size)
+	pos += 4
+
 	binary.LittleEndian.PutUint64(buf[pos:], f.SummaryHandler.Offset)
 	pos += 8
 	binary.LittleEndian.PutUint32(buf[pos:], f.SummaryHandler.Size)
+	pos += 4
+
+	binary.LittleEndian.PutUint64(buf[pos:], f.MerkleHandler.Offset)
+	pos += 8
+	binary.LittleEndian.PutUint32(buf[pos:], f.MerkleHandler.Size)
 	pos += 4
 
 	binary.LittleEndian.PutUint64(buf[pos:], f.MetaDataHandler.Offset)
@@ -88,36 +84,6 @@ func (f *Footer) Encode() []byte {
 	binary.LittleEndian.PutUint32(buf[pos:], f.DictionaryHandler.Size)
 	pos += 4
 
-	binary.LittleEndian.PutUint64(buf[pos:], f.BlockSize)
-	pos += 8
-	binary.LittleEndian.PutUint32(buf[pos:], f.NumDataBlocks)
-	pos += 4
-
-	binary.LittleEndian.PutUint64(buf[pos:], f.MinTimeStamp.Low)
-	binary.LittleEndian.PutUint64(buf[pos+8:], f.MinTimeStamp.High)
-	pos += 16
-
-	binary.LittleEndian.PutUint64(buf[pos:], f.MaxTimeStamp.Low)
-	binary.LittleEndian.PutUint64(buf[pos+8:], f.MaxTimeStamp.High)
-	pos += 16
-
-	binary.LittleEndian.PutUint32(buf[pos:], f.MinKeyLength)
-	pos += 4
-	binary.LittleEndian.PutUint32(buf[pos:], f.MaxKeyLength)
-	pos += 4
-
-	binary.LittleEndian.PutUint64(buf[pos:], f.TotalRecords)
-	pos += 8
-
-	binary.LittleEndian.PutUint32(buf[pos:], f.RestartInterval)
-	pos += 4
-
-	buf[pos] = f.EncodingType
-	pos++
-	buf[pos] = byte(f.CompressionType)
-	pos++
-	buf[pos] = f.MergeIteratorStructure
-	pos++
 	buf[pos] = f.Version
 	pos++
 	buf[pos] = byte(f.Format)
@@ -151,9 +117,19 @@ func (f *Footer) Decode(buf []byte) error {
 	f.IndexHandler.Size = binary.LittleEndian.Uint32(buf[pos:])
 	pos += 4
 
+	f.TTLIndexHandler.Offset = binary.LittleEndian.Uint64(buf[pos:])
+	pos += 8
+	f.TTLIndexHandler.Size = binary.LittleEndian.Uint32(buf[pos:])
+	pos += 4
+
 	f.SummaryHandler.Offset = binary.LittleEndian.Uint64(buf[pos:])
 	pos += 8
 	f.SummaryHandler.Size = binary.LittleEndian.Uint32(buf[pos:])
+	pos += 4
+
+	f.MerkleHandler.Offset = binary.LittleEndian.Uint64(buf[pos:])
+	pos += 8
+	f.MerkleHandler.Size = binary.LittleEndian.Uint32(buf[pos:])
 	pos += 4
 
 	f.MetaDataHandler.Offset = binary.LittleEndian.Uint64(buf[pos:])
@@ -166,36 +142,6 @@ func (f *Footer) Decode(buf []byte) error {
 	f.DictionaryHandler.Size = binary.LittleEndian.Uint32(buf[pos:])
 	pos += 4
 
-	f.BlockSize = binary.LittleEndian.Uint64(buf[pos:])
-	pos += 8
-	f.NumDataBlocks = binary.LittleEndian.Uint32(buf[pos:])
-	pos += 4
-
-	f.MinTimeStamp.Low = binary.LittleEndian.Uint64(buf[pos:])
-	f.MinTimeStamp.High = binary.LittleEndian.Uint64(buf[pos+8:])
-	pos += 16
-
-	f.MaxTimeStamp.Low = binary.LittleEndian.Uint64(buf[pos:])
-	f.MaxTimeStamp.High = binary.LittleEndian.Uint64(buf[pos+8:])
-	pos += 16
-
-	f.MinKeyLength = binary.LittleEndian.Uint32(buf[pos:])
-	pos += 4
-	f.MaxKeyLength = binary.LittleEndian.Uint32(buf[pos:])
-	pos += 4
-
-	f.TotalRecords = binary.LittleEndian.Uint64(buf[pos:])
-	pos += 8
-
-	f.RestartInterval = binary.LittleEndian.Uint32(buf[pos:])
-	pos += 4
-
-	f.EncodingType = buf[pos]
-	pos++
-	f.CompressionType = enums.SSTableCompression(buf[pos])
-	pos++
-	f.MergeIteratorStructure = buf[pos]
-	pos++
 	f.Version = buf[pos]
 	pos++
 	f.Format = enums.SSTableFormat(buf[pos])

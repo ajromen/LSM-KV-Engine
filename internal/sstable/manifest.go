@@ -23,6 +23,7 @@ type SSTableManifest struct {
 type Manifest struct {
 	FileDir       string                    `json:"file_dir"`
 	NextSStableId int                       `json:"next_stable_id"`
+	MaxSeqId      uint64                    `json:"max_seq_id"`
 	Layers        map[int][]SSTableManifest `json:"layers"`
 }
 
@@ -46,23 +47,36 @@ func NewManifest(fileDir string) (*Manifest, error) {
 	return manifest, nil
 }
 
+// reconstructs manifest if deleted
 func (m *Manifest) reconstruct(fileDir string) error {
 	files, err := os.ReadDir(fileDir)
 	if err != nil {
 		return err
 	}
-	sstableFiles := make(map[string]enums.SSTableFormat)
+
+	type FormatLayer struct {
+		format enums.SSTableFormat
+		layer  uint64
+	}
+
+	sstableFiles := make(map[string]FormatLayer)
 	for _, file := range files {
 		if !file.IsDir() {
 			name := file.Name()
 			// Single-file: 000000.sst
 			if filepath.Ext(name) == SSTableFileExtension && !strings.Contains(strings.TrimSuffix(name, SSTableFileExtension), ".") {
-				sstableFiles[filepath.Join(fileDir, name)] = enums.FormatSingleFile
+				fl := FormatLayer{
+					format: enums.FormatSingleFile,
+				}
+				sstableFiles[filepath.Join(fileDir, name)] = fl
 			}
 			// Multi-file: 000000.sst.data -> add 000000.sst to list
 			if strings.HasSuffix(name, SSTableFileExtension+string(DataSegmentExtension)) {
 				basePath := filepath.Join(fileDir, strings.TrimSuffix(name, string(DataSegmentExtension)))
-				sstableFiles[basePath] = enums.FormatMultiFile
+				fl := FormatLayer{
+					format: enums.FormatMultiFile,
+				}
+				sstableFiles[basePath] = fl
 			}
 		}
 	}
@@ -71,26 +85,29 @@ func (m *Manifest) reconstruct(fileDir string) error {
 		sortedFiles = append(sortedFiles, file)
 	}
 	sort.Strings(sortedFiles)
+	var layer int
+	var ext string
 	for _, filePath := range sortedFiles {
 		var id int
-		_, err := fmt.Sscanf(filepath.Base(filePath), "%d%s", &id, SSTableFileExtension)
+		_, err := fmt.Sscanf(filepath.Base(filePath), "L%d_%d%s", &layer, &id, &ext)
 		if err != nil {
-			return err
+			fmt.Printf("Failed to load sstable %s continuing", filePath)
+			continue
 		}
 		if id >= m.NextSStableId {
 			m.NextSStableId = id + 1
 		}
 		sst := SSTableManifest{
-			Layer:        0,
-			BaseFileName: filepath.Base(filePath),
-			Format:       sstableFiles[filePath],
+			Layer:        uint64(layer),
+			BaseFileName: filePath,
+			Format:       sstableFiles[filePath].format,
 			Id:           id,
 		}
-		m.Layers[0] = append(m.Layers[0], sst)
+		m.Layers[layer] = append(m.Layers[layer], sst)
 	}
 	err = m.Save()
 	if err != nil {
-		return fmt.Errorf("failed to save manifest: %w", err)
+		return fmt.Errorf("failed to save Manifest: %w", err)
 	}
 	return nil
 }

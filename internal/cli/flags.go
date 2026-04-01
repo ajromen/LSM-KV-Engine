@@ -9,37 +9,43 @@ type FLags struct {
 	ConfigPath             *string
 	Debug                  *bool
 	MemtableMaxSize        *int
-	MemtableMaxSizeKb      *uint64
+	MemtableMaxSizeB       *uint64
 	MemtableType           *string
 	Instances              *int
 	SSTableFormat          *string
 	BlockCacheMaxBlocks    *int
 	LSMCompactionAlgorithm *string
+	TTLInMemoryTTL         *bool
+	TTLRefreshRate         *uint64
 }
 
 func ParseFlags() *FLags {
 	var configPathOpt OptionalString
 	var debugOpt OptionalBool
 	var mtMaxSizeOpt OptionalInt
-	var mtMaxSizeKbOpt OptionalUInt64
+	var mtMaxSizeBOpt OptionalUInt64
 	var instancesOpt OptionalInt
 	var mtTypeOpt OptionalString
 	var sstFormatOpt OptionalString
 	var BlockCacheMaxBlocksOpt OptionalInt
 	var LSMCompactionAlgorithmOpt OptionalString
+	var TTLInMemoryTTLOpt OptionalBool
+	var TTLRefreshRateOpt OptionalUInt64
 
 	flagString(&configPathOpt, "config", "Path to config file")
 	flagString(&configPathOpt, "c", "Path to config file")
 
 	flagBool(&debugOpt, "debug", "Debug mode")
 	flagBool(&debugOpt, "d", "Debug mode")
-	flagInt(&mtMaxSizeOpt, "memtable-max-size", "Max memtable size in bytes")
-	flagUint64(&mtMaxSizeKbOpt, "memtable-max-size-kb", "Max memtable size in kb")
+	flagInt(&mtMaxSizeOpt, "memtable-max-size", "Max memtable size in number of entries")
+	flagUint64(&mtMaxSizeBOpt, "memtable-max-size-b", "Max memtable size in bytes")
 	flagInt(&instancesOpt, "instances", "Number of memtable instances")
 	flagString(&mtTypeOpt, "memtable-type", "hashmap, skiplist, btree, rbtree, avltree")
 	flagString(&sstFormatOpt, "sst-format", "sst format (single-file / multi-file)")
 	flagInt(&BlockCacheMaxBlocksOpt, "block-cache-max-blocks", "Max number of blocks in the block cache")
 	flagString(&LSMCompactionAlgorithmOpt, "lsm-compaction", "LSM compaction algorithm: size-tiered, leveled")
+	flagBool(&TTLInMemoryTTLOpt, "ttl-in-memory", "Keep {Key,TTL} in memory and allow expiry notifications")
+	flagUint64(&TTLRefreshRateOpt, "ttl-refresh-rate", "Timer in ms for checking expiring keys (Works only if ttl-in-memory=true")
 
 	flag.Parse()
 
@@ -47,11 +53,13 @@ func ParseFlags() *FLags {
 		ConfigPath:             configPathOpt.Get(),
 		Debug:                  debugOpt.Get(),
 		MemtableMaxSize:        mtMaxSizeOpt.Get(),
-		MemtableMaxSizeKb:      mtMaxSizeKbOpt.Get(),
+		MemtableMaxSizeB:       mtMaxSizeBOpt.Get(),
 		MemtableType:           mtTypeOpt.Get(),
 		Instances:              instancesOpt.Get(),
 		SSTableFormat:          sstFormatOpt.Get(),
 		LSMCompactionAlgorithm: LSMCompactionAlgorithmOpt.Get(),
+		TTLInMemoryTTL:         TTLInMemoryTTLOpt.Get(),
+		TTLRefreshRate:         TTLRefreshRateOpt.Get(),
 	}
 }
 

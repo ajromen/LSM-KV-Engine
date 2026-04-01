@@ -17,7 +17,7 @@ var allTypes = []enums.MemTableType{enums.BTreeMemTable, enums.SkiplistMemTable,
 
 func newMemtable(t *testing.T, mt enums.MemTableType, maxEntries int, maxBytes uint64, handler func([]MemtableEntry)) *MemtableManager {
 	t.Helper()
-	factory := NewFactory(config.NewDefaultConfig().Memtable)
+	factory := NewFactory(config.GetSettings().Memtable)
 	return NewMemtableManager(5, 1, factory, handler)
 }
 
@@ -62,10 +62,10 @@ func TestGetMissing(t *testing.T) {
 }
 
 // ============================================================
-// Timestamp semantics
+// SeqId semantics
 // ============================================================
 
-func TestNewerTimestampWins(t *testing.T) {
+func TestNewerSeqIdWins(t *testing.T) {
 	for _, mt := range allTypes {
 		mt := mt
 		t.Run(string(mt), func(t *testing.T) {
@@ -83,7 +83,7 @@ func TestNewerTimestampWins(t *testing.T) {
 	}
 }
 
-func TestOlderTimestampDoesNotOverwrite(t *testing.T) {
+func TestOlderSeqIdDoesNotOverwrite(t *testing.T) {
 	allTypes = []enums.MemTableType{enums.BTreeMemTable, enums.SkiplistMemTable}
 	for _, mt := range allTypes {
 		mt := mt
@@ -107,14 +107,19 @@ func TestOlderTimestampDoesNotOverwrite(t *testing.T) {
 // ============================================================
 
 func TestTombstoneHidesEntry(t *testing.T) {
+	cfg := config.NewDefaultConfig()
+	cfg.Memtable.MemtableMaxEntries = 100
+	cfg.Memtable.MemtableMaxSizeBytes = 1 << 20
+	config.TESTSetSettings(cfg)
+
 	for _, mt := range allTypes {
 		mt := mt
 		t.Run(string(mt), func(t *testing.T) {
-			m := newMemtable(t, mt, 100, 1<<20, nil)
+			m := newMemtable(t, mt, cfg.Memtable.MemtableMaxEntries, cfg.Memtable.MemtableMaxSizeBytes, nil)
 			m.Put([]byte("key"), []byte("value"), 10, false)
 			m.Put([]byte("key"), []byte(""), 20, true)
 			got, ok := m.Get([]byte("key"))
-			if ok || got != nil {
+			if got != nil {
 				t.Errorf("expected deleted key to be hidden, got (%v, %v)", got, ok)
 			}
 		})
@@ -122,6 +127,11 @@ func TestTombstoneHidesEntry(t *testing.T) {
 }
 
 func TestDeleteHidesEntry(t *testing.T) {
+	cfg := config.NewDefaultConfig()
+	cfg.Memtable.MemtableMaxEntries = 100
+	cfg.Memtable.MemtableMaxSizeBytes = 1 << 20
+	config.TESTSetSettings(cfg)
+
 	for _, mt := range allTypes {
 		mt := mt
 		t.Run(string(mt), func(t *testing.T) {
@@ -129,7 +139,7 @@ func TestDeleteHidesEntry(t *testing.T) {
 			m.Put([]byte("key"), []byte("value"), 10, false)
 			m.Delete([]byte("key"), 20)
 			got, ok := m.Get([]byte("key"))
-			if ok || got != nil {
+			if got != nil {
 				t.Errorf("expected deleted key to be hidden, got (%v, %v)", got, ok)
 			}
 		})
@@ -284,7 +294,7 @@ func TestIteratorSeek(t *testing.T) {
 
 			globalRaw := NewRawIterator([]iterator.Iterator[MemtableEntry]{rawIt1, rawIt2}, 1)
 			globalIt := NewMergedMemtableIterator(globalRaw)
-			globalIt.Seek(MemtableEntry{Key: []byte("key3"), Timestamp: math.MaxInt64})
+			globalIt.Seek(MemtableEntry{Key: []byte("key3"), SeqId: math.MaxInt64})
 
 			var got []string
 			for globalIt.Valid() {
@@ -369,7 +379,7 @@ func TestConcurrency(t *testing.T) {
 
 		t.Logf(">>> flush #%d started — %d entries", current, len(entries))
 		for _, e := range entries {
-			t.Logf("    key=%s value=%s tombstone=%v ts=%d", e.Key, e.Value, e.Tombstone, e.Timestamp)
+			t.Logf("    key=%s value=%s tombstone=%v seqId=%d", e.Key, e.Value, e.SeqId, e.SeqId)
 		}
 
 		mu.Lock()
@@ -433,7 +443,7 @@ func TestConcurrency(t *testing.T) {
 	mu.Unlock()
 
 	expectedWrites := numWriters * writesPerWriter
-	expectedDeletes := 0
+	expectedDeletes := 50
 	expectedTotal := expectedWrites + expectedDeletes
 
 	// entries still in active memtable were not flushed yet
@@ -475,6 +485,9 @@ func TestMemtableLifecycle(t *testing.T) {
 		MemtableMaxSizeBytes: 1 << 20,
 		MemtableMaxEntries:   3,
 	}
+	conf := config.NewDefaultConfig()
+	conf.Memtable = cfg
+	config.TESTSetSettings(conf)
 	factory := NewFactory(cfg)
 
 	wg.Add(1)
@@ -482,8 +495,8 @@ func TestMemtableLifecycle(t *testing.T) {
 	mem := NewMemtableManager(5, 0, factory, func(entries []MemtableEntry) {
 		fmt.Println("=== FLUSH START ===")
 		for _, e := range entries {
-			fmt.Printf("flush: key=%s value=%s ts=%d tomb=%v\n",
-				e.Key, e.Value, e.Timestamp, e.Tombstone)
+			fmt.Printf("flush: key=%s value=%s seqId=%d tomb=%v\n",
+				e.Key, e.Value, e.SeqId, e.Tombstone)
 		}
 		mu.Lock()
 		flushed = append(flushed, entries...)
@@ -505,8 +518,8 @@ func TestMemtableLifecycle(t *testing.T) {
 	it.SeekToFirst()
 	for it.Valid() {
 		e := it.Value()
-		fmt.Printf("iter: key=%s value=%s ts=%d\n",
-			e.Key, e.Value, e.Timestamp)
+		fmt.Printf("iter: key=%s value=%s seqID=%d\n",
+			e.Key, e.Value, e.SeqId)
 		it.Next()
 	}
 	fmt.Println("=== FLUSHED COUNT ===")

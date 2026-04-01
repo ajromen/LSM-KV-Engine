@@ -13,29 +13,37 @@ import (
 	"os"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/block"
-	"github.com/ajromen/LSM-KV-Engine/internal/config"
 	"github.com/ajromen/LSM-KV-Engine/internal/encoders"
 	"github.com/ajromen/LSM-KV-Engine/internal/enums"
+	"github.com/ajromen/LSM-KV-Engine/internal/shared"
 )
 
 // SSTableReader allows reading an SSTable file, accesing singular records and validating data integrity
 type SSTableReader struct {
-	filePath       string              // file path of given sstable file (base path if multi file format)
-	Id             int                 // SSTable segment id
-	Layer          int                 // number of the lsm layer
-	SizeBytes      int64               //file size in bytes
-	storage        SegmentStorage      // low-level reading of segments
-	blockManager   *block.BlockManager // reading and decoding data blocks
-	footer         *Footer             // footer of given sstable
-	SummarySegment *SummarySegment     // summary segment (read into RAM)
-	filterSegment  *FilterSegment      // filter segment (read into RAM)
-	merkleTree     *MerkleTree         // merkle tree - metadata segment (read into RAM)
-	config         *config.Config      // config for given sstable
-	valueDecoder   *encoders.AdaptiveEncoder
+	filePath        string              // file path of given sstable file (base path if multi file format)
+	Id              int                 // SSTable segment id
+	Layer           int                 // number of the lsm layer
+	SizeBytes       int64               //file size in bytes
+	storage         SegmentStorage      // low-level reading of segments
+	blockManager    *block.BlockManager // reading and decoding data blocks
+	footer          *Footer             // footer of given sstable
+	Metadata        *Metadata
+	SummarySegment  *SummarySegment  // summary segment (read into RAM)
+	filterSegment   *FilterSegment   // filter segment (read into RAM)
+	merkleTree      *MerkleTree      // merkle tree - metadata segment (read into RAM)
+	TTLIndexSegment *TTLIndexSegment // read once
+	valueDecoder    *encoders.AdaptiveEncoder
+}
+
+type ReaderOptions struct {
+	id       int
+	filePath string
+	format   enums.SSTableFormat
+	layer    int
 }
 
 // opens an SSTable file and loads all necessary segments into RAM
-func NewSSTableReader(id int, filePath string, format enums.SSTableFormat, cfg *config.Config, layer int) (*SSTableReader, error) {
+func NewSSTableReader(id int, filePath string, format enums.SSTableFormat, layer int) (*SSTableReader, error) {
 	var storage SegmentStorage
 	var err error
 	switch format {
@@ -78,39 +86,74 @@ func NewSSTableReader(id int, filePath string, format enums.SSTableFormat, cfg *
 	if err := footer.Validate(); err != nil {
 		return nil, err
 	}
-	blockManager := block.NewBlockManager(int(footer.BlockSize), cfg.BlockManager.BlockCacheMaxBlocks)
+	metaDataData, err := storage.ReadSegment(enums.SegmentMetadata, footer.MetaDataHandler.Offset, footer.MetaDataHandler.Size)
+	if err != nil {
+		return nil, err
+	}
+	meta, err := Decode(metaDataData)
+	if err != nil {
+		return nil, err
+	}
+	blockSize, _ := meta.GetUint64(FieldBlockSize)
+	blockManager := block.NewBlockManager(int(blockSize))
 	storage.SetBlockManager(blockManager)
 	// initialize reader
 	reader := &SSTableReader{
-		storage:      storage,
-		blockManager: blockManager,
-		filePath:     filePath,
-		footer:       footer,
-		config:       cfg,
-		Layer:        layer,
-		Id:           id,
-		SizeBytes:    fileSize,
-	}
-	// load summary into RAM
-	if err := reader.loadSummary(); err != nil {
-		return nil, err
+		storage:         storage,
+		blockManager:    blockManager,
+		filePath:        filePath,
+		footer:          footer,
+		Layer:           layer,
+		Metadata:        meta,
+		Id:              id,
+		SizeBytes:       fileSize,
+		TTLIndexSegment: NewTTLIndexSegment(blockSize),
 	}
 	// load filter into RAM
 	if err := reader.loadFilter(); err != nil {
 		reader.filterSegment = nil
 	}
-
-	// load merkle tree into RAM
-	if err := reader.loadMerkleTree(); err != nil {
-		return nil, err
-	}
-
-	// load dictionary
 	if err := reader.loadDictionary(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to load dictionary: %w", err)
+	}
+	return reader, nil
+}
+
+// NewSSTableReaderFromWriter make sure writer finalize has been run before
+func NewSSTableReaderFromWriter(w *SSTableWriter, id int) (*SSTableReader, error) {
+	if err := w.storage.Restart(); err != nil {
+		return nil, fmt.Errorf("failed to restart storage: %w", err)
 	}
 
-	return reader, nil
+	r := &SSTableReader{
+		storage:        w.storage,
+		Layer:          w.Layer,
+		filePath:       w.filePath,
+		blockManager:   w.blockManager,
+		merkleTree:     w.merkleTree,
+		filterSegment:  w.filterSegment,
+		footer:         w.footer,
+		SummarySegment: w.summarySegment,
+		valueDecoder:   w.valueEncoder, // TODO check encoder is decoder
+		Metadata:       w.metadataSegment,
+		Id:             id,
+	}
+	switch s := r.storage.(type) {
+	case *SingleFileStorage:
+		info, err := s.File().Stat()
+		if err != nil {
+			return nil, fmt.Errorf("single storage failed to stat file: %w", err)
+		}
+		r.SizeBytes = info.Size()
+	case *MultiFileStorage:
+		info, err := os.Stat(r.filePath + string(DataSegmentExtension))
+		if err != nil {
+			return nil, fmt.Errorf("multi storage failed to stat file: %w", err)
+		}
+		r.SizeBytes = info.Size()
+	}
+
+	return r, nil
 }
 
 // loadSummary reads and decodes summary segment, which maps key ranges into index blocks
@@ -125,6 +168,26 @@ func (r *SSTableReader) loadSummary() error {
 	}
 	r.SummarySegment = summary
 	return nil
+}
+
+func (r *SSTableReader) GetTTLEntries() ([]shared.TTLEntry, error) {
+	entries := make([]shared.TTLEntry, 0)
+
+	blockSize := uint64(r.blockManager.BlockSize())
+
+	for off := uint64(0); uint32(off) < r.footer.TTLIndexHandler.Size; off += blockSize { // ovo je pakao sta je ovo sto se ni jedan int ne poklapa
+		buf, err := r.storage.ReadSegment(enums.SegmentTTLIndex, 0, uint32(blockSize))
+		if err != nil {
+			return nil, err
+		}
+		b, err := DecodeTTLIndexBlock(buf)
+		if err != nil {
+			return nil, err
+		}
+		entries = append(b.Entries)
+	}
+
+	return entries, nil
 }
 
 // loadFilter reads and decodes the filter segment -> filter allows quickly checking whether a key exists or nott
@@ -146,7 +209,7 @@ func (r *SSTableReader) loadFilter() error {
 
 // loadMerkleTree reads and decodes the Merkle tree for data integrity verification
 func (r *SSTableReader) loadMerkleTree() error {
-	data, err := r.storage.ReadSegment(enums.SegmentMetadata, r.footer.MetaDataHandler.Offset, r.footer.MetaDataHandler.Size)
+	data, err := r.storage.ReadSegment(enums.SegmentMerkleTree, r.footer.MerkleHandler.Offset, r.footer.MerkleHandler.Size)
 	if err != nil {
 		return err
 	}
@@ -162,7 +225,7 @@ func (r *SSTableReader) loadMerkleTree() error {
 // loadIndexBlock reads a specific index block from index segment -> NEEDS TO BE FIXED!
 func (r *SSTableReader) loadIndexBlock(blockNumber int) (*IndexBlock, error) {
 
-	indexBlockSize := r.config.SSTable.IndexSegment.IndexBlockSize
+	indexBlockSize := r.blockManager.BlockSize()
 
 	offset := r.footer.IndexHandler.Offset +
 		uint64(blockNumber)*uint64(indexBlockSize)
@@ -218,6 +281,24 @@ func (r *SSTableReader) Get(key []byte) (*Record, error) {
 		}
 	}
 
+	// check whether the key is in given range of sstable keys
+	minKey := r.Metadata.GetBytes(FieldMinKey)
+	maxKey := r.Metadata.GetBytes(FieldMaxKey)
+	if bytes.Compare(minKey, key) > 0 || bytes.Compare(maxKey, key) < 0 {
+		return nil, nil
+	}
+
+	// load merkle tree, dictionary and summary segment into ram
+	if err := r.loadSummary(); err != nil {
+		return nil, err
+	}
+	if err := r.loadMerkleTree(); err != nil {
+		return nil, err
+	}
+	if err := r.loadDictionary(); err != nil {
+		return nil, err
+	}
+
 	// step 2
 	indexBlockNum := r.SummarySegment.FindIndexBlockNumber(key)
 	if indexBlockNum < 0 {
@@ -250,14 +331,18 @@ func (r *SSTableReader) Get(key []byte) (*Record, error) {
 	if err != nil {
 		return nil, err
 	}
+	if validated := r.merkleTree.ValidateBlock(dataBlockIdx, blockData); !validated {
+		return nil, errors.New("sstable data corruption detected (merkle root mismatch)")
+	}
 
 	// step 5
-	iterator, err := NewDataBlockIteratorRaw(blockData, int(r.footer.RestartInterval), r.footer.EncodingType, r.valueDecoder)
+	restartInterval, _ := r.Metadata.GetUint64(FieldRestartInterval)
+
+	iterator, err := NewDataBlockIteratorRaw(blockData, int(restartInterval), encoders.PrefixCompression, r.valueDecoder)
 	if err != nil {
 		return nil, err
 	}
 	iterator.Seek(Record{Key: key})
-
 	if !iterator.Valid() {
 		return nil, nil
 	}
@@ -266,7 +351,7 @@ func (r *SSTableReader) Get(key []byte) (*Record, error) {
 		return nil, nil
 	}
 	return &Record{
-		Timestamp: rec.Timestamp,
+		SeqId:     rec.SeqId,
 		Tombstone: rec.Tombstone,
 		Key:       rec.Key,
 		Value:     rec.Value,

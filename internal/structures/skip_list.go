@@ -1,4 +1,4 @@
-package data_structures
+package structures
 
 import (
 	"errors"
@@ -159,13 +159,14 @@ func (sl *SkipList[T]) Search(entry T) (T, bool) {
 }
 
 func (sl *SkipList[T]) EntriesInOrder() []T {
-	entries := make([]T, 0, sl.size)
-	current := sl.header.next[0]
-	for current != nil {
-		entries = append(entries, current.entry)
-		current = current.next[0]
+	it := sl.Iterator()
+	it.SeekToFirst()
+	result := make([]T, 0, sl.size)
+	for it.Valid() {
+		result = append(result, it.Value())
+		it.Next()
 	}
-	return entries
+	return result
 }
 
 func (sl *SkipList[T]) Reset() {

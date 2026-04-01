@@ -1,4 +1,4 @@
-package data_structures
+package structures
 
 import "strings"
 
@@ -10,9 +10,9 @@ type AVLTreeNode[T any] struct {
 }
 
 type AVLTree[T any] struct {
-	root                 *AVLTreeNode[T]
-	cmp                  Comparator[T]
-	cmpIgnoringTimestamp Comparator[T]
+	root             *AVLTreeNode[T]
+	cmp              Comparator[T]
+	cmpIgnoringSeqId Comparator[T]
 }
 
 type avlStackEntry[T any] struct {
@@ -35,11 +35,11 @@ func NewAVLTreeNode[T any](key T) *AVLTreeNode[T] {
 	}
 }
 
-func NewAVLTree[T any](cmp Comparator[T], cmpIgnoringTimestamp Comparator[T]) *AVLTree[T] {
+func NewAVLTree[T any](cmp Comparator[T], cmpIgnoringSeqId Comparator[T]) *AVLTree[T] {
 	return &AVLTree[T]{
-		root:                 nil,
-		cmp:                  cmp,
-		cmpIgnoringTimestamp: cmpIgnoringTimestamp,
+		root:             nil,
+		cmp:              cmp,
+		cmpIgnoringSeqId: cmpIgnoringSeqId,
 	}
 }
 
@@ -124,7 +124,7 @@ func (t *AVLTree[T]) LowerBound(key T) *AVLTreeNode[T] {
 	node := t.root
 	var candidate *AVLTreeNode[T]
 	for node != nil {
-		if t.cmp(node.Key, key) >= 0 {
+		if t.cmpIgnoringSeqId(node.Key, key) >= 0 {
 			candidate = node
 			node = node.left
 		} else {
@@ -203,8 +203,13 @@ func (t *AVLTree[T]) Delete(key T) {
 }
 
 func (t *AVLTree[T]) EntriesInOrder() []T {
-	result := make([]T, 0)
-	t.inOrderHelper(t.root, &result)
+	it := t.Iterator()
+	it.SeekToFirst()
+	var result []T
+	for it.Valid() {
+		result = append(result, it.Key())
+		it.Next()
+	}
 	return result
 }
 
@@ -316,7 +321,7 @@ func (it *AVLTreeIterator[T]) Seek(key T) {
 	it.current = nil
 	node := it.tree.root
 	for node != nil {
-		cmp := it.tree.cmpIgnoringTimestamp(node.Key, key)
+		cmp := it.tree.cmpIgnoringSeqId(node.Key, key)
 		if cmp >= 0 {
 			if node.left != nil {
 				it.stackOfParents.Push(avlStackEntry[T]{node, true})

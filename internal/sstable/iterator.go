@@ -5,8 +5,9 @@ import (
 	"os"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/block"
-	"github.com/ajromen/LSM-KV-Engine/internal/data_structures"
+	"github.com/ajromen/LSM-KV-Engine/internal/encoders"
 	"github.com/ajromen/LSM-KV-Engine/internal/iterator"
+	"github.com/ajromen/LSM-KV-Engine/internal/structures"
 )
 
 // sstableBlockSource provides block-level acces to an SSTable
@@ -21,9 +22,10 @@ type sstableBlockSource struct {
 
 // newSSTableBlockSource constructs a block source from an SSTableReader
 func newSSTableBlockSource(reader *SSTableReader) *sstableBlockSource {
+	numdb, _ := reader.Metadata.GetUint64(FieldNumDataBlocks)
 	return &sstableBlockSource{
 		reader:     reader,
-		numBlocks:  int(reader.footer.NumDataBlocks),
+		numBlocks:  int(numdb),
 		blockSize:  reader.blockManager.BlockSize(),
 		blockCache: make(map[int][]byte),
 	}
@@ -42,7 +44,7 @@ func (s *sstableBlockSource) loadBlock(n int) ([]byte, error) {
 		FilePath: dataFilePath,
 		Offset:   uint32(n),
 	}
-	data, err := s.reader.blockManager.Read(key)
+	data, err := s.reader.blockManager.ReadNoCache(key)
 	if err != nil {
 		return nil, err
 	}
@@ -56,7 +58,8 @@ func (s *sstableBlockSource) blockIteratorRaw(n int) (*DataBlockIteratorRaw, err
 	if err != nil {
 		return nil, err
 	}
-	return NewDataBlockIteratorRaw(data, int(s.reader.footer.RestartInterval), s.reader.footer.EncodingType, s.reader.valueDecoder)
+	ri, _ := s.reader.Metadata.GetUint64(FieldRestartInterval)
+	return NewDataBlockIteratorRaw(data, int(ri), encoders.PrefixCompression, s.reader.valueDecoder)
 }
 
 // SSTableIteratorRaw iterates over all records in an SSTable at raw level
@@ -307,7 +310,7 @@ func (it *SSTableIterator) Value() Record { return *it.current }
 // SSTableMergeIteratorRaw merges multiple SSTableIteratorRaw instances using a merge structure
 // it produces records in sorted order across all SSTables
 type SSTableMergeIteratorRaw struct {
-	structure data_structures.MergeStructure[Record]
+	structure structures.MergeStructure[Record]
 	current   *Record
 	valid     bool
 }
@@ -328,7 +331,7 @@ func NewSSTableMergeIteratorRaw(readers []*SSTableReader, mergeStructure byte) (
 	if len(wrapped) == 0 {
 		return &SSTableMergeIteratorRaw{valid: false}, nil
 	}
-	structure := data_structures.NewMergeStructure(mergeStructure, wrapped, recordComparator)
+	structure := structures.NewMergeStructure(mergeStructure, wrapped, recordComparator)
 	m := &SSTableMergeIteratorRaw{structure: structure}
 	m.syncFromWinner()
 	return m, nil

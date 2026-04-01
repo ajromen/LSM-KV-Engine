@@ -45,6 +45,10 @@ func TestBloomFilter_CalculateMAndK(t *testing.T) {
 
 func TestBloomFilter_AddMightContainAndClear(t *testing.T) {
 	cfg := config.BloomFilterConfig{FalsePositiveRate: 0.01}
+	conf := config.NewDefaultConfig()
+	conf.ProbabilisticType.BloomFilter = cfg
+	config.TESTSetSettings(conf)
+
 	expectedN := uint(1000)
 	p := float64(cfg.FalsePositiveRate)
 

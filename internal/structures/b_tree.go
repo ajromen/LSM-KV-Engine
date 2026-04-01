@@ -1,4 +1,4 @@
-package data_structures
+package structures
 
 import (
 	"strings"
@@ -301,8 +301,13 @@ func (btn *BTreeNode[T]) merge(i int) {
 }
 
 func (bt *BTree[T]) EntriesInOrder() []T {
-	result := make([]T, 0, bt.size)
-	bt.root.inOrder(&result)
+	it := bt.Iterator()
+	it.SeekToFirst()
+	var result []T
+	for it.Valid() {
+		result = append(result, it.Value())
+		it.Next()
+	}
 	return result
 }
 

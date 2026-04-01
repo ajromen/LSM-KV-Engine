@@ -9,38 +9,41 @@ import (
 	"github.com/ajromen/LSM-KV-Engine/internal/encoders"
 	"github.com/ajromen/LSM-KV-Engine/internal/enums"
 	"github.com/ajromen/LSM-KV-Engine/internal/probabilistics"
-	"github.com/ajromen/LSM-KV-Engine/internal/utils"
+	"github.com/ajromen/LSM-KV-Engine/internal/shared"
 )
 
 const SSTableFileExtension = ".sst"
 
 // SSTableWriter allows writing records into sstable
 type SSTableWriter struct {
-	storage           SegmentStorage       // low-level writing of segments
-	blockManager      *block.BlockManager  // writing and encoding data blocks
-	config            config.SSTableConfig // system SSTable configuration
-	filePath          string               // file path where sstable is written (base path if multi file format)
-	dataBlockBuilder  *DataBlockBuilder    // data block builder for building data block from records being written into sstable
-	indexSegment      *IndexSegment        // index segment of sstable : references data blocks
+	storage           SegmentStorage      // low-level writing of segments
+	blockManager      *block.BlockManager // writing and encoding data blocks
+	filePath          string              // file path where sstable is written (base path if multi file format)
+	dataBlockBuilder  *DataBlockBuilder   // data block builder for building data block from records being written into sstable
+	indexSegment      *IndexSegment       // index segment of sstable : references data blocks
+	ttlIndexSegment   *TTLIndexSegment    // ttl index segment of sstable : contains keys and their ttl
 	currentIndexBlock *IndexBlock
 	valueEncoder      *encoders.AdaptiveEncoder
 	summarySegment    *SummarySegment // summary segment of sstable : references index blocks
 	filterSegment     *FilterSegment  // filter segment of sstable
 	merkleTree        *MerkleTree     // merkle tree of sstable
+	metadataSegment   *Metadata       // meta data of sstable
 	footer            *Footer         // footer of sstable
 	currentBlockIndex uint32          // tracks current data block index
 	recordCount       uint64          // tracks number of records
-	minTimestamp      utils.Uint128   // min timestamp (newest record)
-	maxTimestamp      utils.Uint128   // max timestamp (oldest record)
+	minSeqId          uint64          // min seqId (newest record)
+	maxSeqId          uint64          // max seqId (newest record)
 	minKeyLength      uint32          // smallest key by length
 	maxKeyLength      uint32          // largest key by length
 	minKey            []byte          // smallest key in sorting order
 	maxKey            []byte          // largest ket in sorting order
 	firstRecord       bool            // whether it is first record
+	Layer             int             // number of the lsm layer
 }
 
-func NewSSTableWriter(filePath string, blockManager *block.BlockManager, cfg *config.Config, expectedElements uint64) (*SSTableWriter, error) {
-	storage, err := CreateStorage(filePath, cfg, blockManager)
+func NewSSTableWriter(filePath string, blockManager *block.BlockManager, expectedElements uint64, layer int) (*SSTableWriter, error) {
+	cfg := config.GetSettings()
+	storage, err := CreateStorage(filePath, blockManager)
 	if err != nil {
 		return nil, err
 	}
@@ -56,44 +59,46 @@ func NewSSTableWriter(filePath string, blockManager *block.BlockManager, cfg *co
 	return &SSTableWriter{
 		storage:           storage,
 		blockManager:      blockManager,
-		config:            cfg.SSTable,
 		filePath:          filePath,
 		valueEncoder:      valueEncoder,
 		dataBlockBuilder:  NewDataBlockBuilder(1, cfg.SSTable.DataSegment.RestartInterval, blockManager.BlockSize(), valueEncoder),
 		indexSegment:      NewIndexSegment(uint64(blockManager.BlockSize())),
+		ttlIndexSegment:   NewTTLIndexSegment(uint64(blockManager.BlockSize())),
 		currentIndexBlock: NewIndexBlock(),
 		summarySegment:    NewSummarySegment(1),
 		filterSegment:     filterSegment,
 		merkleTree:        NewMerkleTree(),
-		footer:            NewFooter(cfg.SSTable),
+		footer:            NewFooter(),
 		currentBlockIndex: 0,
 		recordCount:       0,
 		minKeyLength:      ^uint32(0),
 		maxKeyLength:      0,
 		firstRecord:       true,
+		Layer:             layer,
 	}, nil
 }
 
 // AddRecord INSERTS A NEW RECORD INTO DataBlockBuilder OF GIVEN SSTableWriter IN GIVEN ORDER:
-// 1. Update min/max key timestamp metadata
+// 1. Update min/max key seqId metadata
 // 2. Update min/max keylength metadata
 // 3. Add key to bloom filter
-// 4. Add record to current data block -> block full? -> flush it
+// 4. Add to TTL index
+// 5. Add record to current data block -> block full? -> flush it
 func (sw *SSTableWriter) AddRecord(record Record) error {
 	sw.recordCount++
 	// step 1
 	if sw.firstRecord {
-		sw.minTimestamp = record.Timestamp
-		sw.maxTimestamp = record.Timestamp
+		sw.minSeqId = record.SeqId
+		sw.maxSeqId = record.SeqId
 		sw.minKey = append([]byte(nil), record.Key...)
 		sw.maxKey = append([]byte(nil), record.Key...)
 		sw.firstRecord = false
 	} else {
-		if utils.Uint128LT(record.Timestamp, sw.minTimestamp) {
-			sw.minTimestamp = record.Timestamp
+		if record.SeqId < sw.minSeqId {
+			sw.minSeqId = record.SeqId
 		}
-		if utils.Uint128GT(record.Timestamp, sw.maxTimestamp) {
-			sw.maxTimestamp = record.Timestamp
+		if record.SeqId > sw.maxSeqId {
+			sw.maxSeqId = record.SeqId
 		}
 		if bytes.Compare(record.Key, sw.minKey) < 0 {
 			sw.minKey = append([]byte(nil), record.Key...)
@@ -118,6 +123,15 @@ func (sw *SSTableWriter) AddRecord(record Record) error {
 	}
 
 	// step 4
+	if record.ExpiresAt != 0 {
+		ttlEntry := shared.TTLEntry{
+			Key:       record.Key,
+			ExpiresAt: record.ExpiresAt,
+		}
+		sw.ttlIndexSegment.AddEntryToBlock(ttlEntry, config.GetSettings().SSTable.DataSegment.BlockSize)
+	}
+
+	// step 5
 	if !sw.dataBlockBuilder.AddRecord(record) {
 		if err := sw.flushDataBlock(); err != nil {
 			return err
@@ -141,7 +155,7 @@ func (sw *SSTableWriter) flushDataBlock() error {
 	}
 
 	// step 1
-	blockData, err := sw.dataBlockBuilder.Finish(sw.config.DataSegment.BlockSize)
+	blockData, err := sw.dataBlockBuilder.Finish(config.GetSettings().SSTable.DataSegment.BlockSize)
 	if err != nil {
 		return err
 	}
@@ -158,7 +172,7 @@ func (sw *SSTableWriter) flushDataBlock() error {
 
 	// step 4
 	sw.currentIndexBlock.AddFromDataBlock(sw.dataBlockBuilder, sw.currentBlockIndex)
-	if sw.currentIndexBlock.RealSize >= uint32(sw.config.IndexSegment.IndexBlockSize) {
+	if sw.currentIndexBlock.RealSize >= uint32(config.GetSettings().SSTable.DataSegment.BlockSize) {
 		sw.indexSegment.AddBlock(sw.currentIndexBlock)
 		sw.currentIndexBlock = NewIndexBlock()
 	}
@@ -172,13 +186,14 @@ func (sw *SSTableWriter) flushDataBlock() error {
 // Finalize FINALIZES THE SSTABLE IN GIVEN ORDER:
 // 1. Flush remaining block if not empty (one block is not flushed because it never got full)
 // 2. Build a merkle tree
-// 3. Fill footer metadata
+// 3. Fill metadata
 // next steps all update footer segment handler metadata -->>
 // 4. Write filter segment on disk
 // 5. Write index blocks on disk
 // 6. Write summary segment on disk
-// 7. Write metadata (merkle tree) segment on disk
-// 8. Write footer and sync storage
+// 7. TODO Write TTL index on disk
+// 8. Write metadata (merkle tree) segment on disk
+// 9. Write footer and sync storage
 func (sw *SSTableWriter) Finalize() error {
 	// add remaining unfinished index block
 	// step 1
@@ -197,13 +212,23 @@ func (sw *SSTableWriter) Finalize() error {
 	}
 
 	// step 3
-	sw.footer.NumDataBlocks = sw.currentBlockIndex
-	sw.footer.TotalRecords = sw.recordCount
-	sw.footer.MinTimeStamp = sw.minTimestamp
-	sw.footer.MaxTimeStamp = sw.maxTimestamp
-	sw.footer.MinKeyLength = sw.minKeyLength
-	sw.footer.MaxKeyLength = sw.maxKeyLength
-	sw.footer.Format = sw.config.Format
+	meta := &Metadata{
+		Fields: make(map[MetadataFieldID][]byte),
+	}
+	meta.SetUint64(FieldNumDataBlocks, uint64(sw.currentBlockIndex))
+	meta.SetUint64(FieldTotalRecords, sw.recordCount)
+	meta.SetUint64(FieldBlockSize, uint64(sw.blockManager.BlockSize()))
+	meta.SetUint64(FieldRestartInterval, uint64(config.GetSettings().SSTable.DataSegment.RestartInterval))
+	meta.SetBytes(FieldMinKey, sw.minKey)
+	meta.SetBytes(FieldMaxKey, sw.maxKey)
+	meta.SetUint64(FieldMinSeqId, sw.minSeqId)
+	meta.SetUint64(FieldMaxSeqId, sw.maxSeqId)
+	meta.SetUint64(FieldMinKeyLength, uint64(sw.minKeyLength))
+	meta.SetUint64(FieldMaxKeyLength, uint64(sw.maxKeyLength))
+	meta.SetByte(FieldMergeStrategy, byte(enums.Heap))
+	meta.SetByte(FieldCompressionType, byte(config.GetSettings().SSTable.DataSegment.Compression))
+	sw.metadataSegment = meta
+	sw.footer.Format = config.GetSettings().SSTable.Format
 
 	// step 4
 	if sw.filterSegment != nil {
@@ -230,7 +255,7 @@ func (sw *SSTableWriter) Finalize() error {
 		var lastOffsetPlusSize uint64
 
 		for i, indexBlock := range sw.indexSegment.Blocks {
-			blockData := indexBlock.EncodeIndexBlock(config.DefaultIndexBlockSize)
+			blockData := indexBlock.EncodeIndexBlock(uint64(config.GetSettings().SSTable.DataSegment.BlockSize))
 			offset, size, err := sw.storage.WriteSegment(enums.SegmentIndex, blockData)
 			if err != nil {
 				return err
@@ -272,17 +297,55 @@ func (sw *SSTableWriter) Finalize() error {
 	}
 
 	// step 7
-	metadataData := sw.merkleTree.Encode()
-	metadataOffset, metadataSize, err := sw.storage.WriteSegment(enums.SegmentMetadata, metadataData)
+	var ttlOffsets []uint64
+	if len(sw.ttlIndexSegment.Blocks) > 0 {
+		ttlOffsets = make([]uint64, len(sw.ttlIndexSegment.Blocks))
+		var firstOffset uint64
+		var lastOffsetPlusSize uint64
+
+		for i, ttlBlock := range sw.ttlIndexSegment.Blocks {
+			blockData := ttlBlock.Encode(uint64(config.GetSettings().SSTable.DataSegment.BlockSize))
+			offset, size, err := sw.storage.WriteSegment(enums.SegmentTTLIndex, blockData)
+			if err != nil {
+				return err
+			}
+			ttlOffsets[i] = offset
+
+			if i == 0 {
+				firstOffset = offset
+			}
+			lastOffsetPlusSize = offset + uint64(size)
+		}
+
+		sw.footer.TTLIndexHandler.Offset = firstOffset
+		sw.footer.TTLIndexHandler.Size = uint32(lastOffsetPlusSize - firstOffset)
+	} else {
+		sw.footer.TTLIndexHandler.Offset = 0
+		sw.footer.TTLIndexHandler.Size = 0
+		ttlOffsets = []uint64{}
+	}
+
+	// step 8
+	merkleTreeData := sw.merkleTree.Encode()
+	merkleTreeOffset, merkleTreeSize, err := sw.storage.WriteSegment(enums.SegmentMerkleTree, merkleTreeData)
+	if err != nil {
+		return err
+	}
+	sw.footer.MerkleHandler = SegmentHandler{
+		Offset: merkleTreeOffset,
+		Size:   merkleTreeSize,
+	}
+	metaDataData := sw.metadataSegment.Encode()
+	metaDataOffset, metaDataSize, err := sw.storage.WriteSegment(enums.SegmentMetadata, metaDataData)
 	if err != nil {
 		return err
 	}
 	sw.footer.MetaDataHandler = SegmentHandler{
-		Offset: metadataOffset,
-		Size:   metadataSize,
+		Offset: metaDataOffset,
+		Size:   metaDataSize,
 	}
 
-	// step 8
+	// step 9
 	dictData := sw.valueEncoder.SaveDict()
 	dictOffset, dictSize, err := sw.storage.WriteSegment(enums.SegmentDictionary, dictData)
 	if err != nil {

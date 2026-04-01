@@ -3,21 +3,25 @@ package memtable
 import (
 	"sync"
 
+	"github.com/ajromen/LSM-KV-Engine/internal/enums"
 	"github.com/ajromen/LSM-KV-Engine/internal/iterator"
 )
 
+// MemtableManager coordinates multiple memtable instances in a whole lsm engine
+// It maintains one active memtable and multiple immutable memtables waiting to be flushed in background to disk
 type MemtableManager struct {
-	active         Memtable
-	immutable      []Memtable
-	maxTables      int
-	mergeStructure byte
-	factory        func() Memtable
-	flushChannel   chan Memtable
-	flushHandler   func([]MemtableEntry)
-	mu             sync.Mutex
-	cond           *sync.Cond
+	active         Memtable              // current writeable memtable instance
+	immutable      []Memtable            // list of memtables that are being flushed in background
+	maxTables      int                   // max number of immutable memtables allowed
+	mergeStructure byte                  // strategy for merging iterators of active+n instances of immutable memtables
+	factory        func() Memtable       // factory for creating new memtables
+	flushChannel   chan Memtable         // channel for async flushing
+	flushHandler   func([]MemtableEntry) // function that persists flushed entries
+	mu             sync.Mutex            // protets all shared states
+	cond           *sync.Cond            // used to block when to many immutable instances
 }
 
+// NewMemtableManager initializes a new instance of a manager and starts the flush worker
 func NewMemtableManager(maxTables int, mergeStructure byte, factory func() Memtable, flushHandler func([]MemtableEntry)) *MemtableManager {
 	mm := &MemtableManager{
 		maxTables:      maxTables,
@@ -31,9 +35,10 @@ func NewMemtableManager(maxTables int, mergeStructure byte, factory func() Memta
 	return mm
 }
 
-func (mm *MemtableManager) Put(key []byte, value []byte, timestamp uint64, tombstone bool) {
+// Put inserts an entry into active memtable and if the memtable reaches max capacity, triggers rotation
+func (mm *MemtableManager) Put(key []byte, value []byte, seqId uint64, opType enums.OpType) {
 	mm.mu.Lock()
-	mm.active.Put(key, value, timestamp, tombstone)
+	mm.active.Put(key, value, seqId, opType)
 	shouldRotate := mm.active.ShouldFlush()
 	mm.mu.Unlock()
 	if shouldRotate {
@@ -41,6 +46,18 @@ func (mm *MemtableManager) Put(key []byte, value []byte, timestamp uint64, tombs
 	}
 }
 
+func (mm *MemtableManager) PutWithTTL(key []byte, value []byte, seqId uint64, opType enums.OpType, ttl int64) {
+	mm.mu.Lock()
+	mm.active.PutWithTTL(key, value, seqId, opType, ttl)
+	shouldRotate := mm.active.ShouldFlush()
+	mm.mu.Unlock()
+	if shouldRotate {
+		mm.rotate()
+	}
+}
+
+// rotate moves the active memtable to immutable list and creates a new one
+// if too many immutable instances of memtable exist, it blocks new puts until space is available
 func (mm *MemtableManager) rotate() {
 	mm.mu.Lock()
 	if !mm.active.ShouldFlush() {
@@ -57,12 +74,19 @@ func (mm *MemtableManager) rotate() {
 	mm.flushChannel <- immutable
 }
 
+// flushWorker runs in a separate goroutine, and it takes immutable memtables and flushes them to disk
 func (mm *MemtableManager) flushWorker(flushHandler func([]MemtableEntry)) {
 	for mem := range mm.flushChannel {
 		mm.mu.Lock()
+		shouldFlush := mm.containsImmutable(mem)
 		mm.removeImmutable(mem)
 		mm.cond.Signal()
 		mm.mu.Unlock()
+
+		if !shouldFlush {
+			continue
+		}
+
 		entries := mem.Flush()
 		if flushHandler != nil {
 			flushHandler(entries)
@@ -70,6 +94,7 @@ func (mm *MemtableManager) flushWorker(flushHandler func([]MemtableEntry)) {
 	}
 }
 
+// removeImmutable removes a specific memtable from the immutable slice
 func (mm *MemtableManager) removeImmutable(target Memtable) {
 	newList := make([]Memtable, 0, len(mm.immutable)-1)
 	for _, m := range mm.immutable {
@@ -80,7 +105,16 @@ func (mm *MemtableManager) removeImmutable(target Memtable) {
 	mm.immutable = newList
 }
 
-func (mm *MemtableManager) Get(key []byte) ([]byte, bool) {
+func (mm *MemtableManager) containsImmutable(target Memtable) bool {
+	for _, m := range mm.immutable {
+		if m == target {
+			return true
+		}
+	}
+	return false
+}
+
+func (mm *MemtableManager) Get(key []byte) (*MemtableEntry, bool) {
 	mm.mu.Lock()
 	defer mm.mu.Unlock()
 	if v, ok := mm.active.Get(key); ok {
@@ -95,16 +129,29 @@ func (mm *MemtableManager) Get(key []byte) ([]byte, bool) {
 	return nil, false
 }
 
-func (mm *MemtableManager) Delete(key []byte, timestamp uint64) {
-	mm.mu.Lock()
-	mm.active.Put(key, []byte{}, timestamp, true)
-	shouldRotate := mm.active.ShouldFlush()
-	mm.mu.Unlock()
-	if shouldRotate {
-		mm.rotate()
-	}
-}
+//// Delete inserts a tombstone for a key into the active memtable
+//// Works the same as Put, but marks entry as deleted
+//func (mm *MemtableManager) Delete(key []byte, seqId uint64) {
+//	mm.mu.Lock()
+//	mm.active.Put(key, []byte{}, seqId, true)
+//	shouldRotate := mm.active.ShouldFlush()
+//	mm.mu.Unlock()
+//	if shouldRotate {
+//		mm.rotate()
+//	}
+//}
+//
+//func (mm *MemtableManager) DeleteWithTTL(key []byte, seqId uint64, ttl int64) {
+//	mm.mu.Lock()
+//	mm.active.PutWithTTL(key, []byte{}, seqId, true, ttl)
+//	shouldRotate := mm.active.ShouldFlush()
+//	mm.mu.Unlock()
+//	if shouldRotate {
+//		mm.rotate()
+//	}
+//}
 
+// RawIterator returns a merged iterator over all memtables without higher-level filtering.
 func (mm *MemtableManager) RawIterator() iterator.Iterator[MemtableEntry] {
 	mm.mu.Lock()
 	defer mm.mu.Unlock()
@@ -120,6 +167,7 @@ func (mm *MemtableManager) RawIterator() iterator.Iterator[MemtableEntry] {
 	return NewRawIterator(rawIters, mm.mergeStructure)
 }
 
+// Iterator returns a merged iterator over all memtables with higher-level filtering.
 func (mm *MemtableManager) Iterator() iterator.Iterator[MemtableEntry] {
 	mm.mu.Lock()
 	defer mm.mu.Unlock()
@@ -134,6 +182,14 @@ func (mm *MemtableManager) Iterator() iterator.Iterator[MemtableEntry] {
 
 	rawMerge := NewRawIterator(rawIters, mm.mergeStructure)
 	return NewMergedMemtableIterator(rawMerge)
+}
+
+func (mm *MemtableManager) ResetAll() {
+	mm.mu.Lock()
+	defer mm.mu.Unlock()
+
+	mm.active = mm.factory()
+	mm.immutable = nil
 }
 
 func (mm *MemtableManager) Close() {

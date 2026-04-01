@@ -8,90 +8,89 @@ import (
 	"github.com/ajromen/LSM-KV-Engine/internal/enums"
 )
 
-// Za sva podešavanja koja nedostaju u konfiguracionom fajlu sistem treba da dodeli
-// default vrednosti koje se navode u kodu
-
 // Engine defaults
 const (
 	//WAL
 
-	DefaultWalSegmentSize = 1 * 1024 * 1024
+	defaultWalSegmentSize = 1 * 1024 * 1024
 
 	//memtable
-	MemtableType                = enums.HashMapMemTable
-	DefaultMemtableMaxEntries   = 1000
-	DefaultMemtableMaxSizeBytes = 1 << 20
-	DefaultMemtableInstances    = 5
-	DefaultSkipListMaxLevel     = 10
-	DefaultBTreeMinimumDegree   = 8
+	memtableType                = enums.HashMapMemTable
+	defaultMemtableMaxEntries   = 1000
+	defaultMemtableMaxSizeBytes = 1
+	defaultMemtableInstances    = 5
+	defaultSkipListMaxLevel     = 10
+	defaultBTreeMinimumDegree   = 8
 
 	//SSTable
-	DefaultSSTableBlockSize           = 160
-	DefaultSSTableRestartInterval     = 3
-	DefaultSSTableCompression         = enums.CompressionNone
-	DefaultSSTableMinBlockUtilization = 0.8
-	DefaultIndexBlockSize             = 160
+	defaultSSTableBlockSize           = 160
+	defaultSSTableRestartInterval     = 3
+	defaultSSTableCompression         = enums.CompressionNone
+	defaultSSTableMinBlockUtilization = 0.8
 
-	// CMS
-	DefaultCMSAccuracy   = 0.01
-	DefaultCMSConfidence = 0.99
+	//CMS
+	defaultCMSAccuracy   = 0.01
+	defaultCMSConfidence = 0.99
 
-	// Block Manager
-	DefaultBlockSize           = 4 * 1024 // bytes
-	DefaultBlockCacheMaxBlocks = 2048
+	//Block Manager
+	defaultBlockSize           = 4 * 1024
+	defaultBlockCacheMaxBlocks = 2048
 
 	//LSM
-	DefaultLSMCompactionAlgorithm = enums.SizeTieredCompaction
-	DefaultLSMMinMergeThreshold   = 3
-	DefaultLSMLevelSizeMultiplier = 10
+	defaultLSMCompactionAlgorithm = enums.SizeTieredCompaction
+	defaultLSMMinMergeThreshold   = 4
+	defaultLSMLevelSizeMultiplier = 10
+	defaultMaxLSMHeight           = 5
+
+	//TTL
+	defaultTTLInMemoryTTL = true
+	defaultTTLRefreshRate = 1000 // 1s
 )
 
 func NewDefaultConfig() *Config {
 	return &Config{
 		SavePath: getDefaultSavePath(),
 		WAL: WALConfig{
-			SegmentSize:  DefaultWalSegmentSize,
-			BlockSize:    DefaultBlockSize, // MUST match BlockManager.BlockSize
+			SegmentSize:  defaultWalSegmentSize,
+			BlockSize:    defaultBlockSize, // MUST match BlockManager.BlockSize
 			SyncInterval: 0,                // ms; 0 => only on Flush/Commit
 			MaxSegments:  0,                // 0 => unlimited
 		},
 		Memtable: MemtableConfig{
-			MemtableType:         MemtableType,
-			MemtableMaxEntries:   DefaultMemtableMaxEntries,
-			MemtableMaxSizeBytes: DefaultMemtableMaxSizeBytes,
-			Instances:            DefaultMemtableInstances,
+			MemtableType:         memtableType,
+			MemtableMaxEntries:   defaultMemtableMaxEntries,
+			MemtableMaxSizeBytes: defaultMemtableMaxSizeBytes,
+			Instances:            defaultMemtableInstances,
 			SkipListConfig: SkipListConfig{
-				MaxLevel: DefaultSkipListMaxLevel,
+				MaxLevel: defaultSkipListMaxLevel,
 			},
 			BTreeConfig: BTreeConfig{
-				MinimumDegree: DefaultBTreeMinimumDegree,
+				MinimumDegree: defaultBTreeMinimumDegree,
 			},
 		},
 		SSTable: SSTableConfig{
 			Format: enums.FormatSingleFile,
 			DataSegment: DataSegmentConfig{
-				BlockSize:           DefaultSSTableBlockSize,
-				RestartInterval:     DefaultSSTableRestartInterval,
-				Compression:         DefaultSSTableCompression,
-				MinBlockUtilization: DefaultSSTableMinBlockUtilization,
+				BlockSize:           defaultSSTableBlockSize,
+				RestartInterval:     defaultSSTableRestartInterval,
+				Compression:         defaultSSTableCompression,
+				MinBlockUtilization: defaultSSTableMinBlockUtilization,
 			},
-			IndexSegment: IndexSegmentConfig{
-				IndexBlockSize: DefaultIndexBlockSize,
-			},
+			IndexSegment: IndexSegmentConfig{},
 		},
 		LSMTree: LSMTreeConfig{
-			MinMergeThreshold:   DefaultLSMMinMergeThreshold,
-			CompactionAlgorithm: DefaultLSMCompactionAlgorithm,
-			LevelSizeMultiplier: DefaultLSMLevelSizeMultiplier,
+			MaxHeight:           defaultMaxLSMHeight,
+			MinMergeThreshold:   defaultLSMMinMergeThreshold,
+			CompactionAlgorithm: defaultLSMCompactionAlgorithm,
+			LevelSizeMultiplier: defaultLSMLevelSizeMultiplier,
 		},
 		SkipList: SkipListConfig{
-			MaxLevel: DefaultSkipListMaxLevel,
+			MaxLevel: defaultSkipListMaxLevel,
 		},
 		ProbabilisticType: ProbabilisticTypeConfig{
 			CountMinSketch: CountMinSketchConfig{
-				Enabled:    true,
-				Accuracy:   DefaultCMSAccuracy,
-				Confidence: DefaultCMSConfidence,
+				Accuracy:   defaultCMSAccuracy,
+				Confidence: defaultCMSConfidence,
 				Seeds: [][]byte{
 					{1, 2, 3, 4},
 					{5, 6, 7, 8},
@@ -100,8 +99,12 @@ func NewDefaultConfig() *Config {
 			},
 		},
 		BlockManager: BlockManagerConfig{
-			BlockSize:           DefaultBlockSize,
-			BlockCacheMaxBlocks: DefaultBlockCacheMaxBlocks,
+			BlockSize:           defaultBlockSize,
+			BlockCacheMaxBlocks: defaultBlockCacheMaxBlocks,
+		},
+		TTL: TTLConfig{
+			InMemoryTTL: defaultTTLInMemoryTTL,
+			RefreshRate: defaultTTLRefreshRate,
 		},
 	}
 }

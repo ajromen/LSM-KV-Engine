@@ -10,29 +10,27 @@ import (
 	"github.com/ajromen/LSM-KV-Engine/internal/enums"
 )
 
-func LoadConfig(flags *cli.FLags) (*Config, error) {
+func LoadConfig(flags *cli.FLags) error {
 	cfg := NewDefaultConfig()
 
 	// load JSON if provided
 	if flags != nil && flags.ConfigPath != nil {
 		err := cfg.loadFromFile(*flags.ConfigPath)
 		if err != nil {
-			return nil, err
+			return err
 		}
 	}
-
-	// apply CLI overrides
-	if flags != nil {
-		if err := cfg.applyFlags(flags); err != nil {
-			return nil, err
-		}
+	err := cfg.applyFlags(flags)
+	if err != nil {
+		return err
 	}
 
 	// validate final config
 	if err := cfg.validateFields(); err != nil {
-		return nil, err
+		return err
 	}
-	return cfg, nil
+	createSettings(cfg)
+	return nil
 }
 
 func (c *Config) applyFlags(flags *cli.FLags) error {
@@ -40,8 +38,8 @@ func (c *Config) applyFlags(flags *cli.FLags) error {
 	if flags.MemtableMaxSize != nil {
 		c.Memtable.MemtableMaxEntries = *flags.MemtableMaxSize
 	}
-	if flags.MemtableMaxSizeKb != nil {
-		c.Memtable.MemtableMaxSizeBytes = *flags.MemtableMaxSizeKb
+	if flags.MemtableMaxSizeB != nil {
+		c.Memtable.MemtableMaxSizeBytes = *flags.MemtableMaxSizeB
 	}
 	if flags.MemtableType != nil {
 		memType := strings.TrimSpace(*flags.MemtableType)
@@ -98,6 +96,12 @@ func (c *Config) applyFlags(flags *cli.FLags) error {
 		}
 		c.LSMTree.CompactionAlgorithm = algorithm
 	}
+	if flags.TTLInMemoryTTL != nil {
+		c.TTL.InMemoryTTL = *flags.TTLInMemoryTTL
+	}
+	if flags.TTLRefreshRate != nil {
+		c.TTL.RefreshRate = int64(*flags.TTLRefreshRate)
+	}
 	return nil
 }
 
@@ -153,27 +157,6 @@ func (c *Config) loadFromFile(path string) error {
 	}
 	return nil
 }
-
-//func (c *SSTableConfig) SegmentPaths(basePath string) map[enums.SegmentType]string {
-//	paths := make(map[enums.SegmentType]string)
-//	if c.Format == enums.FormatSingleFile {
-//		for _, segType := range []enums.SegmentType{
-//			enums.SegmentData, enums.SegmentFilter, enums.SegmentIndex,
-//			enums.SegmentSummary, enums.SegmentMetadata, enums.SegmentFooter,
-//		} {
-//			paths[segType] = basePath
-//		}
-//	} else {
-//		// Each segment has its own file
-//		paths[enums.SegmentData] = basePath + string(sstable.DataSegmentExtension)
-//		paths[enums.SegmentFilter] = basePath + string(sstable.FilterSegmentExtension)
-//		paths[enums.SegmentIndex] = basePath + string(sstable.IndexSegmentExtension)
-//		paths[enums.SegmentSummary] = basePath + string(sstable.SummarySegmentExtension)
-//		paths[enums.SegmentMetadata] = basePath + string(sstable.MetadataSegmentExtension)
-//		paths[enums.SegmentFooter] = basePath + string(sstable.FooterSegmentExtension)
-//	}
-//	return paths
-//}
 
 func fileExists(filename string) bool {
 	_, err := os.Stat(filename)

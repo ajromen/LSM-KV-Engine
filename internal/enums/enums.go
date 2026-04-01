@@ -7,9 +7,11 @@ const (
 	SegmentFilter     SegmentType = 1
 	SegmentIndex      SegmentType = 2
 	SegmentSummary    SegmentType = 3
-	SegmentMetadata   SegmentType = 4
-	SegmentFooter     SegmentType = 5
-	SegmentDictionary SegmentType = 6
+	SegmentMerkleTree SegmentType = 4
+	SegmentMetadata   SegmentType = 5
+	SegmentFooter     SegmentType = 6
+	SegmentDictionary SegmentType = 7
+	SegmentTTLIndex   SegmentType = 8
 )
 
 type SSTableCompression byte
@@ -42,4 +44,20 @@ const (
 	BTreeMemTable    MemTableType = 2
 	RBTreeMemTable   MemTableType = 3
 	AVLTreeMemTable  MemTableType = 4
+)
+
+type OpType byte
+
+const (
+	OpTypePut      OpType = 0
+	OpTypeDel      OpType = 1
+	OpTypeMerge    OpType = 2
+	OpTypeRangeDel OpType = 3
+)
+
+type MergeStructureType byte
+
+const (
+	Heap  MergeStructureType = 0
+	WTree MergeStructureType = 1
 )

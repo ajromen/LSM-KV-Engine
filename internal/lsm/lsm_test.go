@@ -7,16 +7,21 @@ import (
 
 	"github.com/ajromen/LSM-KV-Engine/internal/config"
 	"github.com/ajromen/LSM-KV-Engine/internal/enums"
+	"github.com/ajromen/LSM-KV-Engine/internal/sequence"
 )
 
-func newConfig(compaction enums.LSMCompaction) *config.Config {
+func newSeq() *sequence.SequenceGenerator {
+	return sequence.NewSequenceGenerator(0)
+}
+
+func newConfig(compaction enums.LSMCompaction) {
 	cfg := config.NewDefaultConfig()
 	cfg.LSMTree.CompactionAlgorithm = compaction
 	cfg.LSMTree.MinMergeThreshold = 4
 	cfg.LSMTree.LevelSizeMultiplier = 10
 	cfg.Memtable.MemtableMaxEntries = 5
 	cfg.Memtable.MemtableMaxSizeBytes = 1024 * 4
-	return cfg
+	config.TESTSetSettings(cfg)
 }
 
 func setupLSM(t *testing.T, compaction enums.LSMCompaction) (*LSM, string) {
@@ -25,7 +30,8 @@ func setupLSM(t *testing.T, compaction enums.LSMCompaction) (*LSM, string) {
 	if err != nil {
 		t.Fatalf("MkdirTemp: %v", err)
 	}
-	lsm, err := NewLSM(newConfig(compaction), dir)
+	newConfig(compaction)
+	lsm, err := NewLSM(dir)
 	if err != nil {
 		t.Fatalf("NewLSM: %v", err)
 	}
@@ -41,10 +47,10 @@ func setupLSM(t *testing.T, compaction enums.LSMCompaction) (*LSM, string) {
 
 func teardown(dir string) { os.RemoveAll(dir) }
 
-func putN(t *testing.T, lsm *LSM, n int) {
+func putN(t *testing.T, lsm *LSM, n int, seq *sequence.SequenceGenerator) {
 	t.Helper()
 	for i := 0; i < n; i++ {
-		if err := lsm.Put([]byte(fmt.Sprintf("key%05d", i)), []byte(fmt.Sprintf("val%05d", i))); err != nil {
+		if err := lsm.Put([]byte(fmt.Sprintf("key%05d", i)), []byte(fmt.Sprintf("val%05d", i)), seq.Next()); err != nil {
 			t.Fatalf("Put: %v", err)
 		}
 	}
@@ -78,8 +84,8 @@ func assertNotFound(t *testing.T, lsm *LSM, key string) {
 func runBasicTests(t *testing.T, compaction enums.LSMCompaction) {
 	t.Run("PutGet", func(t *testing.T) {
 		lsm, _ := setupLSM(t, compaction)
-
-		if err := lsm.Put([]byte("k"), []byte("v")); err != nil {
+		seq := newSeq()
+		if err := lsm.Put([]byte("k"), []byte("v"), seq.Next()); err != nil {
 			t.Fatal(err)
 		}
 		assertGet(t, lsm, "k", "v")
@@ -87,30 +93,29 @@ func runBasicTests(t *testing.T, compaction enums.LSMCompaction) {
 
 	t.Run("GetMissing", func(t *testing.T) {
 		lsm, _ := setupLSM(t, compaction)
-
 		assertNotFound(t, lsm, "missing")
 	})
 
 	t.Run("Overwrite", func(t *testing.T) {
 		lsm, _ := setupLSM(t, compaction)
-
-		_ = lsm.Put([]byte("k"), []byte("v1"))
-		_ = lsm.Put([]byte("k"), []byte("v2"))
+		seq := newSeq()
+		_ = lsm.Put([]byte("k"), []byte("v1"), seq.Next())
+		_ = lsm.Put([]byte("k"), []byte("v2"), seq.Next())
 		assertGet(t, lsm, "k", "v2")
 	})
 
 	t.Run("Delete", func(t *testing.T) {
 		lsm, _ := setupLSM(t, compaction)
-
-		_ = lsm.Put([]byte("k"), []byte("v"))
-		_ = lsm.Delete([]byte("k"))
+		seq := newSeq()
+		_ = lsm.Put([]byte("k"), []byte("v"), seq.Next())
+		_ = lsm.Delete([]byte("k"), seq.Next())
 		assertNotFound(t, lsm, "k")
 	})
 
 	t.Run("DeleteNonExistent", func(t *testing.T) {
 		lsm, _ := setupLSM(t, compaction)
-
-		if err := lsm.Delete([]byte("ghost")); err != nil {
+		seq := newSeq()
+		if err := lsm.Delete([]byte("ghost"), seq.Next()); err != nil {
 			t.Fatal(err)
 		}
 		assertNotFound(t, lsm, "ghost")
@@ -118,9 +123,8 @@ func runBasicTests(t *testing.T, compaction enums.LSMCompaction) {
 
 	t.Run("FlushAndRead", func(t *testing.T) {
 		lsm, _ := setupLSM(t, compaction)
-
-		// write enough to trigger at least one flush
-		putN(t, lsm, 30)
+		seq := newSeq()
+		putN(t, lsm, 30, seq)
 		for i := 0; i < 30; i++ {
 			assertGet(t, lsm, fmt.Sprintf("key%05d", i), fmt.Sprintf("val%05d", i))
 		}
@@ -128,19 +132,18 @@ func runBasicTests(t *testing.T, compaction enums.LSMCompaction) {
 
 	t.Run("DeleteAfterFlush", func(t *testing.T) {
 		lsm, _ := setupLSM(t, compaction)
-
-		putN(t, lsm, 20)
-		_ = lsm.Delete([]byte("key00005"))
+		seq := newSeq()
+		putN(t, lsm, 20, seq)
+		_ = lsm.Delete([]byte("key00005"), seq.Next())
 		assertNotFound(t, lsm, "key00005")
-		// other keys still accessible
 		assertGet(t, lsm, "key00010", "val00010")
 	})
 
 	t.Run("OverwriteAfterFlush", func(t *testing.T) {
 		lsm, _ := setupLSM(t, compaction)
-
-		putN(t, lsm, 20)
-		_ = lsm.Put([]byte("key00003"), []byte("new_value"))
+		seq := newSeq()
+		putN(t, lsm, 20, seq)
+		_ = lsm.Put([]byte("key00003"), []byte("new_value"), seq.Next())
 		assertGet(t, lsm, "key00003", "new_value")
 	})
 }
@@ -151,14 +154,11 @@ func TestSizeTiered_Basic(t *testing.T) {
 
 func TestSizeTiered_CompactionReducesL0(t *testing.T) {
 	lsm, _ := setupLSM(t, enums.SizeTieredCompaction)
-
-	// force many flushes so compaction must have fired
-	putN(t, lsm, 200)
-
+	seq := newSeq()
+	putN(t, lsm, 200, seq)
 	l0 := lsm.sstableManager.Layers[0].Length()
 	t.Logf("L0 count after 200 puts: %d", l0)
-
-	threshold := lsm.cfg.LSMTree.MinMergeThreshold
+	threshold := config.GetSettings().LSMTree.MinMergeThreshold
 	if l0 >= threshold {
 		t.Errorf("L0 should have been compacted, got %d (threshold %d)", l0, threshold)
 	}
@@ -166,8 +166,8 @@ func TestSizeTiered_CompactionReducesL0(t *testing.T) {
 
 func TestSizeTiered_DataIntactAfterCompaction(t *testing.T) {
 	lsm, _ := setupLSM(t, enums.SizeTieredCompaction)
-
-	putN(t, lsm, 100)
+	seq := newSeq()
+	putN(t, lsm, 100, seq)
 	for i := 0; i < 100; i++ {
 		assertGet(t, lsm, fmt.Sprintf("key%05d", i), fmt.Sprintf("val%05d", i))
 	}
@@ -175,8 +175,8 @@ func TestSizeTiered_DataIntactAfterCompaction(t *testing.T) {
 
 func TestSizeTiered_LayersGrow(t *testing.T) {
 	lsm, _ := setupLSM(t, enums.SizeTieredCompaction)
-
-	putN(t, lsm, 500)
+	seq := newSeq()
+	putN(t, lsm, 500, seq)
 	t.Logf("Total layers: %d", len(lsm.sstableManager.Layers))
 	if len(lsm.sstableManager.Layers) < 2 {
 		t.Error("expected at least 2 layers after heavy write load")
@@ -189,8 +189,8 @@ func TestLeveled_Basic(t *testing.T) {
 
 func TestLeveled_DataIntactAfterCompaction(t *testing.T) {
 	lsm, _ := setupLSM(t, enums.LeveledCompaction)
-
-	putN(t, lsm, 100)
+	seq := newSeq()
+	putN(t, lsm, 100, seq)
 	for i := 0; i < 100; i++ {
 		assertGet(t, lsm, fmt.Sprintf("key%05d", i), fmt.Sprintf("val%05d", i))
 	}
@@ -198,10 +198,10 @@ func TestLeveled_DataIntactAfterCompaction(t *testing.T) {
 
 func TestLeveled_DeleteAfterCompaction(t *testing.T) {
 	lsm, _ := setupLSM(t, enums.LeveledCompaction)
-
-	putN(t, lsm, 100)
+	seq := newSeq()
+	putN(t, lsm, 100, seq)
 	for i := 0; i < 10; i++ {
-		_ = lsm.Delete([]byte(fmt.Sprintf("key%05d", i)))
+		_ = lsm.Delete([]byte(fmt.Sprintf("key%05d", i)), seq.Next())
 	}
 	for i := 0; i < 10; i++ {
 		assertNotFound(t, lsm, fmt.Sprintf("key%05d", i))
@@ -213,12 +213,12 @@ func TestLeveled_DeleteAfterCompaction(t *testing.T) {
 
 func TestLeveled_OverlapResolved(t *testing.T) {
 	lsm, _ := setupLSM(t, enums.LeveledCompaction)
-
+	seq := newSeq()
 	for i := 0; i < 50; i++ {
-		_ = lsm.Put([]byte(fmt.Sprintf("key%05d", i)), []byte("old"))
+		_ = lsm.Put([]byte(fmt.Sprintf("key%05d", i)), []byte("old"), seq.Next())
 	}
 	for i := 0; i < 50; i++ {
-		_ = lsm.Put([]byte(fmt.Sprintf("key%05d", i)), []byte("new"))
+		_ = lsm.Put([]byte(fmt.Sprintf("key%05d", i)), []byte("new"), seq.Next())
 	}
 	for i := 0; i < 50; i++ {
 		assertGet(t, lsm, fmt.Sprintf("key%05d", i), "new")
@@ -234,20 +234,20 @@ func testPersistence(t *testing.T, compaction enums.LSMCompaction) {
 		_ = os.RemoveAll(dir)
 	})
 
-	cfg := newConfig(compaction)
+	newConfig(compaction)
 
-	lsm1, err := NewLSM(cfg, dir)
+	lsm1, err := NewLSM(dir)
 	if err != nil {
 		t.Fatalf("NewLSM: %v", err)
 	}
-	putN(t, lsm1, 50)
+	seq := newSeq()
+	putN(t, lsm1, 50, seq)
 	_ = lsm1.Finish()
 
-	lsm2, err := NewLSM(cfg, dir)
+	lsm2, err := NewLSM(dir)
 	if err != nil {
 		t.Fatalf("NewLSM reopen: %v", err)
 	}
-	// only keys that were flushed to disk will be visible
 	for i := 0; i < 50; i++ {
 		key := fmt.Sprintf("key%05d", i)
 		val, found, err := lsm2.Get([]byte(key))
