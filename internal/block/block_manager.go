@@ -5,13 +5,11 @@ import (
 	"fmt"
 	"io"
 	"os"
-
-	"github.com/ajromen/LSM-KV-Engine/internal/cache"
 )
 
 type BlockManager struct {
 	blockSize int
-	cache     *cache.LRU[BlockKey, []byte]
+	cache     *BlockCache
 }
 
 type BlockKey struct {
@@ -19,10 +17,10 @@ type BlockKey struct {
 	Offset   uint32 // ako je blok 1kb dozvoljava segment size od 4 terabajta (16 bitova daje max 64mb)
 }
 
-func NewBlockManager(blockSize, maxLRUSize int) *BlockManager {
+func NewBlockManager(blockSize int) *BlockManager {
 	return &BlockManager{
 		blockSize: blockSize,
-		cache:     cache.NewLRU[BlockKey, []byte](maxLRUSize),
+		cache:     GetBlockCacheInstance(),
 	}
 }
 
@@ -210,4 +208,11 @@ func DeleteFile(path string) error {
 		return err
 	}
 	return nil
+}
+
+func (bm *BlockManager) ClearCache() {
+	if bm == nil || bm.cache == nil {
+		return
+	}
+	bm.cache.Clear()
 }
