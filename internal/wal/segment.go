@@ -63,9 +63,19 @@ func (s *Segment) Append(r Record) error {
 		}
 		return nil
 
+	} else if s.CurrentBlock.Remaining() >= headerSize+1 { // full header can fit and at least a byte of payload
+		fmt.Println("Partial") // to do
+		// reminder for myself, when fragmenting the record, dont crc the encoded payload, crc each part separately
+	} else if s.CurrentBlock.Remaining() <= headerSize { // not a single byte of payload can fit, pad the block
+		err := s.MoveToNextBlock()
+		if err != nil {
+			return err
+		}
+
+		return s.Append(r) // crash if headersize > block size, but that should be checked way earlier
 	}
 
-	return fmt.Errorf("Not implemented yet")
+	return fmt.Errorf("block remaining size error")
 }
 
 func (s *Segment) ReadBlock(index uint32) ([]byte, error) {
