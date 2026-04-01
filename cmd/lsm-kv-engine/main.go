@@ -59,6 +59,14 @@ func RunCli(engine *core.Engine) {
 			handleGet(engine, parts)
 		case "clear-all":
 			handleClear(engine, parts)
+		case "range_scan":
+			handleRangeScan(engine, parts)
+		case "prefix_scan":
+			handlePrefixScan(engine, parts)
+		case "range_iterate":
+			handleRangeIterate(engine, parts, reader)
+		case "prefix_iterate":
+			handlePrefixIterate(engine, parts, reader)
 		case "exit", "quit", "q":
 			print("Exiting...")
 			err := engine.Close()
