@@ -44,6 +44,26 @@ func OpenSegment(id uint64, path string, maxBlocks int, bm *block.BlockManager) 
 }
 
 func (s *Segment) Append(r Record) error {
+	headerSize := KEY_START
+	totalSize := headerSize + len(r.Key) + len(r.Value)
+	if s.CurrentBlock.Remaining() >= totalSize { // if full record can fit
+		wr := WALRecord{
+			FragType:  FULL,
+			RecType:   SINGLE, // to be updated
+			TxnID:     0,      // to be updated
+			KeySize:   uint64(len(r.Key)),
+			ValueSize: uint64(len(r.Value)),
+			Record:    r,
+		}
+		buf := Encode(wr)
+
+		_, err := s.CurrentBlock.Write(buf)
+		if err != nil {
+			return err
+		}
+		return nil
+
+	}
 
 	return fmt.Errorf("Not implemented yet")
 }
