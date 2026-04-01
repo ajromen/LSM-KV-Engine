@@ -48,7 +48,7 @@ func main() {
 func RunCli(engine *core.Engine) {
 	reader := bufio.NewReader(os.Stdin)
 	for {
-		fmt.Print("> ")
+		fmt.Print(">  ")
 
 		line, _ := reader.ReadString('\n')
 		line = strings.TrimSpace(line)

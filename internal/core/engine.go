@@ -36,6 +36,8 @@ func NewEngine() (*Engine, error) {
 	}
 	engine := Engine{lsm: lsmTree, inMemoryTTL: config.GetSettings().TTL.InMemoryTTL}
 
+	engine.recover()
+
 	if engine.inMemoryTTL {
 		engine.ttlJanitor = ttl.NewTTLJanitor(engine.Delete)
 		heap, index, err := engine.lsm.GetAllTTLFomSST()
@@ -43,9 +45,9 @@ func NewEngine() (*Engine, error) {
 			return nil, err
 		}
 		engine.ttlJanitor.Init(heap, index)
+		go engine.ttlJanitor.Run()
 	}
 
-	engine.recover()
 	return &engine, nil
 }
 
@@ -89,6 +91,9 @@ func (engine *Engine) GetTTL(key []byte) (int64, bool, error) {
 }
 
 func (engine *Engine) Delete(key []byte) {
+	if config.GetSettings().Debug {
+
+	}
 	seqId := engine.seqGen.Next()
 	// wal
 	engine.lsm.Put(key, nil, seqId, enums.OpTypeDel)
@@ -100,6 +105,9 @@ func (engine *Engine) RangeDelete(startKey []byte, endKey []byte) {
 }
 
 func (engine *Engine) Close() error {
+	if engine.inMemoryTTL {
+		engine.ttlJanitor.Stop()
+	}
 	//wal finish write
 	err := engine.lsm.Finish()
 	if err != nil {
@@ -119,7 +127,9 @@ func (engine *Engine) ClearAll() error {
 	if err := os.Remove(manifestPath); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("clear-all: failed to remove manifest: %w", err)
 	}
-	engine.ttlJanitor.ClearAll()
+	if engine.inMemoryTTL {
+		engine.ttlJanitor.ClearAll()
+	}
 
 	return nil
 }
