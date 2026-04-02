@@ -128,7 +128,77 @@ func (s *Segment) Append(r Record) error {
 		if err != nil {
 			return err
 		}
-		fmt.Println("Partial record", buf, payload)
+		//fmt.Println("Partial record", buf, payload)
+
+		for s.CurrentBlock.Remaining() < headerSize+len(payload) {
+			//fmt.Println(s.CurrentBlock.Data)
+			err = s.MoveToNextBlock()
+			if err != nil {
+				return err
+			}
+
+			if s.CurrentBlock.Remaining() >= headerSize+len(payload) {
+				break
+			}
+
+			payloadSpace = s.CurrentBlock.Remaining() - headerSize
+
+			if payloadSpace < pValueStart { // part of key fits
+				wr = WALRecord{
+					FragType:  MIDDLE,
+					RecType:   SINGLE, // to be updated
+					TxnID:     0,      // to be updated
+					KeySize:   uint64(payloadSpace),
+					ValueSize: 0,
+					Record: Record{
+						Timestamp: r.Timestamp,
+						Tombstone: r.Tombstone,
+						Key:       payload[:payloadSpace],
+						Value:     nil,
+					},
+				}
+				payload = payload[payloadSpace:]
+				pValueStart = pValueStart - payloadSpace
+			} else if payloadSpace == pValueStart { // exactly key fits
+				wr = WALRecord{
+					FragType:  MIDDLE,
+					RecType:   SINGLE, // to be updated
+					TxnID:     0,      // to be updated
+					KeySize:   uint64(pValueStart),
+					ValueSize: 0,
+					Record: Record{
+						Timestamp: r.Timestamp,
+						Tombstone: r.Tombstone,
+						Key:       payload[:pValueStart],
+						Value:     nil,
+					},
+				}
+				payload = payload[pValueStart:]
+				pValueStart = 0
+			} else { // part of value fits
+				wr = WALRecord{
+					FragType:  MIDDLE,
+					RecType:   SINGLE, // to be updated
+					TxnID:     0,      // to be updated
+					KeySize:   uint64(pValueStart),
+					ValueSize: uint64(payloadSpace - pValueStart),
+					Record: Record{
+						Timestamp: r.Timestamp,
+						Tombstone: r.Tombstone,
+						Key:       payload[:pValueStart],
+						Value:     payload[pValueStart:payloadSpace],
+					},
+				}
+				payload = payload[payloadSpace:]
+				pValueStart = 0
+			}
+			buf := Encode(wr)
+			_, err := s.CurrentBlock.Write(buf)
+			if err != nil {
+				return err
+			}
+
+		}
 
 		// reminder for myself, when fragmenting the record, dont crc the encoded payload, crc each part separately
 	} else if s.CurrentBlock.Remaining() <= headerSize { // not a single byte of payload can fit, pad the block
