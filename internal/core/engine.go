@@ -10,6 +10,7 @@ import (
 	"github.com/ajromen/LSM-KV-Engine/internal/config"
 	"github.com/ajromen/LSM-KV-Engine/internal/enums"
 	"github.com/ajromen/LSM-KV-Engine/internal/lsm"
+	"github.com/ajromen/LSM-KV-Engine/internal/notifier"
 	"github.com/ajromen/LSM-KV-Engine/internal/sequence"
 	"github.com/ajromen/LSM-KV-Engine/internal/shared"
 	"github.com/ajromen/LSM-KV-Engine/internal/sstable"
@@ -22,6 +23,7 @@ type Engine struct {
 	seqGen      *sequence.SequenceGenerator
 	ttlJanitor  *ttl.Janitor
 	inMemoryTTL bool
+	notifier    *notifier.Notifier
 	//wal
 }
 
@@ -34,7 +36,7 @@ func NewEngine() (*Engine, error) {
 	if err != nil {
 		return nil, err
 	}
-	engine := Engine{lsm: lsmTree, inMemoryTTL: config.GetSettings().TTL.InMemoryTTL}
+	engine := Engine{lsm: lsmTree, inMemoryTTL: config.GetSettings().TTL.InMemoryTTL, notifier: notifier.NewNotifier()}
 
 	engine.recover()
 
@@ -66,6 +68,7 @@ func (engine *Engine) Put(key []byte, value []byte) {
 	seqId := engine.seqGen.Next()
 	//wal
 	engine.lsm.Put(key, value, seqId, enums.OpTypePut)
+	engine.notifier.NotifyPut(key, value)
 }
 
 func (engine *Engine) PutWithTTL(key []byte, value []byte, ttl int64) {
@@ -75,6 +78,7 @@ func (engine *Engine) PutWithTTL(key []byte, value []byte, ttl int64) {
 		engine.ttlJanitor.AddTTL(shared.TTLEntry{ExpiresAt: time.Now().UnixMilli() + ttl, Key: key})
 	}
 	engine.lsm.PutWithTTL(key, value, seqId, enums.OpTypePut, ttl)
+	engine.notifier.NotifyPut(key, value)
 }
 
 func (engine *Engine) Get(key []byte) ([]byte, bool, error) {
@@ -98,6 +102,7 @@ func (engine *Engine) Delete(key []byte) {
 	seqId := engine.seqGen.Next()
 	// wal
 	engine.lsm.Put(key, nil, seqId, enums.OpTypeDel)
+	engine.notifier.NotifyDelete(key)
 }
 
 func (engine *Engine) RangeDelete(startKey []byte, endKey []byte) {
@@ -193,4 +198,12 @@ func (engine *Engine) DataRaw(index int) {
 	fmt.Println("File:", filePath)
 	fmt.Println("Data bytes:", buf)
 	fmt.Println("-----")
+}
+
+func (engine *Engine) Subscribe(lower, upper string, bufferSize int) *notifier.Listener {
+	return engine.notifier.Subscribe([]byte(lower), []byte(upper), bufferSize)
+}
+
+func (engine *Engine) Unsubscribe(l *notifier.Listener) {
+	engine.notifier.Unsubscribe(l)
 }
