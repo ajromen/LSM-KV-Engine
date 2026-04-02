@@ -17,6 +17,7 @@ type Config struct {
 	ProbabilisticType ProbabilisticTypeConfig `json:"probabilistic_type"`
 	SkipList          SkipListConfig          `json:"skiplist"`
 	SavePath          string                  `json:"save_path"`
+	Debug             bool                    `json:"debug"`
 }
 
 type WALConfig struct {

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/block"
+	"github.com/ajromen/LSM-KV-Engine/internal/config"
 	"github.com/ajromen/LSM-KV-Engine/internal/enums"
 )
 
@@ -38,10 +39,16 @@ func NewManifest(fileDir string) (*Manifest, error) {
 		if err != nil {
 			return nil, err
 		}
+		if config.GetSettings().Debug {
+			fmt.Printf("Reconstructed manifest from folder\n")
+		}
 	} else {
 		err := manifest.load()
 		if err != nil {
 			return nil, err
+		}
+		if config.GetSettings().Debug {
+			fmt.Printf("Manifest loaded from file \n")
 		}
 	}
 	return manifest, nil

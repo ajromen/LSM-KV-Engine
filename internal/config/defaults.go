@@ -10,8 +10,8 @@ import (
 
 // Engine defaults
 const (
+	defaultDebug = false
 	//WAL
-
 	defaultWalSegmentSize = 1 * 1024 * 1024
 
 	//memtable
@@ -50,6 +50,7 @@ const (
 func NewDefaultConfig() *Config {
 	return &Config{
 		SavePath: getDefaultSavePath(),
+		Debug:    defaultDebug,
 		WAL: WALConfig{
 			WALSegmentSize: defaultWalSegmentSize,
 		},

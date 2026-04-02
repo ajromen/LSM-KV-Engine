@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"time"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/block"
 	"github.com/ajromen/LSM-KV-Engine/internal/config"
@@ -72,20 +73,24 @@ func NewSSTableManager(dataDir string) *SSTableManager {
 	}
 	manager.Manifest = manifest
 	manager.blockManager = block.NewBlockManager(blockSize)
-	if err := manager.LoadExistingSSTables(); err != nil {
+	num, err := manager.LoadExistingSSTables()
+	if err != nil {
 		panic(fmt.Errorf("failed to load existing sstables: %v", err))
+	}
+	if config.GetSettings().Debug {
+		fmt.Printf("Loaded %d sstables \n", num)
 	}
 	return manager
 }
 
 // takes sstable names from Manifest and loads them
 // finds max sequence id if not in Manifest
-func (sm *SSTableManager) LoadExistingSSTables() error {
+func (sm *SSTableManager) LoadExistingSSTables() (int, error) {
 	_, err := os.Stat(sm.dataDir)
 	if os.IsNotExist(err) {
 		err := block.EnsureDir(sm.dataDir)
 		if err != nil {
-			return fmt.Errorf("cant create data directory: %w", err)
+			return 0, fmt.Errorf("cant create data directory: %w", err)
 		}
 	}
 	keys := make([]int, 0, len(sm.Manifest.Layers))
@@ -102,12 +107,12 @@ func (sm *SSTableManager) LoadExistingSSTables() error {
 		for _, sstManifest := range sm.Manifest.Layers[i] {
 			reader, err := NewSSTableReader(sstManifest.Id, sstManifest.BaseFileName, sstManifest.Format, int(sstManifest.Layer))
 			if err != nil {
-				return fmt.Errorf("cant create SSTable reader: %w", err)
+				return 0, fmt.Errorf("cant create SSTable reader: %w", err)
 			}
 			if sm.Manifest.MaxSeqId == 0 {
 				seqId, ok := reader.Metadata.GetUint64(FieldMaxSeqId)
 				if !ok {
-					return fmt.Errorf("couldn't read metadata segment")
+					return 0, fmt.Errorf("couldn't read metadata segment")
 				}
 				if maxSeqId < seqId {
 					maxSeqId = seqId
@@ -120,10 +125,10 @@ func (sm *SSTableManager) LoadExistingSSTables() error {
 		sm.Manifest.MaxSeqId = maxSeqId
 		err := sm.Manifest.Save()
 		if err != nil {
-			return err
+			return 0, err
 		}
 	}
-	return nil
+	return len(keys), nil
 }
 
 func (sm *SSTableManager) createSSTable(expectedElems uint64, toLayer int) (string, int, *SSTableWriter, error) {
@@ -164,7 +169,9 @@ func (sm *SSTableManager) FlushToSSTable(entries []memtable.MemtableEntry) error
 	if len(entries) == 0 {
 		return nil
 	}
-	fmt.Printf("Flushing %d entries\n", len(entries))
+	if config.GetSettings().Debug {
+		fmt.Printf("Flushing %d entries\n", len(entries))
+	}
 	sort.Slice(entries, func(i, j int) bool { return bytes.Compare(entries[i].Key, entries[j].Key) < 0 })
 
 	// 1. create new sstable
@@ -200,8 +207,9 @@ func (sm *SSTableManager) FlushToSSTable(entries []memtable.MemtableEntry) error
 	if err != nil {
 		return err
 	}
-
-	fmt.Printf("SSTable %s created with %d entries\n", filepath.Base(filePath), len(entries))
+	if config.GetSettings().Debug {
+		fmt.Printf("SSTable %s created with %d entries\n", filepath.Base(filePath), len(entries))
+	}
 	return nil
 }
 
@@ -218,10 +226,17 @@ func (sm *SSTableManager) Get(key []byte) (*Record, bool, error) {
 			if record.Tombstone {
 				return nil, false, nil
 			}
-			return record, true, nil
+			return sm.checkTTL(record)
 		}
 	}
 	return nil, false, nil
+}
+
+func (sm *SSTableManager) checkTTL(r *Record) (*Record, bool, error) {
+	if r.ExpiresAt != 0 && time.UnixMilli(r.ExpiresAt).Before(time.Now()) {
+		return nil, false, nil
+	}
+	return r, true, nil
 }
 
 // DeleteSSTable deletes at specified layer/index
@@ -307,7 +322,7 @@ func (sm *SSTableManager) MergeSSTables(readers []*SSTableReader, toLayer int, s
 	count := 0
 	for iterator.Valid() {
 		rec := iterator.Value()
-		if rec.Tombstone { // TODO check if record is before checkpoints - check if key exists above
+		if rec.Tombstone {
 			iterator.Next()
 			continue
 		}
@@ -374,6 +389,7 @@ func (sm *SSTableManager) MoveSSTable(current *SSTableReader, toLayer int) error
 func (sm *SSTableManager) GetAllTTL() (*ttl.ExpiryHeap, map[string]int64, error) {
 	heap := ttl.NewExpiryHeap()
 	index := make(map[string]int64)
+	timeNow := time.Now().UnixMilli()
 	for _, layer := range sm.Layers {
 		for i := len(layer.SSTables) - 1; i >= 0; i-- {
 			e, err := layer.SSTables[i].GetTTLEntries()
@@ -381,6 +397,9 @@ func (sm *SSTableManager) GetAllTTL() (*ttl.ExpiryHeap, map[string]int64, error)
 				return nil, nil, err
 			}
 			for _, entry := range e {
+				if entry.ExpiresAt < timeNow {
+					continue
+				}
 				heap.Push(entry)
 				index[string(entry.Key)] = entry.ExpiresAt
 			}
