@@ -355,5 +355,6 @@ func (r *SSTableReader) Get(key []byte) (*Record, error) {
 		Tombstone: rec.Tombstone,
 		Key:       rec.Key,
 		Value:     rec.Value,
+		ExpiresAt: rec.ExpiresAt,
 	}, nil
 }

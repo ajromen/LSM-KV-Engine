@@ -130,6 +130,9 @@ func (mm *MemtableManager) Get(key []byte) (*MemtableEntry, bool) {
 }
 
 func (mm *MemtableManager) checkTTL(entry *MemtableEntry, ok bool) (*MemtableEntry, bool) {
+	if entry == nil {
+		return nil, true
+	}
 	if entry.ExpiresAt != 0 && time.UnixMilli(entry.ExpiresAt).Before(time.Now()) {
 		return nil, false
 	}

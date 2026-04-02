@@ -22,8 +22,8 @@ Commands:
     del <key>                 Delete a key
     exit | quit | q           Close the engine and exit
   TTL:
-    expire <key> <ttl>   Set TTL for a key
-    ttl <key>            Prints remaining TTL for a key (O(1) only if InMemoryTTL=true)
+    expire <key1> <key2> ... <keyN> <ttl>   Set TTL for a key/keys
+    ttl <key>                               Prints remaining TTL for a key (O(1) only if InMemoryTTL=true)
   Aditional:
     del-range <key1> <key2>   Delete a range of keys 
     clear-all                 Delete all data
@@ -46,7 +46,7 @@ func main() {
 	}
 	engine, err := core.NewEngine()
 	if err != nil {
-		fmt.Println("Error: ", err)
+		printError(fmt.Sprint("Error: ", err))
 		return
 	}
 	RunCli(engine)
@@ -87,23 +87,23 @@ func RunCli(engine *core.Engine) {
 			print("Exiting...")
 			err := engine.Close()
 			if err != nil {
-				fmt.Println("Closing error: ", err)
+				printError(fmt.Sprint("Closing error: ", err))
 				os.Exit(1)
 			}
 			os.Exit(0)
 		case "help":
-			fmt.Println(helpText)
+			printSuccess(fmt.Sprint(helpText))
 		case "dataraw":
 			handleDataRaw(engine, parts)
 		default:
-			fmt.Println("Unknown command: ", parts[0])
+			printError(fmt.Sprint("Unknown command: ", parts[0]))
 		}
 	}
 }
 
 func handlePut(engine *core.Engine, parts []string) {
 	if len(parts) < 3 || len(parts) > 4 {
-		fmt.Println("Usage: put <key> <value> [ttl]")
+		printError(fmt.Sprint("Usage: put <key> <value> [ttl]"))
 		return
 	}
 
@@ -113,7 +113,7 @@ func handlePut(engine *core.Engine, parts []string) {
 	if len(parts) == 4 {
 		ttl, err := parseTTL(parts[3])
 		if err != nil {
-			fmt.Println("TTL must be a number")
+			printError(fmt.Sprint("TTL must be a number"))
 			return
 		}
 		engine.PutWithTTL([]byte(key), []byte(value), ttl)
@@ -121,64 +121,80 @@ func handlePut(engine *core.Engine, parts []string) {
 		engine.Put([]byte(key), []byte(value))
 	}
 
-	fmt.Println("Put:", key, "OK")
+	printSuccess(fmt.Sprint("Put: ", key, " OK"))
 }
-
 func handleExpire(engine *core.Engine, parts []string) {
 	if len(parts) < 3 {
-		fmt.Println("Usage: expire <key> <ttl>")
+		printError("Usage: expire <key1> <key2> ... <keyN> <ttl>")
 		return
 	}
-	key := parts[1]
-	ttl, err := parseTTL(parts[2])
+
+	ttl, err := parseTTL(parts[len(parts)-1])
 	if err != nil {
-		fmt.Println("TTL must be a number")
+		printError("Invalid TTL format")
 		return
 	}
-	engine.PutWithTTL([]byte(key), nil, ttl)
-	fmt.Printf("Expire: '%s', %dms OK\n", key, ttl)
+
+	keys := parts[1 : len(parts)-1]
+
+	for _, key := range keys {
+		val, found, err := engine.Get([]byte(key))
+		if err != nil {
+			printError(fmt.Sprintf("error checking key '%s': %v", key, err))
+			return
+		}
+		if !found {
+			printError(fmt.Sprintf("key not found: %s", key))
+			return
+		}
+
+		engine.PutWithTTL([]byte(key), val, ttl)
+	}
+
+	printSuccess(fmt.Sprintf("Expire set for %d keys (%dms)", len(keys), ttl))
 }
 
 func handleGet(engine *core.Engine, parts []string) {
 	if len(parts) != 2 {
-		fmt.Println("Usage: get <key>")
+		printError(fmt.Sprint("Usage: get <key>"))
 		return
 	}
 	key := parts[1]
 	value, found, err := engine.Get([]byte(key))
 	if err != nil {
-		fmt.Println("Get:", err)
+		printError(fmt.Sprint("Get:", err))
 		return
 	}
 	if !found {
-		fmt.Println("Get: key '" + key + "' not found")
+		printError(fmt.Sprint("Get: key '" + key + "' not found"))
 		return
 	}
-	fmt.Println(string(value))
+	printSuccess(fmt.Sprint(string(value)))
 }
 
 func handleTTL(engine *core.Engine, parts []string) {
 	if len(parts) != 2 {
-		fmt.Println("Usage: ttl <key>")
+		printError(fmt.Sprint("Usage: ttl <key>"))
 		return
 	}
 
 	key := parts[1]
 	value, found, err := engine.GetTTL([]byte(key))
+
 	if err != nil {
-		fmt.Println("TTL:", err)
+		printError(fmt.Sprint("TTL:", err))
 		return
 	}
-	if !found {
-		fmt.Println("TTL: key '" + key + "' not found or doesnt have ttl")
+	if !found || value == 0 {
+		printError(fmt.Sprint("TTL: key '" + key + "' not found or doesnt have ttl"))
 		return
 	}
 	t := time.UnixMilli(value)
 	if t.Before(time.Now()) {
-		fmt.Println("TTL: key '" + key + "' expired")
+		printError(fmt.Sprint("TTL: key '" + key + "' expired"))
 		return
 	}
-	fmt.Printf("Key: '%s', TTL: %dms, Expires At: %s\n", key, t.UnixMilli()-time.Now().UnixMilli(), t.Format("15:04:05 02 Jan 2006 "))
+	printSuccess(fmt.Sprintf("Key: '%s', TTL: %dms, Expires At: %s\n", key, t.UnixMilli()-time.Now().UnixMilli(), t.Format("15:04:05 02 Jan 2006 ")))
 }
 
 func parseTTL(s string) (int64, error) {
@@ -214,48 +230,48 @@ func parseTTL(s string) (int64, error) {
 
 func handleDelete(engine *core.Engine, parts []string) {
 	if len(parts) != 2 {
-		fmt.Println("Usage: delete <key>")
+		printError(fmt.Sprint("Usage: delete <key>"))
 		return
 	}
 	key := parts[1]
 	engine.Delete([]byte(key))
 
-	fmt.Println("Delete:", key, "OK")
+	printSuccess(fmt.Sprint("Delete: ", key, " OK"))
 }
 
 func handleRangeDel(engine *core.Engine, parts []string) {
 	if len(parts) != 3 {
-		fmt.Println("Usage: del-range <key1> <key2>")
+		printError(fmt.Sprint("Usage: del-range <key1> <key2>"))
 	}
 	startKey := parts[1]
 	endKey := parts[2]
 	engine.RangeDelete([]byte(startKey), []byte(endKey))
-	fmt.Println("RangeDel:", startKey, endKey, "OK")
+	printSuccess(fmt.Sprint("RangeDel: ", startKey, endKey, " OK"))
 }
 
 func handleClear(engine *core.Engine, parts []string) {
 	if len(parts) != 1 {
-		fmt.Println("Usage: clear-all")
+		printError(fmt.Sprint("Usage: clear-all"))
 		return
 	}
-	fmt.Print("DELETE ALL DATA? (yes/N): ")
+	fmt.Print(red + "DELETE ALL DATA? (yes/N): " + reset)
 	reader := bufio.NewReader(os.Stdin)
 	answer, _ := reader.ReadString('\n')
 	answer = strings.TrimSpace(answer)
 	if answer != "yes" {
-		fmt.Println("Aborted.")
+		printError(fmt.Sprint("Aborted."))
 		return
 	}
 	if err := engine.ClearAll(); err != nil {
-		fmt.Println("ClearAll:", err)
+		printError(fmt.Sprint("ClearAll:", err))
 		return
 	}
-	fmt.Println("ClearAll: OK")
+	printSuccess(fmt.Sprint("ClearAll: OK"))
 }
 
 func handleDataRaw(engine *core.Engine, parts []string) {
 	if len(parts) != 2 {
-		fmt.Println("Usage: dataraw <index>")
+		printError(fmt.Sprint("Usage: dataraw <index>"))
 		return
 	}
 
@@ -263,9 +279,18 @@ func handleDataRaw(engine *core.Engine, parts []string) {
 
 	indx, err := strconv.Atoi(indxStr)
 	if err != nil {
-		fmt.Println("invalid index:", indxStr)
+		printError(fmt.Sprint("invalid index:", indxStr))
 		return
 	}
 
 	engine.DataRaw(indx)
+}
+
+func printError(err string) {
+	fmt.Println(red + err + reset)
+}
+
+func printSuccess(str string) {
+	fmt.Println(green + str + reset)
+
 }
