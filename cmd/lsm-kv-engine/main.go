@@ -22,8 +22,8 @@ Commands:
     del <key>                 Delete a key
     exit | quit | q           Close the engine and exit
   TTL:
-    expire <key> <ttl>   Set TTL for a key
-    ttl <key>            Prints remaining TTL for a key (O(1) only if InMemoryTTL=true)
+    expire <key1> <key2> ... <keyN> <ttl>   Set TTL for a key/keys
+    ttl <key>                               Prints remaining TTL for a key (O(1) only if InMemoryTTL=true)
   Aditional:
     del-range <key1> <key2>   Delete a range of keys 
     clear-all                 Delete all data
@@ -123,31 +123,35 @@ func handlePut(engine *core.Engine, parts []string) {
 
 	printSuccess(fmt.Sprint("Put: ", key, " OK"))
 }
-
 func handleExpire(engine *core.Engine, parts []string) {
 	if len(parts) < 3 {
-		printError(fmt.Sprint("Usage: expire <key> <ttl>"))
-		return
-	}
-	key := parts[1]
-
-	value, found, err := engine.Get([]byte(key))
-	if err != nil {
-		printError(fmt.Sprint("Expire: ", err))
-		return
-	}
-	if !found {
-		printError(fmt.Sprint("Expire: key not found"))
+		printError("Usage: expire <key1> <key2> ... <keyN> <ttl>")
 		return
 	}
 
-	ttl, err := parseTTL(parts[2])
+	ttl, err := parseTTL(parts[len(parts)-1])
 	if err != nil {
-		printError(fmt.Sprint("TTL must be a number"))
+		printError("Invalid TTL format")
 		return
 	}
-	engine.PutWithTTL([]byte(key), value, ttl)
-	fmt.Printf(green+"Expire: '%s', %dms OK\n"+reset, key, ttl)
+
+	keys := parts[1 : len(parts)-1]
+
+	for _, key := range keys {
+		val, found, err := engine.Get([]byte(key))
+		if err != nil {
+			printError(fmt.Sprintf("error checking key '%s': %v", key, err))
+			return
+		}
+		if !found {
+			printError(fmt.Sprintf("key not found: %s", key))
+			return
+		}
+
+		engine.PutWithTTL([]byte(key), val, ttl)
+	}
+
+	printSuccess(fmt.Sprintf("Expire set for %d keys (%dms)", len(keys), ttl))
 }
 
 func handleGet(engine *core.Engine, parts []string) {
@@ -190,7 +194,7 @@ func handleTTL(engine *core.Engine, parts []string) {
 		printError(fmt.Sprint("TTL: key '" + key + "' expired"))
 		return
 	}
-	fmt.Printf(green+"Key: '%s', TTL: %dms, Expires At: %s\n"+reset, key, t.UnixMilli()-time.Now().UnixMilli(), t.Format("15:04:05 02 Jan 2006 "))
+	printSuccess(fmt.Sprintf("Key: '%s', TTL: %dms, Expires At: %s\n", key, t.UnixMilli()-time.Now().UnixMilli(), t.Format("15:04:05 02 Jan 2006 ")))
 }
 
 func parseTTL(s string) (int64, error) {
