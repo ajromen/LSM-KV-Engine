@@ -69,6 +69,9 @@ func (l *LSM) Get(key []byte) ([]byte, bool, error) {
 		}
 		return entry.Value, true, nil
 	}
+	if config.GetSettings().Debug {
+		fmt.Printf("Key not found in memtable checking sstable\n")
+	}
 	record, found, err := l.sstableManager.Get(key)
 	if err != nil {
 		return nil, false, err

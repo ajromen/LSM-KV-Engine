@@ -214,6 +214,7 @@ func (sm *SSTableManager) FlushToSSTable(entries []memtable.MemtableEntry) error
 }
 
 func (sm *SSTableManager) Get(key []byte) (*Record, bool, error) {
+	t := time.Now().UnixMilli()
 	for _, layer := range sm.Layers {
 		for i := len(layer.SSTables) - 1; i >= 0; i-- {
 			record, err := layer.SSTables[i].Get(key)
@@ -226,14 +227,14 @@ func (sm *SSTableManager) Get(key []byte) (*Record, bool, error) {
 			if record.Tombstone {
 				return nil, false, nil
 			}
-			return sm.checkTTL(record)
+			return sm.checkTTL(record, t)
 		}
 	}
 	return nil, false, nil
 }
 
-func (sm *SSTableManager) checkTTL(r *Record) (*Record, bool, error) {
-	if r.ExpiresAt != 0 && time.UnixMilli(r.ExpiresAt).Before(time.Now()) {
+func (sm *SSTableManager) checkTTL(r *Record, t int64) (*Record, bool, error) {
+	if r.ExpiresAt != 0 && r.ExpiresAt < t {
 		return nil, false, nil
 	}
 	return r, true, nil
@@ -320,9 +321,10 @@ func (sm *SSTableManager) MergeSSTables(readers []*SSTableReader, toLayer int, s
 		return err
 	}
 	count := 0
+	t := time.Now().UnixMilli()
 	for iterator.Valid() {
 		rec := iterator.Value()
-		if rec.Tombstone {
+		if rec.Tombstone || rec.ExpiresAt < t && rec.ExpiresAt != 0 {
 			iterator.Next()
 			continue
 		}
