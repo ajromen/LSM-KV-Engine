@@ -139,7 +139,8 @@ func (s *Segment) Append(r Record) error {
 		}
 		//fmt.Println("Partial record", buf, payload)
 
-		// seems unsafe, might have to refactor for loop
+		// for loop seems unsafe, might have to refactor
+		// to do
 		for s.CurrentBlock.Remaining() < headerSize+len(payload) {
 			//fmt.Println(s.CurrentBlock.Data)
 			err = s.MoveToNextBlock()
@@ -285,6 +286,22 @@ func (s *Segment) MoveToNextBlock() error {
 	s.CurrentBlockIndex++
 	s.CurrentBlock = NewBlock(s.BlockSize)
 	return nil
+}
+
+func (s *Segment) Sync() error {
+	err := s.FlushCurrentBlock()
+	if err != nil {
+		return err
+	}
+	return s.BM.SyncFile(s.Path)
+}
+
+func (s *Segment) IsFull() bool {
+	if s.CurrentBlock == nil {
+		return true
+	}
+	minFragmentSize := KEY_START + 1
+	return s.CurrentBlockIndex == uint32(s.MaxBlocks-1) && s.CurrentBlock.Remaining() < minFragmentSize
 }
 
 // Helper function, should be moved to block manager?
