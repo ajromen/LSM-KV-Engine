@@ -413,6 +413,7 @@ func (m *MergedMemtableIterator) advance() {
 	for m.rawIterator.Valid() {
 		entry := m.rawIterator.Key()
 		if entry.OpType == enums.OpTypeDel {
+			m.prevKey = append([]byte(nil), entry.Key...)
 			m.rawIterator.Next()
 			continue
 		}
