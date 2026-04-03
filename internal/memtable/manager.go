@@ -156,7 +156,7 @@ func (mm *MemtableManager) Close() {
 // EntryIterator returns a MergedMemtableIterator adapted to iterator.Entry type
 // This is used by DBIterator which works at the Entry level
 func (mm *MemtableManager) EntryIterator() iterator.Iterator[iterator.Entry] {
-	typedIt := mm.Iterator() // Iterator[MemtableEntry]
+	typedIt := mm.RawIterator() // using raw in order to DBIterator see tombstone
 	return iterator.NewAdaptedIterator(
 		&memtableIteratorSeekWrapper{inner: typedIt},
 		func(e MemtableEntry) iterator.Entry {

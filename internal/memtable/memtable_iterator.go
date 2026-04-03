@@ -170,7 +170,11 @@ func NewRawIterator(iterators []iterator.Iterator[MemtableEntry], mergeStructure
 	}
 	active := []iterator.Iterator[MemtableEntry]{}
 	for _, it := range iterators {
-		if it != nil && it.Valid() {
+		if it == nil {
+			continue
+		}
+		it.SeekToFirst()
+		if it.Valid() {
 			active = append(active, it)
 		}
 	}
