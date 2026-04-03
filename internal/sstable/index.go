@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"hash/crc32"
-	"os"
 )
 
 /*
@@ -51,8 +50,8 @@ type IndexEntry struct {
 func (entry *IndexEntry) EncodedSize() int {
 	keyLen := uint64(len(entry.Key))
 	buf := make([]byte, binary.MaxVarintLen64)
-	varintLen := binary.PutUvarint(buf, keyLen)
-	return varintLen + len(entry.Key) + 4
+	variantLen := binary.PutUvarint(buf, keyLen)
+	return variantLen + len(entry.Key) + 4
 }
 
 // EncodeTo SERIALIZES THE INDEX ENTRY INTO THE PROVIDED BUFFER, RETURNS THE NUMBER OF BYTES WRITTEN
@@ -210,18 +209,6 @@ func (block *IndexBlock) FindBlock(key []byte) int {
 		}
 	}
 	return result
-}
-
-// ReadFromFile READS INDEX BLOCK FROM FILE -> not used
-func ReadFromFile(file *os.File, offset uint64, size int) (*IndexBlock, error) {
-	if _, err := file.Seek(int64(offset), 0); err != nil {
-		return nil, err
-	}
-	data := make([]byte, size)
-	if _, err := file.Read(data); err != nil {
-		return nil, err
-	}
-	return DecodeIndexBlock(data)
 }
 
 // AddFromDataBlock CREATES AN INDEX ENTRY AND ADDS IT TO BLOCK FROM DATA BLOCK BUILDER AND INDEX OF GIVEN BLOCK

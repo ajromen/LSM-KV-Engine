@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 
+	"github.com/ajromen/LSM-KV-Engine/internal/config"
 	"github.com/ajromen/LSM-KV-Engine/internal/sstable"
 )
 
@@ -43,7 +44,9 @@ func (l LeveledCompaction) Compact(manager *sstable.SSTableManager) error {
 			break
 		}
 		pickedNextLayer := l.pickFromNext(pickedCurrent, manager.Layers[i+1].SSTables)
-		fmt.Printf("Compacting %d SSTables at layer %d\n", len(pickedNextLayer)+1, i)
+		if config.GetSettings().Debug {
+			fmt.Printf("Compacting %d SSTables at layer %d\n", len(pickedNextLayer)+1, i)
+		}
 		// if it doesn't have overlapping just move it layer down
 		if len(pickedNextLayer) == 0 {
 			err := manager.MoveSSTable(pickedCurrent, min(i+1, l.MaxHeight-1))
@@ -97,14 +100,18 @@ func (s SizeTiredCompaction) Compact(manager *sstable.SSTableManager) error {
 		readers := make([]*sstable.SSTableReader, len(manager.Layers[i].SSTables))
 		copy(readers, manager.Layers[i].SSTables)
 		if i+1 == s.MaxHeight {
-			fmt.Printf("Compacting %d SSTables at layer %d\n", len(readers), i)
+			if config.GetSettings().Debug {
+				fmt.Printf("Compacting %d SSTables at layer %d\n", len(readers), i)
+			}
 			err := manager.MergeSSTables(readers, i, true)
 			if err != nil {
 				return err
 			}
 			return nil
 		}
-		fmt.Printf("Compacting %d SSTables at layer %d\n", len(readers), i)
+		if config.GetSettings().Debug {
+			fmt.Printf("Compacting %d SSTables at layer %d\n", len(readers), i)
+		}
 		err := manager.MergeSSTables(readers, min(i+1, s.MaxHeight-1), false)
 		if err != nil {
 			return err

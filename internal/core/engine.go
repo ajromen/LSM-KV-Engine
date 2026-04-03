@@ -4,38 +4,53 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
+	"time"
 
-	"github.com/ajromen/LSM-KV-Engine/internal/cli"
 	"github.com/ajromen/LSM-KV-Engine/internal/config"
 	"github.com/ajromen/LSM-KV-Engine/internal/iterator"
+	"github.com/ajromen/LSM-KV-Engine/internal/enums"
 	"github.com/ajromen/LSM-KV-Engine/internal/lsm"
 	"github.com/ajromen/LSM-KV-Engine/internal/sequence"
+	"github.com/ajromen/LSM-KV-Engine/internal/shared"
 	"github.com/ajromen/LSM-KV-Engine/internal/sstable"
+	"github.com/ajromen/LSM-KV-Engine/internal/ttl"
 )
 
 type Engine struct {
-	config *config.Config
-	lsm    *lsm.LSM
-	seqGen *sequence.SequenceGenerator
+	config      *config.Config
+	lsm         *lsm.LSM
+	seqGen      *sequence.SequenceGenerator
+	ttlJanitor  *ttl.Janitor
+	inMemoryTTL bool
 	//wal
 }
 
-func NewEngine(flags *cli.FLags) (*Engine, error) {
-	err := config.LoadConfig(flags)
-	if err != nil {
-		return nil, err
-	}
+func NewEngine() (*Engine, error) {
 	dataDir := config.GetSettings().SavePath
 	if err := os.MkdirAll(dataDir, 0755); err != nil {
 		return nil, err
 	}
-
 	lsmTree, err := lsm.NewLSM(dataDir)
 	if err != nil {
 		return nil, err
 	}
-	engine := Engine{lsm: lsmTree}
+	engine := Engine{lsm: lsmTree, inMemoryTTL: config.GetSettings().TTL.InMemoryTTL}
+
 	engine.recover()
+
+	if engine.inMemoryTTL {
+		engine.ttlJanitor = ttl.NewTTLJanitor(engine.Delete)
+		heap, index, err := engine.lsm.GetAllTTLFomSST()
+		if err != nil {
+			return nil, err
+		}
+		engine.ttlJanitor.Init(heap, index)
+		go engine.ttlJanitor.Run()
+	}
+	if config.GetSettings().Debug {
+		print("Engine created\n")
+	}
 	return &engine, nil
 }
 
@@ -48,14 +63,19 @@ func (engine *Engine) recover() {
 	engine.seqGen = sequence.NewSequenceGenerator(maxSeq)
 }
 
-func (engine *Engine) Put(key []byte, value []byte) error {
+func (engine *Engine) Put(key []byte, value []byte) {
 	seqId := engine.seqGen.Next()
 	//wal
-	err := engine.lsm.Put(key, value, seqId)
-	if err != nil {
-		return err
+	engine.lsm.Put(key, value, seqId, enums.OpTypePut)
+}
+
+func (engine *Engine) PutWithTTL(key []byte, value []byte, ttl int64) {
+	seqId := engine.seqGen.Next()
+	//wal
+	if engine.inMemoryTTL {
+		engine.ttlJanitor.AddTTL(shared.TTLEntry{ExpiresAt: time.Now().UnixMilli() + ttl, Key: key})
 	}
-	return nil
+	engine.lsm.PutWithTTL(key, value, seqId, enums.OpTypePut, ttl)
 }
 
 func (engine *Engine) Get(key []byte) ([]byte, bool, error) {
@@ -63,17 +83,33 @@ func (engine *Engine) Get(key []byte) ([]byte, bool, error) {
 	return value, found, err
 }
 
-func (engine *Engine) Delete(key []byte) error {
+func (engine *Engine) GetTTL(key []byte) (int64, bool, error) {
+	if !config.GetSettings().TTL.InMemoryTTL {
+		value, found, err := engine.lsm.GetTTL(key)
+		return value, found, err
+	}
+	t, found := engine.ttlJanitor.GetTTL(string(key))
+	return t, found, nil
+}
+
+func (engine *Engine) Delete(key []byte) {
+	if config.GetSettings().Debug {
+		fmt.Printf("\nDeleting key %s\n", string(key))
+	}
 	seqId := engine.seqGen.Next()
 	// wal
-	err := engine.lsm.Delete(key, seqId)
-	if err != nil {
-		return err
-	}
-	return nil
+	engine.lsm.Put(key, nil, seqId, enums.OpTypeDel)
+}
+
+func (engine *Engine) RangeDelete(startKey []byte, endKey []byte) {
+	seqId := engine.seqGen.Next()
+	engine.lsm.Put(startKey, endKey, seqId, enums.OpTypeRangeDel)
 }
 
 func (engine *Engine) Close() error {
+	if engine.inMemoryTTL {
+		engine.ttlJanitor.Stop()
+	}
 	//wal finish write
 	err := engine.lsm.Finish()
 	if err != nil {
@@ -83,8 +119,20 @@ func (engine *Engine) Close() error {
 }
 
 func (engine *Engine) ClearAll() error {
-	//wal
-	print("TODO delete everything")
+	if err := engine.lsm.ClearAll(); err != nil {
+		return fmt.Errorf("clear-all: lsm clear failed: %w", err)
+	}
+
+	dataDir := config.GetSettings().SavePath
+	manifestPath := filepath.Join(dataDir, "MANIFEST")
+
+	if err := os.Remove(manifestPath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("clear-all: failed to remove manifest: %w", err)
+	}
+	if engine.inMemoryTTL {
+		engine.ttlJanitor.ClearAll()
+	}
+
 	return nil
 }
 
