@@ -6,12 +6,14 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"time"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/block"
 	"github.com/ajromen/LSM-KV-Engine/internal/config"
 	"github.com/ajromen/LSM-KV-Engine/internal/enums"
 	"github.com/ajromen/LSM-KV-Engine/internal/iterator"
 	"github.com/ajromen/LSM-KV-Engine/internal/memtable"
+	"github.com/ajromen/LSM-KV-Engine/internal/ttl"
 )
 
 type Layer struct {
@@ -72,20 +74,24 @@ func NewSSTableManager(dataDir string) *SSTableManager {
 	}
 	manager.Manifest = manifest
 	manager.blockManager = block.NewBlockManager(blockSize)
-	if err := manager.LoadExistingSSTables(); err != nil {
+	num, err := manager.LoadExistingSSTables()
+	if err != nil {
 		panic(fmt.Errorf("failed to load existing sstables: %v", err))
+	}
+	if config.GetSettings().Debug {
+		fmt.Printf("Loaded %d sstables \n", num)
 	}
 	return manager
 }
 
 // takes sstable names from Manifest and loads them
 // finds max sequence id if not in Manifest
-func (sm *SSTableManager) LoadExistingSSTables() error {
+func (sm *SSTableManager) LoadExistingSSTables() (int, error) {
 	_, err := os.Stat(sm.dataDir)
 	if os.IsNotExist(err) {
 		err := block.EnsureDir(sm.dataDir)
 		if err != nil {
-			return fmt.Errorf("cant create data directory: %w", err)
+			return 0, fmt.Errorf("cant create data directory: %w", err)
 		}
 	}
 	keys := make([]int, 0, len(sm.Manifest.Layers))
@@ -102,12 +108,12 @@ func (sm *SSTableManager) LoadExistingSSTables() error {
 		for _, sstManifest := range sm.Manifest.Layers[i] {
 			reader, err := NewSSTableReader(sstManifest.Id, sstManifest.BaseFileName, sstManifest.Format, int(sstManifest.Layer))
 			if err != nil {
-				return fmt.Errorf("cant create SSTable reader: %w", err)
+				return 0, fmt.Errorf("cant create SSTable reader: %w", err)
 			}
 			if sm.Manifest.MaxSeqId == 0 {
 				seqId, ok := reader.Metadata.GetUint64(FieldMaxSeqId)
 				if !ok {
-					return fmt.Errorf("couldn't read metadata segment")
+					return 0, fmt.Errorf("couldn't read metadata segment")
 				}
 				if maxSeqId < seqId {
 					maxSeqId = seqId
@@ -120,10 +126,10 @@ func (sm *SSTableManager) LoadExistingSSTables() error {
 		sm.Manifest.MaxSeqId = maxSeqId
 		err := sm.Manifest.Save()
 		if err != nil {
-			return err
+			return 0, err
 		}
 	}
-	return nil
+	return len(keys), nil
 }
 
 func (sm *SSTableManager) createSSTable(expectedElems uint64, toLayer int) (string, int, *SSTableWriter, error) {
@@ -164,7 +170,9 @@ func (sm *SSTableManager) FlushToSSTable(entries []memtable.MemtableEntry) error
 	if len(entries) == 0 {
 		return nil
 	}
-	fmt.Printf("Flushing %d entries\n", len(entries))
+	if config.GetSettings().Debug {
+		fmt.Printf("Flushing %d entries\n", len(entries))
+	}
 	sort.Slice(entries, func(i, j int) bool { return bytes.Compare(entries[i].Key, entries[j].Key) < 0 })
 
 	// 1. create new sstable
@@ -179,7 +187,8 @@ func (sm *SSTableManager) FlushToSSTable(entries []memtable.MemtableEntry) error
 			Key:       entry.Key,
 			Value:     entry.Value,
 			SeqId:     entry.SeqId,
-			Tombstone: entry.Tombstone,
+			Tombstone: entry.OpType == enums.OpTypeDel,
+			ExpiresAt: entry.ExpiresAt,
 		}
 		if err := writer.AddRecord(record); err != nil {
 			return fmt.Errorf("cant add record: %w", err)
@@ -199,12 +208,14 @@ func (sm *SSTableManager) FlushToSSTable(entries []memtable.MemtableEntry) error
 	if err != nil {
 		return err
 	}
-
-	fmt.Printf("SSTable %s created with %d entries\n", filepath.Base(filePath), len(entries))
+	if config.GetSettings().Debug {
+		fmt.Printf("SSTable %s created with %d entries\n", filepath.Base(filePath), len(entries))
+	}
 	return nil
 }
 
-func (sm *SSTableManager) Get(key []byte) ([]byte, bool, error) {
+func (sm *SSTableManager) Get(key []byte) (*Record, bool, error) {
+	t := time.Now().UnixMilli()
 	for _, layer := range sm.Layers {
 		for i := len(layer.SSTables) - 1; i >= 0; i-- {
 			record, err := layer.SSTables[i].Get(key)
@@ -217,10 +228,17 @@ func (sm *SSTableManager) Get(key []byte) ([]byte, bool, error) {
 			if record.Tombstone {
 				return nil, false, nil
 			}
-			return record.Value, true, nil
+			return sm.checkTTL(record, t)
 		}
 	}
 	return nil, false, nil
+}
+
+func (sm *SSTableManager) checkTTL(r *Record, t int64) (*Record, bool, error) {
+	if r.ExpiresAt != 0 && r.ExpiresAt < t {
+		return nil, false, nil
+	}
+	return r, true, nil
 }
 
 // DeleteSSTable deletes at specified layer/index
@@ -254,6 +272,30 @@ func (sm *SSTableManager) DeleteSSTables(readers []*SSTableReader) error {
 	return nil
 }
 
+func (sm *SSTableManager) ClearAll() error {
+	for _, layer := range sm.Layers {
+		for _, reader := range layer.SSTables {
+			if reader != nil && reader.storage != nil {
+				reader.storage.Delete()
+			}
+		}
+	}
+
+	sm.Layers = []*Layer{newLayer()}
+
+	if sm.blockManager != nil {
+		sm.blockManager.ClearCache()
+	}
+
+	sm.Manifest = &Manifest{
+		FileDir:       sm.dataDir,
+		NextSStableId: 0,
+		Layers:        make(map[int][]SSTableManifest),
+	}
+
+	return sm.Manifest.Save()
+}
+
 // MergeSSTables pass in sstables to merge them into a single sstable and delete old ones
 // skipTombstones if it's the last layer
 // 1. create new sstable
@@ -280,9 +322,10 @@ func (sm *SSTableManager) MergeSSTables(readers []*SSTableReader, toLayer int, s
 		return err
 	}
 	count := 0
+	t := time.Now().UnixMilli()
 	for iterator.Valid() {
 		rec := iterator.Value()
-		if rec.Tombstone { // TODO check if record is before checkpoints - check if key exists above
+		if rec.Tombstone || rec.ExpiresAt < t && rec.ExpiresAt != 0 {
 			iterator.Next()
 			continue
 		}
@@ -343,7 +386,6 @@ func (sm *SSTableManager) MoveSSTable(current *SSTableReader, toLayer int) error
 	if err != nil {
 		return err
 	}
-	//TODO update footer
 	return nil
 }
 
@@ -433,3 +475,25 @@ func (e emptyEntryIterator) Next()                 {}
 func (e emptyEntryIterator) Prev()                 {}
 func (e emptyEntryIterator) Key() iterator.Entry   { return iterator.Entry{} }
 func (e emptyEntryIterator) Value() iterator.Entry { return iterator.Entry{} }
+func (sm *SSTableManager) GetAllTTL() (*ttl.ExpiryHeap, map[string]int64, error) {
+	heap := ttl.NewExpiryHeap()
+	index := make(map[string]int64)
+	timeNow := time.Now().UnixMilli()
+	for _, layer := range sm.Layers {
+		for i := len(layer.SSTables) - 1; i >= 0; i-- {
+			e, err := layer.SSTables[i].GetTTLEntries()
+			if err != nil {
+				return nil, nil, err
+			}
+			for _, entry := range e {
+				if entry.ExpiresAt < timeNow {
+					continue
+				}
+				heap.Push(entry)
+				index[string(entry.Key)] = entry.ExpiresAt
+			}
+
+		}
+	}
+	return heap, index, nil
+}

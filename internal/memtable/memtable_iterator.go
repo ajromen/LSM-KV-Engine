@@ -3,9 +3,9 @@ package memtable
 import (
 	"bytes"
 
-	"github.com/ajromen/LSM-KV-Engine/internal/data_structures"
 	"github.com/ajromen/LSM-KV-Engine/internal/enums"
 	"github.com/ajromen/LSM-KV-Engine/internal/iterator"
+	"github.com/ajromen/LSM-KV-Engine/internal/structures"
 )
 
 // this file implements the iterator layer for memtables
@@ -141,7 +141,7 @@ func (s *SingleMemtableIterator) advanceToNextUnique(prevKey []byte) {
 			continue
 		}
 		// 2. skip tombstones
-		if entry.Tombstone {
+		if entry.OpType == enums.OpTypeDel {
 			prevKey = entry.Key
 			s.rawIt.Next()
 			continue
@@ -158,7 +158,7 @@ func (s *SingleMemtableIterator) advanceToNextUnique(prevKey []byte) {
 // It uses a MergeStructure (Heap or WinnerTree) for ordering
 // no filtering -> raw-level
 type RawIterator struct {
-	structure data_structures.MergeStructure[MemtableEntry]
+	structure structures.MergeStructure[MemtableEntry]
 	current   *MemtableEntry
 	valid     bool
 }
@@ -189,7 +189,7 @@ func NewRawIterator(iterators []iterator.Iterator[MemtableEntry], mergeStructure
 		}
 		return 0
 	}
-	structure := data_structures.NewMergeStructure(mergeStructure, active, cmp)
+	structure := structures.NewMergeStructure(mergeStructure, active, cmp)
 	it := &RawIterator{
 		structure: structure,
 	}
@@ -246,7 +246,7 @@ func (i *RawIterator) SeekToLast() {
 		it.SeekToLast()
 	}
 	reverseCmp := reverseComparator(i.structure.Cmp())
-	tempStructure := data_structures.NewMergeStructure(byte(enums.Heap), i.structure.Iterators(), reverseCmp)
+	tempStructure := structures.NewMergeStructure(byte(enums.Heap), i.structure.Iterators(), reverseCmp)
 	winner := tempStructure.Winner()
 	if winner != nil && winner.Valid() {
 		entry := winner.Key()
@@ -311,7 +311,7 @@ func (i *RawIterator) Prev() {
 		return
 	}
 	reverseCmp := reverseComparator(i.structure.Cmp())
-	tempStructure := data_structures.NewMergeStructure(byte(enums.Heap), i.structure.Iterators(), reverseCmp)
+	tempStructure := structures.NewMergeStructure(byte(enums.Heap), i.structure.Iterators(), reverseCmp)
 	winner := tempStructure.Winner()
 	if winner != nil && winner.Valid() {
 		entry := winner.Key()
@@ -408,7 +408,7 @@ func (m *MergedMemtableIterator) Prev() {
 func (m *MergedMemtableIterator) advance() {
 	for m.rawIterator.Valid() {
 		entry := m.rawIterator.Key()
-		if entry.Tombstone {
+		if entry.OpType == enums.OpTypeDel {
 			m.rawIterator.Next()
 			continue
 		}

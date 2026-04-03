@@ -53,9 +53,12 @@ func (l *LSM) onFlush(entries []memtable.MemtableEntry) {
 	}
 }
 
-func (l *LSM) Put(key []byte, value []byte, seqId uint64) error {
-	l.memtableeManager.Put(key, value, seqId, false)
-	return nil
+func (l *LSM) Put(key []byte, value []byte, seqId uint64, opType enums.OpType) {
+	l.memtableeManager.Put(key, value, seqId, opType)
+}
+
+func (l *LSM) PutWithTTL(key []byte, value []byte, seqId uint64, opType enums.OpType, ttl int64) {
+	l.memtableeManager.PutWithTTL(key, value, seqId, opType, ttl)
 }
 
 func (l *LSM) Get(key []byte) ([]byte, bool, error) {
@@ -64,26 +67,47 @@ func (l *LSM) Get(key []byte) ([]byte, bool, error) {
 		if entry == nil {
 			return nil, false, nil // tombstone
 		}
-		return entry, true, nil
+		return entry.Value, true, nil
 	}
-	entry, found, err := l.sstableManager.Get(key)
+	if config.GetSettings().Debug {
+		fmt.Printf("Key not found in memtable checking sstable\n")
+	}
+	record, found, err := l.sstableManager.Get(key)
 	if err != nil {
 		return nil, false, err
 	}
 	if found {
-		return entry, true, nil
+		return record.Value, true, nil
 	}
 	return nil, false, nil
 }
 
-func (l *LSM) Delete(key []byte, seqId uint64) error {
-	l.memtableeManager.Put(key, nil, seqId, true)
-	return nil
+func (l *LSM) GetTTL(key []byte) (int64, bool, error) {
+	entry, found := l.memtableeManager.Get(key)
+	if found {
+		if entry == nil {
+			return 0, false, nil // tombstone
+		}
+		return entry.ExpiresAt, true, nil
+	}
+	record, found, err := l.sstableManager.Get(key)
+	if err != nil {
+		return 0, false, err
+	}
+	if found {
+		return record.ExpiresAt, true, nil
+	}
+	return 0, false, nil
 }
 
 func (l *LSM) Finish() error {
 	l.memtableeManager.Close()
 	return nil
+}
+
+func (l *LSM) ClearAll() error {
+	l.memtableeManager.ResetAll()
+	return l.sstableManager.ClearAll()
 }
 
 func (l *LSM) GetMaxSeqId() uint64 {
@@ -119,3 +143,6 @@ func (l *LSM) NewPrefixIterator(prefix []byte) (*iterator.PrefixIterator, error)
 	}
 	return iterator.NewPrefixIterator(dbIt, prefix), nil
 }
+// func (l *LSM) GetAllTTLFomSST() (*ttl.ExpiryHeap, map[string]int64, error) {
+//return l.sstableManager.GetAllTTL()
+//}

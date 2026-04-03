@@ -31,3 +31,10 @@ func (b *BlockCache) Get(bk BlockKey) ([]byte, bool) {
 func (b *BlockCache) Put(key BlockKey, data []byte) {
 	b.lru.Put(key, data)
 }
+
+func (b *BlockCache) Clear() {
+	if b == nil || b.lru == nil {
+		return
+	}
+	b.lru.Clear()
+}

@@ -9,6 +9,7 @@ type Config struct {
 	Memtable          MemtableConfig          `json:"memtable"`
 	SSTable           SSTableConfig           `json:"sstable"`
 	LSMTree           LSMTreeConfig           `json:"lsmtree"`
+	TTL               TTLConfig               `json:"ttl"`
 	BlockManager      BlockManagerConfig      `json:"blockmanager"`
 	Snapshot          SnapshotConfig          `json:"snapshot"`
 	Checkpoint        CheckpointConfig        `json:"checkpoint"`
@@ -16,6 +17,7 @@ type Config struct {
 	ProbabilisticType ProbabilisticTypeConfig `json:"probabilistic_type"`
 	SkipList          SkipListConfig          `json:"skiplist"`
 	SavePath          string                  `json:"save_path"`
+	Debug             bool                    `json:"debug"`
 }
 
 type WALConfig struct {
@@ -45,8 +47,7 @@ type DataSegmentConfig struct {
 }
 
 type IndexSegmentConfig struct {
-	IndexBlockSize int `json:"index_block_size"`
-	MaxCache       int `json:"max_cache_size"`
+	MaxCache int `json:"max_cache_size"`
 }
 
 type LSMTreeConfig struct {
@@ -100,7 +101,8 @@ type SimHashConfig struct {
 }
 
 type TTLConfig struct {
-	Duration int `json:"duration"`
+	InMemoryTTL bool  `json:"in_memory_ttl"`
+	RefreshRate int64 `json:"refresh_rate"`
 }
 
 type SkipListConfig struct {

@@ -209,3 +209,10 @@ func DeleteFile(path string) error {
 	}
 	return nil
 }
+
+func (bm *BlockManager) ClearCache() {
+	if bm == nil || bm.cache == nil {
+		return
+	}
+	bm.cache.Clear()
+}

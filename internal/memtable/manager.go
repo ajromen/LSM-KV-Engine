@@ -2,7 +2,9 @@ package memtable
 
 import (
 	"sync"
+	"time"
 
+	"github.com/ajromen/LSM-KV-Engine/internal/enums"
 	"github.com/ajromen/LSM-KV-Engine/internal/iterator"
 )
 
@@ -35,9 +37,19 @@ func NewMemtableManager(maxTables int, mergeStructure byte, factory func() Memta
 }
 
 // Put inserts an entry into active memtable and if the memtable reaches max capacity, triggers rotation
-func (mm *MemtableManager) Put(key []byte, value []byte, seqId uint64, tombstone bool) {
+func (mm *MemtableManager) Put(key []byte, value []byte, seqId uint64, opType enums.OpType) {
 	mm.mu.Lock()
-	mm.active.Put(key, value, seqId, tombstone)
+	mm.active.Put(key, value, seqId, opType)
+	shouldRotate := mm.active.ShouldFlush()
+	mm.mu.Unlock()
+	if shouldRotate {
+		mm.rotate()
+	}
+}
+
+func (mm *MemtableManager) PutWithTTL(key []byte, value []byte, seqId uint64, opType enums.OpType, ttl int64) {
+	mm.mu.Lock()
+	mm.active.PutWithTTL(key, value, seqId, opType, ttl)
 	shouldRotate := mm.active.ShouldFlush()
 	mm.mu.Unlock()
 	if shouldRotate {
@@ -67,9 +79,15 @@ func (mm *MemtableManager) rotate() {
 func (mm *MemtableManager) flushWorker(flushHandler func([]MemtableEntry)) {
 	for mem := range mm.flushChannel {
 		mm.mu.Lock()
+		shouldFlush := mm.containsImmutable(mem)
 		mm.removeImmutable(mem)
 		mm.cond.Signal()
 		mm.mu.Unlock()
+
+		if !shouldFlush {
+			continue
+		}
+
 		entries := mem.Flush()
 		if flushHandler != nil {
 			flushHandler(entries)
@@ -88,32 +106,37 @@ func (mm *MemtableManager) removeImmutable(target Memtable) {
 	mm.immutable = newList
 }
 
-// Get searches for a key across all memtables
-func (mm *MemtableManager) Get(key []byte) ([]byte, bool) {
+func (mm *MemtableManager) containsImmutable(target Memtable) bool {
+	for _, m := range mm.immutable {
+		if m == target {
+			return true
+		}
+	}
+	return false
+}
+
+func (mm *MemtableManager) Get(key []byte) (*MemtableEntry, bool) {
 	mm.mu.Lock()
 	defer mm.mu.Unlock()
 	if v, ok := mm.active.Get(key); ok {
-		return v, true
+		return mm.checkTTL(v, ok)
 	}
 	for i := len(mm.immutable) - 1; i >= 0; i-- {
 		if v, ok := mm.immutable[i].Get(key); ok {
-			return v, true
+			return mm.checkTTL(v, ok)
 		}
 	}
-
 	return nil, false
 }
 
-// Delete inserts a tombstone for a key into the active memtable
-// Works the same as Put, but marks entry as deleted
-func (mm *MemtableManager) Delete(key []byte, seqId uint64) {
-	mm.mu.Lock()
-	mm.active.Put(key, []byte{}, seqId, true)
-	shouldRotate := mm.active.ShouldFlush()
-	mm.mu.Unlock()
-	if shouldRotate {
-		mm.rotate()
+func (mm *MemtableManager) checkTTL(entry *MemtableEntry, ok bool) (*MemtableEntry, bool) {
+	if entry == nil {
+		return nil, true
 	}
+	if entry.ExpiresAt != 0 && time.UnixMilli(entry.ExpiresAt).Before(time.Now()) {
+		return nil, false
+	}
+	return entry, ok
 }
 
 // RawIterator returns a merged iterator over all memtables without higher-level filtering.
@@ -147,6 +170,14 @@ func (mm *MemtableManager) Iterator() iterator.Iterator[MemtableEntry] {
 
 	rawMerge := NewRawIterator(rawIters, mm.mergeStructure)
 	return NewMergedMemtableIterator(rawMerge)
+}
+
+func (mm *MemtableManager) ResetAll() {
+	mm.mu.Lock()
+	defer mm.mu.Unlock()
+
+	mm.active = mm.factory()
+	mm.immutable = nil
 }
 
 func (mm *MemtableManager) Close() {
