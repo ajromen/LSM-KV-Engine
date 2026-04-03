@@ -8,6 +8,7 @@ import (
 	"github.com/ajromen/LSM-KV-Engine/internal/iterator"
 	"github.com/ajromen/LSM-KV-Engine/internal/memtable"
 	"github.com/ajromen/LSM-KV-Engine/internal/sstable"
+	"github.com/ajromen/LSM-KV-Engine/internal/ttl"
 )
 
 type LSM struct {
@@ -143,6 +144,6 @@ func (l *LSM) NewPrefixIterator(prefix []byte) (*iterator.PrefixIterator, error)
 	}
 	return iterator.NewPrefixIterator(dbIt, prefix), nil
 }
-// func (l *LSM) GetAllTTLFomSST() (*ttl.ExpiryHeap, map[string]int64, error) {
-//return l.sstableManager.GetAllTTL()
-//}
+func (l *LSM) GetAllTTLFomSST() (*ttl.ExpiryHeap, map[string]int64, error) {
+	return l.sstableManager.GetAllTTL()
+}

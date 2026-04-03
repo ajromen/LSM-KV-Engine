@@ -440,9 +440,14 @@ func (sm *SSTableManager) EntryIterator(start, end []byte) (iterator.Iterator[it
 		&sstableIteratorSeekWrapper{inner: raw},
 		func(r Record) iterator.Entry {
 			return iterator.Entry{
-				Key:        append([]byte(nil), r.Key...),
-				Value:      append([]byte(nil), r.Value...),
-				Tombstone:  r.Tombstone,
+				Key:   append([]byte(nil), r.Key...),
+				Value: append([]byte(nil), r.Value...),
+				OpType: func() enums.OpType {
+					if r.Tombstone {
+						return enums.OpTypeDel
+					}
+					return enums.OpTypePut
+				}(),
 				SequenceID: r.SeqId,
 			}
 		},

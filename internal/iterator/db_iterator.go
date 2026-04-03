@@ -1,11 +1,15 @@
 package iterator
 
-import "bytes"
+import (
+	"bytes"
+
+	"github.com/ajromen/LSM-KV-Engine/internal/enums"
+)
 
 type Entry struct {
 	Key        []byte
 	Value      []byte
-	Tombstone  bool
+	OpType     enums.OpType
 	SequenceID uint64
 }
 
@@ -100,14 +104,14 @@ func (it *DBIterator) advance() {
 
 			it.skipKey(keyCopy)
 
-			if entry.Tombstone {
+			if entry.OpType == enums.OpTypeDel {
 				continue
 			}
 
 			it.current = &Entry{
 				Key:        keyCopy,
 				Value:      valCopy,
-				Tombstone:  false,
+				OpType:     enums.OpTypePut,
 				SequenceID: entry.SequenceID,
 			}
 			it.valid = true
@@ -120,14 +124,14 @@ func (it *DBIterator) advance() {
 
 			it.skipKey(keyCopy)
 
-			if entry.Tombstone {
+			if entry.OpType == enums.OpTypeDel {
 				continue
 			}
 
 			it.current = &Entry{
 				Key:        keyCopy,
 				Value:      valCopy,
-				Tombstone:  false,
+				OpType:     enums.OpTypePut,
 				SequenceID: entry.SequenceID,
 			}
 			it.valid = true
@@ -187,7 +191,7 @@ func copyEntry(e Entry) Entry {
 	return Entry{
 		Key:        append([]byte(nil), e.Key...),
 		Value:      append([]byte(nil), e.Value...),
-		Tombstone:  e.Tombstone,
+		OpType:     e.OpType,
 		SequenceID: e.SequenceID,
 	}
 }
