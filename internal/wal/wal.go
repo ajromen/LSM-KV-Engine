@@ -6,7 +6,7 @@ type WAL struct {
 	Dir           string
 	ActiveSegment *Segment
 	BlockSize     int
-	MaxBlock      int
+	MaxBlocks     int
 	NextSegmentID uint64
 	BM            *block.BlockManager
 }
