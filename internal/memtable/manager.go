@@ -145,11 +145,11 @@ func (mm *MemtableManager) RawIterator() iterator.Iterator[MemtableEntry] {
 	defer mm.mu.Unlock()
 	var rawIters []iterator.Iterator[MemtableEntry]
 	if mm.active != nil {
-		activeIt := NewRawSingleMemtableIterator(mm.active.Iterator())
+		activeIt := NewRawSingleMemtableIterator(mm.active.RawIterator())
 		rawIters = append(rawIters, activeIt.(*RawSingleMemtableIterator))
 	}
 	for i := len(mm.immutable) - 1; i >= 0; i-- {
-		it := NewRawSingleMemtableIterator(mm.immutable[i].Iterator())
+		it := NewRawSingleMemtableIterator(mm.immutable[i].RawIterator())
 		rawIters = append(rawIters, it.(*RawSingleMemtableIterator))
 	}
 	return NewRawIterator(rawIters, mm.mergeStructure)
