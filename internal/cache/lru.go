@@ -75,3 +75,14 @@ func (lru *LRU[K, V]) Clear() {
 	lru.list.Init()
 	lru.cache = make(map[K]*list.Element)
 }
+
+func (lru *LRU[K, V]) InvalidateWhere(predicate func(K) bool) {
+	lru.mu.Lock()
+	defer lru.mu.Unlock()
+	for key, elem := range lru.cache {
+		if predicate(key) {
+			lru.list.Remove(elem)
+			delete(lru.cache, key)
+		}
+	}
+}

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/block"
@@ -34,6 +35,7 @@ func (l *Layer) GetSize() int64 {
 	for _, reader := range l.SSTables {
 		size += reader.SizeBytes
 	}
+	l.needsUpdate = false
 	return size
 }
 
@@ -44,6 +46,7 @@ func (l *Layer) AppendSSTable(sstable *SSTableReader) {
 
 func (l *Layer) RemoveSSTable(index int) {
 	l.SSTables = append(l.SSTables[:index], l.SSTables[index+1:]...)
+	l.needsUpdate = true
 }
 
 func newLayer() *Layer {
@@ -59,6 +62,7 @@ type SSTableManager struct {
 	blockManager *block.BlockManager
 	Manifest     *Manifest
 	dataDir      string
+	mu           sync.RWMutex
 }
 
 func NewSSTableManager(dataDir string) *SSTableManager {
@@ -167,6 +171,8 @@ func (sm *SSTableManager) addToLayers(reader *SSTableReader, toLayer int) error 
 // 2. add entries
 // 3. create reader and add to manager
 func (sm *SSTableManager) FlushToSSTable(entries []memtable.MemtableEntry) error {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
 	if len(entries) == 0 {
 		return nil
 	}
@@ -215,6 +221,8 @@ func (sm *SSTableManager) FlushToSSTable(entries []memtable.MemtableEntry) error
 }
 
 func (sm *SSTableManager) Get(key []byte) (*Record, bool, error) {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
 	t := time.Now().UnixMilli()
 	for _, layer := range sm.Layers {
 		for i := len(layer.SSTables) - 1; i >= 0; i-- {
@@ -246,6 +254,7 @@ func (sm *SSTableManager) DeleteSSTable(layer, id int) error {
 	readers := sm.Layers[layer].SSTables
 	for i, reader := range readers {
 		if reader.Id == id {
+
 			reader.storage.Delete()
 			sm.Layers[layer].RemoveSSTable(i)
 			break
@@ -303,6 +312,8 @@ func (sm *SSTableManager) ClearAll() error {
 // 3. open new reader and add to manager
 // 4. delete old sstables
 func (sm *SSTableManager) MergeSSTables(readers []*SSTableReader, toLayer int, skipTombstones bool) error {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
 	// 1. create new sstable
 
 	expectedElems := uint64(0)
@@ -323,12 +334,19 @@ func (sm *SSTableManager) MergeSSTables(readers []*SSTableReader, toLayer int, s
 	}
 	count := 0
 	t := time.Now().UnixMilli()
+	var lastKey []byte
 	for iterator.Valid() {
 		rec := iterator.Value()
-		if rec.Tombstone || rec.ExpiresAt < t && rec.ExpiresAt != 0 {
+		if bytes.Equal(rec.Key, lastKey) {
 			iterator.Next()
 			continue
 		}
+		if rec.Tombstone || (rec.ExpiresAt != 0 && rec.ExpiresAt < t) {
+			lastKey = rec.Key
+			iterator.Next()
+			continue
+		}
+		lastKey = rec.Key
 		err := writer.AddRecord(rec)
 		if err != nil {
 			return err
@@ -366,6 +384,8 @@ func (sm *SSTableManager) MergeSSTables(readers []*SSTableReader, toLayer int, s
 
 // MoveSSTable moves sstable from one layer to another
 func (sm *SSTableManager) MoveSSTable(current *SSTableReader, toLayer int) error {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
 	fromLayer := current.Layer
 
 	readers := sm.Layers[fromLayer].SSTables

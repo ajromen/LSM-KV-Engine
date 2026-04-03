@@ -103,7 +103,7 @@ func (l *LSM) GetTTL(key []byte) (int64, bool, error) {
 
 func (l *LSM) Finish() error {
 	l.memtableeManager.Close()
-	return nil
+	return l.sstableManager.Manifest.Save()
 }
 
 func (l *LSM) ClearAll() error {

@@ -181,7 +181,16 @@ func (mm *MemtableManager) ResetAll() {
 }
 
 func (mm *MemtableManager) Close() {
-	//close(mm.flushChannel) mozda treba
+	mm.mu.Lock()
+	if mm.active != nil && mm.active.ShouldFlush() {
+		immutable := mm.active
+		mm.immutable = append(mm.immutable, immutable)
+		mm.active = mm.factory()
+		mm.flushChannel <- immutable
+	}
+	mm.mu.Unlock()
+
+	close(mm.flushChannel)
 }
 
 // EntryIterator returns a MergedMemtableIterator adapted to iterator.Entry type
