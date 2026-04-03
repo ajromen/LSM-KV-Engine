@@ -11,6 +11,7 @@ import (
 	"github.com/ajromen/LSM-KV-Engine/internal/block"
 	"github.com/ajromen/LSM-KV-Engine/internal/config"
 	"github.com/ajromen/LSM-KV-Engine/internal/enums"
+	"github.com/ajromen/LSM-KV-Engine/internal/iterator"
 	"github.com/ajromen/LSM-KV-Engine/internal/memtable"
 	"github.com/ajromen/LSM-KV-Engine/internal/ttl"
 )
@@ -388,6 +389,92 @@ func (sm *SSTableManager) MoveSSTable(current *SSTableReader, toLayer int) error
 	return nil
 }
 
+func (sm *SSTableManager) ReadersForRange(start, end []byte) []*SSTableReader {
+	readers := make([]*SSTableReader, 0)
+
+	for _, layer := range sm.Layers {
+		for _, reader := range layer.SSTables {
+			if sstableOverlapsRange(reader, start, end) {
+				readers = append(readers, reader)
+			}
+		}
+	}
+
+	return readers
+}
+
+func sstableOverlapsRange(reader *SSTableReader, start, end []byte) bool {
+	if reader == nil || reader.SummarySegment == nil {
+		return true
+	}
+
+	minKey := reader.Metadata.GetBytes(FieldMinKey)
+	maxKey := reader.Metadata.GetBytes(FieldMaxKey)
+
+	if len(minKey) == 0 || len(maxKey) == 0 {
+		return true
+	}
+
+	if len(end) > 0 && bytes.Compare(minKey, end) > 0 {
+		return false
+	}
+	if len(start) > 0 && bytes.Compare(maxKey, start) < 0 {
+		return false
+	}
+
+	return true
+}
+
+// EntryIterator returns an SSTableMergeIterator adapted to iterator.Entry,
+// optionally filtering readers by key range (start/end can be nil for full scan).
+func (sm *SSTableManager) EntryIterator(start, end []byte) (iterator.Iterator[iterator.Entry], error) {
+	readers := sm.ReadersForRange(start, end)
+	if len(readers) == 0 {
+		return emptyEntryIterator{}, nil
+	}
+	raw, err := NewSSTableMergeIterator(readers, byte(enums.Heap))
+	if err != nil {
+		return nil, err
+	}
+	return iterator.NewAdaptedIterator(
+		&sstableIteratorSeekWrapper{inner: raw},
+		func(r Record) iterator.Entry {
+			return iterator.Entry{
+				Key:        append([]byte(nil), r.Key...),
+				Value:      append([]byte(nil), r.Value...),
+				Tombstone:  r.Tombstone,
+				SequenceID: r.SeqId,
+			}
+		},
+		func(key []byte) Record {
+			return Record{Key: key}
+		},
+	), nil
+}
+
+// sstableIteratorSeekWrapper wraps SSTableMergeIterator to satisfy TypedSeekIterator
+type sstableIteratorSeekWrapper struct {
+	inner *SSTableMergeIterator
+}
+
+func (w *sstableIteratorSeekWrapper) Valid() bool   { return w.inner.Valid() }
+func (w *sstableIteratorSeekWrapper) SeekToFirst()  { w.inner.SeekToFirst() }
+func (w *sstableIteratorSeekWrapper) SeekToLast()   { w.inner.SeekToLast() }
+func (w *sstableIteratorSeekWrapper) Next()         { w.inner.Next() }
+func (w *sstableIteratorSeekWrapper) Key() Record   { return w.inner.Key() }
+func (w *sstableIteratorSeekWrapper) Seek(r Record) { w.inner.Seek(r) }
+
+// emptyEntryIterator is an always-invalid iterator returned when no readers match
+type emptyEntryIterator struct{}
+
+func (e emptyEntryIterator) Valid() bool           { return false }
+func (e emptyEntryIterator) SeekToFirst()          {}
+func (e emptyEntryIterator) SeekToLast()           {}
+func (e emptyEntryIterator) Seek(_ iterator.Entry) {}
+func (e emptyEntryIterator) Next()                 {}
+func (e emptyEntryIterator) Prev()                 {}
+func (e emptyEntryIterator) Key() iterator.Entry   { return iterator.Entry{} }
+func (e emptyEntryIterator) Value() iterator.Entry { return iterator.Entry{} }
 func (sm *SSTableManager) GetAllTTL() (*ttl.ExpiryHeap, map[string]int64, error) {
 	heap := ttl.NewExpiryHeap()
 	index := make(map[string]int64)

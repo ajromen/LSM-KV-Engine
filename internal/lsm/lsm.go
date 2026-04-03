@@ -5,6 +5,7 @@ import (
 
 	"github.com/ajromen/LSM-KV-Engine/internal/config"
 	"github.com/ajromen/LSM-KV-Engine/internal/enums"
+	"github.com/ajromen/LSM-KV-Engine/internal/iterator"
 	"github.com/ajromen/LSM-KV-Engine/internal/memtable"
 	"github.com/ajromen/LSM-KV-Engine/internal/sstable"
 )
@@ -113,6 +114,35 @@ func (l *LSM) GetMaxSeqId() uint64 {
 	return l.sstableManager.Manifest.MaxSeqId
 }
 
+// NewDBIterator creates a DBIterator that merges memtable and sstable data
+// start/end are used to filter which SSTables to include
+func (l *LSM) NewDBIterator(start, end []byte) (*iterator.DBIterator, error) {
+	memIt := l.memtableeManager.EntryIterator()
+	sstIt, err := l.sstableManager.EntryIterator(start, end)
+	if err != nil {
+		return nil, err
+	}
+	return iterator.NewDBIterator(memIt, sstIt), nil
+}
+
+// NewRangeIterator creates a RangeIterator over [lower, upper]
+func (l *LSM) NewRangeIterator(lower, upper []byte) (*iterator.RangeIterator, error) {
+	dbIt, err := l.NewDBIterator(lower, upper)
+	if err != nil {
+		return nil, err
+	}
+	return iterator.NewRangeIterator(dbIt, lower, upper), nil
+}
+
+// NewPrefixIterator creates a PrefixIterator for the given prefix
+func (l *LSM) NewPrefixIterator(prefix []byte) (*iterator.PrefixIterator, error) {
+	upper := append(append([]byte(nil), prefix...), 0xFF)
+	dbIt, err := l.NewDBIterator(prefix, upper)
+	if err != nil {
+		return nil, err
+	}
+	return iterator.NewPrefixIterator(dbIt, prefix), nil
+}
 // func (l *LSM) GetAllTTLFomSST() (*ttl.ExpiryHeap, map[string]int64, error) {
 //return l.sstableManager.GetAllTTL()
 //}

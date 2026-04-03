@@ -260,6 +260,11 @@ func (i *RawIterator) SeekToLast() {
 
 // Seek positions all iterators at key and recomputes winner
 func (i *RawIterator) Seek(key MemtableEntry) {
+	if i.structure == nil {
+		i.current = nil
+		i.valid = false
+		return
+	}
 	for _, it := range i.structure.Iterators() {
 		it.Seek(key)
 	}

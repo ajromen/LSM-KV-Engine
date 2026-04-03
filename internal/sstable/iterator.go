@@ -110,6 +110,12 @@ func (it *SSTableIteratorRaw) SeekToLast() {
 // Seek positions the iterator to the first record >= target
 // this uses the sstable indexing structure - Summary -> Index -> Data
 func (it *SSTableIteratorRaw) Seek(target Record) {
+	if it.src.reader.SummarySegment == nil {
+		if err := it.src.reader.loadSummary(); err != nil {
+			it.valid = false
+			return
+		}
+	}
 	// find index block containing the key from summary
 	indexBlockNum := it.src.reader.SummarySegment.FindIndexBlockNumber(target.Key)
 	if indexBlockNum < 0 {
@@ -145,8 +151,8 @@ func (it *SSTableIteratorRaw) Seek(target Record) {
 		it.current = &rec
 		it.valid = true
 	} else {
-		it.current = nil
-		it.valid = false
+		it.blockIdx++
+		it.advanceBlock()
 	}
 }
 
