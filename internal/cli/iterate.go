@@ -63,12 +63,12 @@ func runIteratorLoop(it *core.ActiveIterator, reader *bufio.Reader) {
 		case "next", "n":
 			result, ok := it.Next()
 			if !ok {
-				PrintSuccess("End of iterator\n")
+				PrintSuccess("End of iterator")
 				return
 			}
-			PrintSuccess(fmt.Sprintf("%s -> %s\n", result.Key, result.Value))
+			PrintSuccess(fmt.Sprintf("%s -> %s", result.Key, result.Value))
 		case "stop", "s":
-			PrintSuccess("Iterator stopped.\n")
+			PrintSuccess("Iterator stopped.")
 			return
 		default:
 			PrintError("Unknown iterator command. Use 'next/n' or 'stop/s'.\n")

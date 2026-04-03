@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/ajromen/LSM-KV-Engine/internal/config"
 	"github.com/ajromen/LSM-KV-Engine/internal/core"
 )
 
@@ -49,7 +50,7 @@ func RunCli(engine *core.Engine) {
 		case "prefix-iterate":
 			handlePrefixIterate(engine, parts, reader)
 		case "exit", "quit", "q":
-			print("Exiting...")
+			print(blue + "Exiting...")
 			err := engine.Close()
 			if err != nil {
 				PrintError(fmt.Sprint("Closing error: ", err))
@@ -57,9 +58,13 @@ func RunCli(engine *core.Engine) {
 			}
 			os.Exit(0)
 		case "help":
-			PrintSuccess(fmt.Sprint(helpText))
+			printHelpMessage()
 		case "dataraw":
-			handleDataRaw(engine, parts)
+			if config.GetSettings().Debug {
+				handleDataRaw(engine, parts)
+				continue
+			}
+			PrintError(fmt.Sprint("Unknown command: ", parts[0]))
 		default:
 			PrintError(fmt.Sprint("Unknown command: ", parts[0]))
 		}

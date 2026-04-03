@@ -1,6 +1,10 @@
 package cli
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/ajromen/LSM-KV-Engine/internal/config"
+)
 
 const (
 	reset = "\033[0m"
@@ -43,11 +47,17 @@ func PrintSuccess(str string) {
 	fmt.Println(green + str + reset)
 
 }
-
 func printBanner() {
 	fmt.Println(banner)
 }
 
 func printReady(usage string) {
 	fmt.Print(blue + usage + ">  " + reset)
+}
+
+func printHelpMessage() {
+	PrintSuccess(helpText)
+	if config.GetSettings().Debug {
+		PrintSuccess("Debug:\n  dataraw <index>   Print decoded raw data for requested sstable")
+	}
 }
