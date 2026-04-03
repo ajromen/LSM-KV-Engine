@@ -8,8 +8,9 @@ import (
 type EventType byte
 
 const (
-	EventPut    EventType = 0
-	EventDelete EventType = 1
+	EventPut      EventType = 0
+	EventDelete   EventType = 1
+	EventRangeDel EventType = 2
 )
 
 func (e EventType) String() string {
@@ -94,19 +95,36 @@ func (n *Notifier) NotifyDelete(key []byte) {
 	})
 }
 
+func (n *Notifier) NotifyDeleteRange(startKey, endKey []byte) {
+	n.notify(Event{
+		Type:  EventRangeDel,
+		Key:   append([]byte(nil), startKey...),
+		Value: append([]byte(nil), endKey...),
+	})
+}
+
 func (n *Notifier) notify(e Event) {
 	n.mu.RLock()
 	defer n.mu.RUnlock()
-
 	for _, l := range n.listeners {
-		if l.inRange(e.Key) {
-
+		if e.Type == EventRangeDel && l.overlapsRange(e.Key, e.Value) ||
+			e.Type != EventRangeDel && l.inRange(e.Key) {
 			select {
 			case l.Ch <- e:
 			default:
 			}
 		}
 	}
+}
+
+func (l *Listener) overlapsRange(start, end []byte) bool {
+	if len(l.upper) > 0 && bytes.Compare(start, l.upper) > 0 {
+		return false
+	}
+	if len(l.lower) > 0 && bytes.Compare(end, l.lower) < 0 {
+		return false
+	}
+	return true
 }
 
 func (l *Listener) inRange(key []byte) bool {
