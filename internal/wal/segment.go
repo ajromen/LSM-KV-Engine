@@ -19,6 +19,9 @@ type Segment struct {
 }
 
 func OpenSegment(id uint64, path string, maxBlocks int, bm *block.BlockManager) (*Segment, error) {
+	if path == "" {
+		return nil, fmt.Errorf("path is empty")
+	}
 	if bm == nil {
 		return nil, fmt.Errorf("block manager is nil")
 	}
