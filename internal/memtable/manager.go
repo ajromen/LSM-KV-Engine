@@ -20,6 +20,8 @@ type MemtableManager struct {
 	flushHandler   func([]MemtableEntry) // function that persists flushed entries
 	mu             sync.Mutex            // protets all shared states
 	cond           *sync.Cond            // used to block when to many immutable instances
+	wg             sync.WaitGroup        // wait for flush
+	closing        bool
 }
 
 // NewMemtableManager initializes a new instance of a manager and starts the flush worker
@@ -71,6 +73,7 @@ func (mm *MemtableManager) rotate() {
 	immutable := mm.active
 	mm.immutable = append(mm.immutable, immutable)
 	mm.active = mm.factory()
+	mm.wg.Add(1)
 	mm.mu.Unlock()
 	mm.flushChannel <- immutable
 }
@@ -78,20 +81,21 @@ func (mm *MemtableManager) rotate() {
 // flushWorker runs in a separate goroutine, and it takes immutable memtables and flushes them to disk
 func (mm *MemtableManager) flushWorker(flushHandler func([]MemtableEntry)) {
 	for mem := range mm.flushChannel {
+
 		mm.mu.Lock()
 		shouldFlush := mm.containsImmutable(mem)
 		mm.removeImmutable(mem)
 		mm.cond.Signal()
 		mm.mu.Unlock()
 
-		if !shouldFlush {
-			continue
+		if shouldFlush {
+			entries := mem.Flush()
+			if flushHandler != nil {
+				flushHandler(entries)
+			}
 		}
 
-		entries := mem.Flush()
-		if flushHandler != nil {
-			flushHandler(entries)
-		}
+		mm.wg.Done()
 	}
 }
 
@@ -182,15 +186,21 @@ func (mm *MemtableManager) ResetAll() {
 
 func (mm *MemtableManager) Close() {
 	mm.mu.Lock()
+
 	if mm.active != nil && mm.active.ShouldFlush() {
 		immutable := mm.active
 		mm.immutable = append(mm.immutable, immutable)
 		mm.active = mm.factory()
+
+		mm.wg.Add(1)
 		mm.flushChannel <- immutable
 	}
+
+	mm.closing = true
 	mm.mu.Unlock()
 
 	close(mm.flushChannel)
+	mm.wg.Wait()
 }
 
 // EntryIterator returns a MergedMemtableIterator adapted to iterator.Entry type
