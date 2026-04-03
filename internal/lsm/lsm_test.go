@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"testing"
-	"time"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/block"
 	"github.com/ajromen/LSM-KV-Engine/internal/config"
@@ -18,6 +17,7 @@ func newSeq() *sequence.SequenceGenerator {
 
 func newConfig(compaction enums.LSMCompaction) {
 	cfg := config.NewDefaultConfig()
+	cfg.SSTable.Format = enums.FormatSingleFile
 	cfg.LSMTree.CompactionAlgorithm = compaction
 	cfg.LSMTree.MinMergeThreshold = 4
 	cfg.LSMTree.MaxHeight = 5
@@ -26,7 +26,6 @@ func newConfig(compaction enums.LSMCompaction) {
 	cfg.Memtable.MemtableMaxSizeBytes = 512
 	config.TESTSetSettings(cfg)
 }
-
 func setupLSM(t *testing.T, compaction enums.LSMCompaction) (*LSM, string) {
 	t.Helper()
 	block.GetBlockCacheInstance().Clear()
@@ -40,8 +39,9 @@ func setupLSM(t *testing.T, compaction enums.LSMCompaction) (*LSM, string) {
 		t.Fatalf("NewLSM: %v", err)
 	}
 	t.Cleanup(func() {
-		lsm.Finish()
-		time.Sleep(200 * time.Millisecond) // HACK — čeka flush da završi
+		if err := lsm.Finish(); err != nil {
+			t.Logf("Finish: %v", err)
+		}
 		os.RemoveAll(dir)
 	})
 	return lsm, dir
