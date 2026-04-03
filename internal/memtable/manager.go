@@ -194,7 +194,7 @@ func (mm *MemtableManager) EntryIterator() iterator.Iterator[iterator.Entry] {
 			return iterator.Entry{
 				Key:        append([]byte(nil), e.Key...),
 				Value:      append([]byte(nil), e.Value...),
-				Tombstone:  e.Tombstone,
+				Tombstone:  e.OpType == enums.OpTypeDel,
 				SequenceID: e.SeqId,
 			}
 		},

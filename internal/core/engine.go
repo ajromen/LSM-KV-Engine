@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/config"
-	"github.com/ajromen/LSM-KV-Engine/internal/iterator"
 	"github.com/ajromen/LSM-KV-Engine/internal/enums"
+	"github.com/ajromen/LSM-KV-Engine/internal/iterator"
 	"github.com/ajromen/LSM-KV-Engine/internal/lsm"
 	"github.com/ajromen/LSM-KV-Engine/internal/notifier"
 	"github.com/ajromen/LSM-KV-Engine/internal/sequence"
@@ -109,6 +109,7 @@ func (engine *Engine) Delete(key []byte) {
 func (engine *Engine) RangeDelete(startKey []byte, endKey []byte) {
 	seqId := engine.seqGen.Next()
 	engine.lsm.Put(startKey, endKey, seqId, enums.OpTypeRangeDel)
+	engine.notifier.NotifyDeleteRange(startKey, endKey)
 }
 
 func (engine *Engine) Close() error {
