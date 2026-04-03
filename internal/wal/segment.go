@@ -18,6 +18,15 @@ type Segment struct {
 }
 
 func OpenSegment(id uint64, path string, maxBlocks int, bm *block.BlockManager) (*Segment, error) {
+	if bm == nil {
+		return nil, fmt.Errorf("block manager is nil")
+	}
+	if maxBlocks <= 0 {
+		return nil, fmt.Errorf("maxBlocks must be >0")
+	}
+	if bm.BlockSize() < KEY_START+1 {
+		return nil, fmt.Errorf("blockSize is smaller than minimum WAL fragment size")
+	}
 	exists, err := FileExists(path)
 	if err != nil {
 		return nil, err
@@ -130,6 +139,7 @@ func (s *Segment) Append(r Record) error {
 		}
 		//fmt.Println("Partial record", buf, payload)
 
+		// seems unsafe, might have to refactor for loop
 		for s.CurrentBlock.Remaining() < headerSize+len(payload) {
 			//fmt.Println(s.CurrentBlock.Data)
 			err = s.MoveToNextBlock()
@@ -235,6 +245,9 @@ func (s *Segment) Append(r Record) error {
 }
 
 func (s *Segment) ReadBlock(index uint32) ([]byte, error) {
+	if index >= uint32(s.MaxBlocks) {
+		return nil, fmt.Errorf("block index out of range")
+	}
 	bk := block.BlockKey{
 		FilePath: s.Path,
 		Offset:   index,
