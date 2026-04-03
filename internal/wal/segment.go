@@ -199,6 +199,27 @@ func (s *Segment) Append(r Record) error {
 			}
 
 		}
+		fmt.Println(payload)
+		wr = WALRecord{
+			FragType:  LAST,
+			RecType:   SINGLE, // to be updated
+			TxnID:     0,      // to be updated
+			KeySize:   uint64(pValueStart),
+			ValueSize: uint64(len(payload) - pValueStart),
+			Record: Record{
+				Timestamp: r.Timestamp,
+				Tombstone: r.Tombstone,
+				Key:       payload[:pValueStart],
+				Value:     payload[pValueStart:],
+			},
+		}
+		buf = Encode(wr)
+		_, err = s.CurrentBlock.Write(buf)
+		if err != nil {
+			return err
+		}
+
+		return nil
 
 		// reminder for myself, when fragmenting the record, dont crc the encoded payload, crc each part separately
 	} else if s.CurrentBlock.Remaining() <= headerSize { // not a single byte of payload can fit, pad the block
