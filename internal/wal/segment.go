@@ -1,6 +1,7 @@
 package wal
 
 import (
+	"encoding/binary"
 	"fmt"
 	"os"
 
@@ -32,8 +33,59 @@ func OpenSegment(id uint64, path string, maxBlocks int, bm *block.BlockManager) 
 		return nil, err
 	}
 	if exists {
-		// to do
-		return nil, fmt.Errorf("not implemented yet")
+		s := Segment{
+			ID:        id,
+			Path:      path,
+			BlockSize: bm.BlockSize(),
+			MaxBlocks: maxBlocks,
+			BM:        bm,
+		}
+		err := bm.EnsureSize(path, int64(bm.BlockSize()*maxBlocks))
+		if err != nil {
+			return nil, err
+		}
+		lastUsedIndex := uint32(0)
+		lastWritePos := 0
+		foundAny := false
+
+		for i := uint32(0); i < uint32(maxBlocks); i++ {
+			blockData, err := s.ReadBlock(i)
+			if err != nil {
+				return nil, err
+			}
+			writePos, hasData, err := ScanBlock(blockData)
+			if err != nil {
+				return nil, err
+			}
+			if !hasData {
+				break
+			}
+
+			foundAny = true
+			lastUsedIndex = i
+			lastWritePos = writePos
+		}
+
+		if !foundAny {
+			s.CurrentBlockIndex = 0
+			s.CurrentBlock = NewBlock(bm.BlockSize())
+			return &s, nil
+		}
+
+		blockData, err := s.ReadBlock(lastUsedIndex)
+		if err != nil {
+			return nil, err
+		}
+
+		s.CurrentBlockIndex = lastUsedIndex
+		s.CurrentBlock = &Block{
+			Data:     blockData,
+			Size:     bm.BlockSize(),
+			WritePos: lastWritePos,
+		}
+
+		return &s, nil
+
 	} else {
 		s := Segment{
 			ID:                id,
@@ -143,6 +195,7 @@ func (s *Segment) Append(r Record) error {
 		// to do
 		for s.CurrentBlock.Remaining() < headerSize+len(payload) {
 			//fmt.Println(s.CurrentBlock.Data)
+			//fmt.Println(s.CurrentBlockIndex)
 			err = s.MoveToNextBlock()
 			if err != nil {
 				return err
@@ -302,6 +355,48 @@ func (s *Segment) IsFull() bool {
 	}
 	minFragmentSize := KEY_START + 1
 	return s.CurrentBlockIndex == uint32(s.MaxBlocks-1) && s.CurrentBlock.Remaining() < minFragmentSize
+}
+
+func RecordSizeAt(data []byte, offset int) (int, error) {
+	remainingSize := len(data) - offset
+	if remainingSize <= KEY_START {
+		return 0, fmt.Errorf("Not enough space for record")
+	}
+	keySize := binary.LittleEndian.Uint64(data[offset+KEY_SIZE_START : offset+VALUE_SIZE_START])
+	valueSize := binary.LittleEndian.Uint64(data[offset+VALUE_SIZE_START : offset+KEY_START])
+	total := KEY_START + int(keySize) + int(valueSize)
+	if offset+total > len(data) {
+		return 0, fmt.Errorf("record exceedes block bounds")
+	}
+	return total, nil
+}
+
+func ScanBlock(data []byte) (int, bool, error) {
+	offset := 0
+	foundAny := false
+
+	for {
+		if offset+KEY_START > len(data) {
+			return offset, foundAny, nil
+		}
+
+		recSize, err := RecordSizeAt(data, offset)
+		if err != nil {
+			return offset, foundAny, nil
+		}
+
+		recBytes := data[offset : offset+recSize]
+		_, err = Decode(recBytes)
+		if err != nil {
+			return offset, foundAny, nil
+		}
+		foundAny = true
+		offset += recSize
+
+		if offset == len(data) {
+			return offset, foundAny, nil
+		}
+	}
 }
 
 // Helper function, should be moved to block manager?
