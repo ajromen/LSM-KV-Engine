@@ -100,6 +100,12 @@ func (c *Config) applyFlags(flags *flags.FLags) error {
 	if flags.TTLRefreshRate != nil {
 		c.TTL.RefreshRate = int64(*flags.TTLRefreshRate)
 	}
+	if flags.TokenBucketMaxTokens != nil {
+		c.TokenBucket.MaxTokens = *flags.TokenBucketMaxTokens
+	}
+	if flags.TokenBucketResetIntervalMs != nil {
+		c.TokenBucket.ResetIntervalMs = *flags.TokenBucketResetIntervalMs
+	}
 	return nil
 }
 

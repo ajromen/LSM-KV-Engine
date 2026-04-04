@@ -1,5 +1,10 @@
 package flags
 
+import (
+	"flag"
+	"strconv"
+)
+
 type OptionalBool struct {
 	val bool
 	set bool
@@ -70,4 +75,29 @@ func (o *OptionalUInt64) Get() *uint64 {
 		return nil
 	}
 	return &o.val
+}
+
+type OptionalInt64 struct {
+	val int64
+	set bool
+}
+
+func (o *OptionalInt64) Get() *int64 {
+	if !o.set {
+		return nil
+	}
+	return &o.val
+}
+
+func flagInt64(opt *OptionalInt64, name, description string) {
+	flag.Func(name, description, func(v string) error {
+		val, err := strconv.ParseInt(v, 10, 64)
+		if err != nil {
+			opt.set = false
+			return err
+		}
+		opt.val = val
+		opt.set = true
+		return nil
+	})
 }
