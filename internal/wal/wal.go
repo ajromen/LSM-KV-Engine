@@ -163,6 +163,19 @@ func (w *WAL) Delete(key []byte, timestamp uint64) error {
 	return nil
 }
 
+func (w *WAL) Recover() ([]Record, error) { // doesnt call memtable, just returns list of records
+	frags, err := w.ReadAllFragments()
+	if err != nil {
+		return nil, err
+	}
+
+	records, err := JoinFragments(frags)
+	if err != nil {
+		return nil, err
+	}
+	return records, nil
+}
+
 func (w *WAL) ReadAllFragments() ([]WALRecord, error) {
 	if w == nil {
 		return nil, fmt.Errorf("wal is nil")
