@@ -47,6 +47,10 @@ const (
 	//TTL
 	defaultTTLInMemoryTTL = true
 	defaultTTLRefreshRate = 1000 // 1s
+
+	// Token Bucket
+	defaultTokenBucketMaxTokens       int64 = 0    // 0
+	defaultTokenBucketResetIntervalMs int64 = 1000 // 1s
 )
 
 func NewDefaultConfig() *Config {
@@ -106,6 +110,10 @@ func NewDefaultConfig() *Config {
 		TTL: TTLConfig{
 			InMemoryTTL: defaultTTLInMemoryTTL,
 			RefreshRate: defaultTTLRefreshRate,
+		},
+		TokenBucket: TokenBucketConfig{
+			MaxTokens:       defaultTokenBucketMaxTokens,
+			ResetIntervalMs: defaultTokenBucketResetIntervalMs,
 		},
 	}
 }
