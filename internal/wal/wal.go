@@ -290,7 +290,7 @@ func JoinFragments(frags []WALRecord) ([]Record, error) { // returns error for l
 		}
 
 	}
-	if inFragment {
+	if inFragment { // should probably ignore last unfinished fragmented record?
 		return nil, fmt.Errorf("unfinished fragmented record at the end of WAL")
 	}
 
