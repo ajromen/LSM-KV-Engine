@@ -337,7 +337,7 @@ func ReadBlockRecords(data []byte) ([]WALRecord, error) {
 			return records, nil
 		}
 
-		recBytes := data[offset:recSize]
+		recBytes := data[offset : offset+recSize]
 		rec, err := Decode(recBytes)
 		if err != nil {
 			return records, nil
