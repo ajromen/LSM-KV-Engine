@@ -55,6 +55,7 @@ type LSMTreeConfig struct {
 	MinMergeThreshold   int                 `json:"min_merge_threshold"`
 	LevelSizeMultiplier int                 `json:"level_size_multiplier"`
 	CompactionAlgorithm enums.LSMCompaction `json:"compaction_algorithm"`
+	ReadCacheSize       int                 `json:"read_cache_size"`
 }
 
 type BlockManagerConfig struct {
