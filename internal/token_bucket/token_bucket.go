@@ -54,24 +54,30 @@ func (tb *TokenBucket) refill() {
 // Format: maxTokens(8) | resetIntervalMs(8) | tokens(8) | lastResetMs(8)
 func (tb *TokenBucket) Serialize() []byte {
 	buf := make([]byte, 32)
-	binary.LittleEndian.PutUint64(buf[0:8], uint64(tb.maxTokens))
-	binary.LittleEndian.PutUint64(buf[8:16], uint64(tb.resetIntervalMs))
-	binary.LittleEndian.PutUint64(buf[16:24], uint64(tb.tokens))
-	binary.LittleEndian.PutUint64(buf[24:32], uint64(tb.lastResetMs))
-	return buf
+	n := 0
+	n += binary.PutVarint(buf[n:], tb.maxTokens)
+	n += binary.PutVarint(buf[n:], tb.resetIntervalMs)
+	n += binary.PutVarint(buf[n:], tb.tokens)
+	n += binary.PutVarint(buf[n:], tb.lastResetMs)
+	return buf[:n]
 }
 
 // Deserialize decodes the bucket state from a byte slice
 func Deserialize(data []byte) *TokenBucket {
-	if len(data) < 32 {
+	if len(data) == 0 {
 		return nil
 	}
-	return &TokenBucket{
-		maxTokens:       int64(binary.LittleEndian.Uint64(data[0:8])),
-		resetIntervalMs: int64(binary.LittleEndian.Uint64(data[8:16])),
-		tokens:          int64(binary.LittleEndian.Uint64(data[16:24])),
-		lastResetMs:     int64(binary.LittleEndian.Uint64(data[24:32])),
-	}
+	tb := &TokenBucket{}
+	offset := 0
+	var n int
+	tb.maxTokens, n = binary.Varint(data[offset:])
+	offset += n
+	tb.resetIntervalMs, n = binary.Varint(data[offset:])
+	offset += n
+	tb.tokens, n = binary.Varint(data[offset:])
+	offset += n
+	tb.lastResetMs, _ = binary.Varint(data[offset:])
+	return tb
 }
 
 // IsEnabled reports whether the token bucket is configured (maxTokens > 0)
