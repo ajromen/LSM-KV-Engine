@@ -18,6 +18,7 @@ type Config struct {
 	SkipList          SkipListConfig          `json:"skiplist"`
 	SavePath          string                  `json:"save_path"`
 	Debug             bool                    `json:"debug"`
+	TokenBucket       TokenBucketConfig       `json:"token_bucket"`
 }
 
 type WALConfig struct {
@@ -76,7 +77,10 @@ type BackupConfig struct {
 	BackupIncremental bool `json:"backup_incremental"`
 }
 
-// Treba odraditi i ovaj TokenBucket
+type TokenBucketConfig struct {
+	MaxTokens       int64 `json:"max_tokens"`
+	ResetIntervalMs int64 `json:"reset_interval_ms"`
+}
 
 type ProbabilisticTypeConfig struct {
 	BloomFilter    BloomFilterConfig    `json:"bloomfilter"`
