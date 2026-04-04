@@ -266,7 +266,7 @@ func (s *Segment) Append(r Record) error {
 			}
 
 		}
-		fmt.Println(payload)
+		//fmt.Println(payload)
 		wr = WALRecord{
 			FragType:  LAST,
 			RecType:   SINGLE, // to be updated
