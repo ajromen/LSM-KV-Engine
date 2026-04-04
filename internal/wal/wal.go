@@ -11,6 +11,12 @@ import (
 	"github.com/ajromen/LSM-KV-Engine/internal/block"
 )
 
+// to do : Recovery, Batch/transactions, Sync policy
+// 1.1 Write-Ahead Log (WAL)
+// WAL treba implementirati kao segmentirani log.
+// Svaki segment ima fiksan broj zapisa koje korisnik specificira.
+// ????
+
 const (
 	FilePrefix = "wal_"
 	FileSuffix = ".log"
@@ -25,7 +31,7 @@ type WAL struct {
 	BM            *block.BlockManager
 }
 
-func OpenWAL(dir string, blockSize int, maxBlocks int) (*WAL, error) { //always opens from scratch, next segment id always 2, no matter how many files are already here
+func OpenWAL(dir string, blockSize int, maxBlocks int) (*WAL, error) {
 	if dir == "" {
 		return nil, fmt.Errorf("wal dir is empty")
 	}
@@ -126,6 +132,34 @@ func (w *WAL) Append(r Record) error {
 	}
 
 	return w.ActiveSegment.Append(r)
+}
+
+func (w *WAL) Put(key []byte, value []byte, timestamp uint64) error {
+	r := Record{
+		Timestamp: timestamp,
+		Tombstone: false,
+		Key:       key,
+		Value:     value,
+	}
+	err := w.Append(r)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (w *WAL) Delete(key []byte, timestamp uint64) error {
+	r := Record{
+		Timestamp: timestamp,
+		Tombstone: true,
+		Key:       key,
+		Value:     nil,
+	}
+	err := w.Append(r)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func (w *WAL) RotateSegment() error {
