@@ -163,6 +163,128 @@ func (w *WAL) Delete(key []byte, timestamp uint64) error {
 	return nil
 }
 
+func (w *WAL) ReadAllFragments() ([]WALRecord, error) {
+	if w == nil {
+		return nil, fmt.Errorf("wal is nil")
+	}
+
+	entries, err := ListFiles(w.Dir)
+	if err != nil {
+		return nil, err
+	}
+
+	type segInfo struct {
+		id   uint64
+		path string
+	}
+
+	segments := make([]segInfo, 0)
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if !strings.HasPrefix(name, FilePrefix) || !strings.HasSuffix(name, FileSuffix) {
+			continue
+		}
+
+		id, err := ParseSegmentID(name)
+		if err != nil {
+			return nil, err
+		}
+
+		segments = append(segments, segInfo{
+			id:   id,
+			path: filepath.Join(w.Dir, name),
+		})
+	}
+
+	for i := 0; i < len(segments); i++ {
+		for j := i + 1; j < len(segments); j++ {
+			if segments[j].id < segments[i].id {
+				temp := segments[j]
+				segments[j] = segments[i]
+				segments[i] = temp
+			}
+		}
+	}
+
+	all := make([]WALRecord, 0)
+
+	for _, segInfo := range segments {
+		seg, err := OpenSegment(segInfo.id, segInfo.path, w.MaxBlocks, w.BM)
+		if err != nil {
+			return nil, err
+		}
+
+		recs, err := seg.ReadAllRecords()
+		if err != nil {
+			return nil, err
+		}
+
+		all = append(all, recs...)
+	}
+
+	return all, nil
+}
+
+func JoinFragments(frags []WALRecord) ([]Record, error) {
+	records := make([]Record, 0)
+
+	var current *Record
+	inFragment := false
+
+	for _, frag := range frags {
+		switch frag.RecType {
+		case FULL:
+			records = append(records, frag.Record)
+		case FIRST:
+			if inFragment {
+				return nil, fmt.Errorf("found FIRST before previous fragmented record was finished")
+			}
+
+			rec := Record{
+				Timestamp: frag.Record.Timestamp,
+				Tombstone: frag.Record.Tombstone,
+				Key:       append([]byte(nil), frag.Record.Key...),
+				Value:     append([]byte(nil), frag.Record.Value...),
+			}
+			current = &rec
+			inFragment = true
+
+		case MIDDLE:
+			if !inFragment || current == nil {
+				return nil, fmt.Errorf("found MIDDLE without active fragmented record")
+			}
+
+			current.Key = append(current.Key, frag.Record.Key...)
+			current.Value = append(current.Key, frag.Record.Value...)
+
+		case LAST:
+			if !inFragment || current == nil {
+				return nil, fmt.Errorf("found LAST without active fragmented record")
+			}
+			current.Key = append(current.Key, frag.Record.Key...)
+			current.Value = append(current.Key, frag.Record.Value...)
+
+			records = append(records, *current)
+			current = nil
+			inFragment = false
+		default:
+			return nil, fmt.Errorf("invalid frag type")
+
+		}
+
+	}
+	if inFragment {
+		return nil, fmt.Errorf("unfinished fragmented record at the end of WAL")
+	}
+
+	return records, nil
+
+}
+
 func (w *WAL) RotateSegment() error {
 	if w == nil {
 		return fmt.Errorf("wal is nil")
