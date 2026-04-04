@@ -11,11 +11,12 @@ import (
 	"github.com/ajromen/LSM-KV-Engine/internal/block"
 )
 
-// to do : Recovery, Batch/transactions, Sync policy
+// to do : Recovery, Batch/transactions, Sync policy, Low WaterMark
 // 1.1 Write-Ahead Log (WAL)
 // WAL treba implementirati kao segmentirani log.
 // Svaki segment ima fiksan broj zapisa koje korisnik specificira.
 // ????
+// ne sece rekord po segmentima kako treba
 
 const (
 	FilePrefix = "wal_"
