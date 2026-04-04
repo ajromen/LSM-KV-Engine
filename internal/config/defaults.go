@@ -42,6 +42,8 @@ const (
 	defaultLSMLevelSizeMultiplier = 10
 	defaultMaxLSMHeight           = 5
 
+	defaultReadCacheSize = 1000
+
 	//TTL
 	defaultTTLInMemoryTTL = true
 	defaultTTLRefreshRate = 1000 // 1s
@@ -81,6 +83,7 @@ func NewDefaultConfig() *Config {
 			MinMergeThreshold:   defaultLSMMinMergeThreshold,
 			CompactionAlgorithm: defaultLSMCompactionAlgorithm,
 			LevelSizeMultiplier: defaultLSMLevelSizeMultiplier,
+			ReadCacheSize:       defaultReadCacheSize,
 		},
 		SkipList: SkipListConfig{
 			MaxLevel: defaultSkipListMaxLevel,

@@ -3,6 +3,7 @@ package lsm
 import (
 	"fmt"
 
+	"github.com/ajromen/LSM-KV-Engine/internal/cache"
 	"github.com/ajromen/LSM-KV-Engine/internal/config"
 	"github.com/ajromen/LSM-KV-Engine/internal/enums"
 	"github.com/ajromen/LSM-KV-Engine/internal/iterator"
@@ -15,6 +16,7 @@ type LSM struct {
 	memtableeManager *memtable.MemtableManager
 	sstableManager   *sstable.SSTableManager
 	strategy         CompactionStrategy
+	readCache        *cache.LRU[string, []byte]
 }
 
 func NewLSM(dataDir string) (*LSM, error) {
@@ -38,6 +40,7 @@ func NewLSM(dataDir string) (*LSM, error) {
 	factory := memtable.NewFactory(stt.Memtable)
 	memManager := memtable.NewMemtableManager(3, 0, factory, lsm.onFlush)
 	lsm.memtableeManager = memManager
+	lsm.readCache = cache.NewLRU[string, []byte](stt.LSMTree.ReadCacheSize)
 	return &lsm, nil
 }
 
@@ -56,6 +59,11 @@ func (l *LSM) onFlush(entries []memtable.MemtableEntry) {
 
 func (l *LSM) Put(key []byte, value []byte, seqId uint64, opType enums.OpType) {
 	l.memtableeManager.Put(key, value, seqId, opType)
+	if opType == enums.OpTypeDel {
+		l.readCache.Put(string(key), nil)
+	} else {
+		l.readCache.Put(string(key), value)
+	}
 }
 
 func (l *LSM) PutWithTTL(key []byte, value []byte, seqId uint64, opType enums.OpType, ttl int64) {
@@ -63,23 +71,39 @@ func (l *LSM) PutWithTTL(key []byte, value []byte, seqId uint64, opType enums.Op
 }
 
 func (l *LSM) Get(key []byte) ([]byte, bool, error) {
+	// 1. check cache
+	if val, ok := l.readCache.Get(string(key)); ok {
+		if val == nil {
+			return nil, false, nil
+		}
+		return val, true, nil
+	}
+
+	// 2. check memtable
 	entry, found := l.memtableeManager.Get(key)
 	if found {
 		if entry == nil {
-			return nil, false, nil // tombstone
+			l.readCache.Put(string(key), nil)
+			return nil, false, nil
 		}
+		l.readCache.Put(string(key), entry.Value)
 		return entry.Value, true, nil
 	}
+
 	if config.GetSettings().Debug {
 		fmt.Printf("Key not found in memtable checking sstable\n")
 	}
+
+	// 3. check SSTable
 	record, found, err := l.sstableManager.Get(key)
 	if err != nil {
 		return nil, false, err
 	}
 	if found {
+		l.readCache.Put(string(key), record.Value)
 		return record.Value, true, nil
 	}
+
 	return nil, false, nil
 }
 
@@ -107,6 +131,7 @@ func (l *LSM) Finish() error {
 }
 
 func (l *LSM) ClearAll() error {
+	l.readCache.Clear()
 	l.memtableeManager.ResetAll()
 	return l.sstableManager.ClearAll()
 }
@@ -144,6 +169,7 @@ func (l *LSM) NewPrefixIterator(prefix []byte) (*iterator.PrefixIterator, error)
 	}
 	return iterator.NewPrefixIterator(dbIt, prefix), nil
 }
+
 func (l *LSM) GetAllTTLFomSST() (*ttl.ExpiryHeap, map[string]int64, error) {
 	return l.sstableManager.GetAllTTL()
 }

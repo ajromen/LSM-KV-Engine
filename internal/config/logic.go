@@ -6,11 +6,11 @@ import (
 	"os"
 	"strings"
 
-	"github.com/ajromen/LSM-KV-Engine/internal/cli"
 	"github.com/ajromen/LSM-KV-Engine/internal/enums"
+	"github.com/ajromen/LSM-KV-Engine/internal/flags"
 )
 
-func LoadConfig(flags *cli.FLags) error {
+func LoadConfig(flags *flags.FLags) error {
 	cfg := NewDefaultConfig()
 	if flags.ConfigPath != nil {
 		err := cfg.loadFromFile(*flags.ConfigPath)
@@ -31,7 +31,7 @@ func LoadConfig(flags *cli.FLags) error {
 	return nil
 }
 
-func (c *Config) applyFlags(flags *cli.FLags) error {
+func (c *Config) applyFlags(flags *flags.FLags) error {
 	if flags.Debug != nil {
 		c.Debug = *flags.Debug
 	}
