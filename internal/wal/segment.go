@@ -301,6 +301,57 @@ func (s *Segment) Append(r Record) error {
 	return fmt.Errorf("block remaining size error")
 }
 
+func (s *Segment) ReadAllRecords() ([]WALRecord, error) { //doesnt join fragments
+	if s == nil {
+		return nil, fmt.Errorf("segment is nil")
+	}
+	all := make([]WALRecord, 0)
+
+	for i := 0; i < s.MaxBlocks; i++ {
+		blockData, err := s.ReadBlock(uint32(i))
+		if err != nil {
+			return nil, err
+		}
+
+		recs, err := ReadBlockRecords(blockData)
+		if err != nil {
+			return nil, err
+		}
+		if len(recs) == 0 {
+			break
+		}
+		all = append(all, recs...)
+	}
+	return all, nil
+}
+
+func ReadBlockRecords(data []byte) ([]WALRecord, error) {
+	records := make([]WALRecord, 0)
+	offset := 0
+	for {
+		if offset+KEY_START > len(data) {
+			return records, nil
+		}
+		recSize, err := RecordSizeAt(data, offset)
+		if err != nil {
+			return records, nil
+		}
+
+		recBytes := data[offset:recSize]
+		rec, err := Decode(recBytes)
+		if err != nil {
+			return records, nil
+		}
+
+		records = append(records, rec)
+		offset += recSize
+
+		if offset == len(data) {
+			return records, nil
+		}
+	}
+}
+
 func (s *Segment) ReadBlock(index uint32) ([]byte, error) {
 	if index >= uint32(s.MaxBlocks) {
 		return nil, fmt.Errorf("block index out of range")
