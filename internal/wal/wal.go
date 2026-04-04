@@ -5,8 +5,15 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/block"
+)
+
+const (
+	FilePrefix = "wal_"
+	FileSuffix = ".log"
 )
 
 type WAL struct {
@@ -42,13 +49,57 @@ func OpenWAL(dir string, blockSize int, maxBlocks int) (*WAL, error) { //always 
 		BM:            bm,
 	}
 
-	firstPath := w.SegmentPath(w.NextSegmentID)
-	seg, err := OpenSegment(w.NextSegmentID, firstPath, w.MaxBlocks, w.BM)
+	entries, err := ListFiles(dir)
 	if err != nil {
 		return nil, err
 	}
+	maxID := uint64(0)
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if !strings.HasPrefix(name, FilePrefix) || !strings.HasSuffix(name, FileSuffix) {
+			continue
+		}
+		id, err := ParseSegmentID(name)
+		if err != nil {
+			return nil, err
+		}
+		if id > maxID {
+			maxID = id
+		}
+
+	}
+
+	if maxID == 0 { // id no log files
+		firstPath := w.SegmentPath(w.NextSegmentID)
+		seg, err := OpenSegment(w.NextSegmentID, firstPath, w.MaxBlocks, w.BM)
+		if err != nil {
+			return nil, err
+		}
+		w.ActiveSegment = seg
+		w.NextSegmentID++
+
+		return w, nil
+	}
+
+	// load last log file by id
+	lastPath := w.SegmentPath(maxID)
+	seg, err := OpenSegment(maxID, lastPath, w.MaxBlocks, w.BM)
+	if err != nil {
+		return nil, err
+	}
+
 	w.ActiveSegment = seg
-	w.NextSegmentID++
+	w.NextSegmentID = maxID + 1
+
+	if w.ActiveSegment.IsFull() {
+		err = w.RotateSegment()
+		if err != nil {
+			return nil, err
+		}
+	}
 
 	return w, nil
 
@@ -136,7 +187,29 @@ func (w *WAL) PrintAll() error { //func for debugging
 	return nil
 }
 
+func ParseSegmentID(name string) (uint64, error) {
+	base := strings.TrimPrefix(name, FilePrefix)
+	base = strings.TrimSuffix(base, FileSuffix)
+	fmt.Println(name, base)
+
+	id, err := strconv.ParseUint(base, 10, 64)
+	if err != nil {
+		return 0, err
+	}
+	return id, nil
+
+}
+
 func (w *WAL) SegmentPath(id uint64) string {
 	filename := fmt.Sprintf("wal_%06d.log", id)
 	return filepath.Join(w.Dir, filename)
+}
+
+// helper function, should go to block manager
+func ListFiles(dir string) ([]os.DirEntry, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	return entries, err
 }
