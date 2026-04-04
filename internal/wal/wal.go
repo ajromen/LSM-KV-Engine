@@ -242,7 +242,7 @@ func (w *WAL) ReadAllFragments() ([]WALRecord, error) {
 	return all, nil
 }
 
-func JoinFragments(frags []WALRecord) ([]Record, error) { // returns error for last unfinished record, should ignore it!
+func JoinFragments(frags []WALRecord) ([]Record, error) { // returns error for unfinished records, maybe should just return existing records
 	records := make([]Record, 0)
 
 	var current *Record
@@ -251,10 +251,15 @@ func JoinFragments(frags []WALRecord) ([]Record, error) { // returns error for l
 	for _, frag := range frags {
 		switch frag.FragType {
 		case FULL:
+			if inFragment { // maybe should immediately return existing records?
+				//return nil, fmt.Errorf("found FULL while fragmented record is unfinished")
+				return records, nil
+			}
 			records = append(records, frag.Record)
 		case FIRST:
 			if inFragment {
-				return nil, fmt.Errorf("found FIRST before previous fragmented record was finished")
+				//return nil, fmt.Errorf("found FIRST before previous fragmented record was finished")
+				return records, nil
 			}
 
 			rec := Record{
@@ -268,7 +273,8 @@ func JoinFragments(frags []WALRecord) ([]Record, error) { // returns error for l
 
 		case MIDDLE:
 			if !inFragment || current == nil {
-				return nil, fmt.Errorf("found MIDDLE without active fragmented record")
+				//return nil, fmt.Errorf("found MIDDLE without active fragmented record")
+				return records, nil
 			}
 
 			current.Key = append(current.Key, frag.Record.Key...)
@@ -276,7 +282,8 @@ func JoinFragments(frags []WALRecord) ([]Record, error) { // returns error for l
 
 		case LAST:
 			if !inFragment || current == nil {
-				return nil, fmt.Errorf("found LAST without active fragmented record")
+				//return nil, fmt.Errorf("found LAST without active fragmented record")
+				return records, nil
 			}
 			current.Key = append(current.Key, frag.Record.Key...)
 			current.Value = append(current.Value, frag.Record.Value...)
@@ -285,13 +292,15 @@ func JoinFragments(frags []WALRecord) ([]Record, error) { // returns error for l
 			current = nil
 			inFragment = false
 		default:
-			return nil, fmt.Errorf("invalid frag type")
+			//return nil, fmt.Errorf("invalid frag type")
+			return records, nil
 
 		}
 
 	}
 	if inFragment { // should probably ignore last unfinished fragmented record?
-		return nil, fmt.Errorf("unfinished fragmented record at the end of WAL")
+		//return nil, fmt.Errorf("unfinished fragmented record at the end of WAL")
+		return records, nil
 	}
 
 	return records, nil
