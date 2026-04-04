@@ -229,14 +229,14 @@ func (w *WAL) ReadAllFragments() ([]WALRecord, error) {
 	return all, nil
 }
 
-func JoinFragments(frags []WALRecord) ([]Record, error) {
+func JoinFragments(frags []WALRecord) ([]Record, error) { // returns error for last unfinished record, should ignore it!
 	records := make([]Record, 0)
 
 	var current *Record
 	inFragment := false
 
 	for _, frag := range frags {
-		switch frag.RecType {
+		switch frag.FragType {
 		case FULL:
 			records = append(records, frag.Record)
 		case FIRST:
@@ -259,14 +259,14 @@ func JoinFragments(frags []WALRecord) ([]Record, error) {
 			}
 
 			current.Key = append(current.Key, frag.Record.Key...)
-			current.Value = append(current.Key, frag.Record.Value...)
+			current.Value = append(current.Value, frag.Record.Value...)
 
 		case LAST:
 			if !inFragment || current == nil {
 				return nil, fmt.Errorf("found LAST without active fragmented record")
 			}
 			current.Key = append(current.Key, frag.Record.Key...)
-			current.Value = append(current.Key, frag.Record.Value...)
+			current.Value = append(current.Value, frag.Record.Value...)
 
 			records = append(records, *current)
 			current = nil
@@ -329,7 +329,7 @@ func (w *WAL) PrintAll() error { //func for debugging
 			break
 		}
 		bindex := 0
-		fmt.Println("Segment", id)
+		//fmt.Println("Segment", id)
 		for {
 			block, err := s.ReadBlock(uint32(bindex))
 			if err != nil {
@@ -347,7 +347,7 @@ func (w *WAL) PrintAll() error { //func for debugging
 func ParseSegmentID(name string) (uint64, error) {
 	base := strings.TrimPrefix(name, FilePrefix)
 	base = strings.TrimSuffix(base, FileSuffix)
-	fmt.Println(name, base)
+	//fmt.Println(name, base)
 
 	id, err := strconv.ParseUint(base, 10, 64)
 	if err != nil {
