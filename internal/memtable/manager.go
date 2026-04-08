@@ -149,11 +149,11 @@ func (mm *MemtableManager) RawIterator() iterator.Iterator[MemtableEntry] {
 	defer mm.mu.Unlock()
 	var rawIters []iterator.Iterator[MemtableEntry]
 	if mm.active != nil {
-		activeIt := NewRawSingleMemtableIterator(mm.active.Iterator())
+		activeIt := NewRawSingleMemtableIterator(mm.active.RawIterator())
 		rawIters = append(rawIters, activeIt.(*RawSingleMemtableIterator))
 	}
 	for i := len(mm.immutable) - 1; i >= 0; i-- {
-		it := NewRawSingleMemtableIterator(mm.immutable[i].Iterator())
+		it := NewRawSingleMemtableIterator(mm.immutable[i].RawIterator())
 		rawIters = append(rawIters, it.(*RawSingleMemtableIterator))
 	}
 	return NewRawIterator(rawIters, mm.mergeStructure)
@@ -206,14 +206,14 @@ func (mm *MemtableManager) Close() {
 // EntryIterator returns a MergedMemtableIterator adapted to iterator.Entry type
 // This is used by DBIterator which works at the Entry level
 func (mm *MemtableManager) EntryIterator() iterator.Iterator[iterator.Entry] {
-	typedIt := mm.Iterator() // Iterator[MemtableEntry]
+	typedIt := mm.RawIterator() // using raw in order to DBIterator see tombstone
 	return iterator.NewAdaptedIterator(
 		&memtableIteratorSeekWrapper{inner: typedIt},
 		func(e MemtableEntry) iterator.Entry {
 			return iterator.Entry{
 				Key:        append([]byte(nil), e.Key...),
 				Value:      append([]byte(nil), e.Value...),
-				Tombstone:  e.OpType == enums.OpTypeDel,
+				OpType:     e.OpType,
 				SequenceID: e.SeqId,
 			}
 		},
@@ -222,15 +222,3 @@ func (mm *MemtableManager) EntryIterator() iterator.Iterator[iterator.Entry] {
 		},
 	)
 }
-
-// memtableIteratorSeekWrapper wraps Iterator[MemtableEntry] to add TypedSeekIterator interface
-type memtableIteratorSeekWrapper struct {
-	inner iterator.Iterator[MemtableEntry]
-}
-
-func (w *memtableIteratorSeekWrapper) Valid() bool          { return w.inner.Valid() }
-func (w *memtableIteratorSeekWrapper) SeekToFirst()         { w.inner.SeekToFirst() }
-func (w *memtableIteratorSeekWrapper) SeekToLast()          { w.inner.SeekToLast() }
-func (w *memtableIteratorSeekWrapper) Next()                { w.inner.Next() }
-func (w *memtableIteratorSeekWrapper) Key() MemtableEntry   { return w.inner.Key() }
-func (w *memtableIteratorSeekWrapper) Seek(e MemtableEntry) { w.inner.Seek(e) }

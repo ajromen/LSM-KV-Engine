@@ -377,3 +377,25 @@ func (r *SSTableReader) Get(key []byte) (*Record, error) {
 		ExpiresAt: rec.ExpiresAt,
 	}, nil
 }
+
+func (reader *SSTableReader) OverlapsRange(start, end []byte) bool {
+	if reader == nil || reader.SummarySegment == nil {
+		return true
+	}
+
+	minKey := reader.Metadata.GetBytes(FieldMinKey)
+	maxKey := reader.Metadata.GetBytes(FieldMaxKey)
+
+	if len(minKey) == 0 || len(maxKey) == 0 {
+		return true
+	}
+
+	if len(end) > 0 && bytes.Compare(minKey, end) > 0 {
+		return false
+	}
+	if len(start) > 0 && bytes.Compare(maxKey, start) < 0 {
+		return false
+	}
+
+	return true
+}

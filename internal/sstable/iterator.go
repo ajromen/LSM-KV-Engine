@@ -498,3 +498,27 @@ func (m *SSTableMergeIterator) advance(prevKey []byte) {
 	m.current = nil
 	m.valid = false
 }
+
+// sstableIteratorSeekWrapper wraps SSTableMergeIterator to satisfy TypedSeekIterator
+type sstableIteratorSeekWrapper struct {
+	inner *SSTableMergeIterator
+}
+
+func (w *sstableIteratorSeekWrapper) Valid() bool   { return w.inner.Valid() }
+func (w *sstableIteratorSeekWrapper) SeekToFirst()  { w.inner.SeekToFirst() }
+func (w *sstableIteratorSeekWrapper) SeekToLast()   { w.inner.SeekToLast() }
+func (w *sstableIteratorSeekWrapper) Next()         { w.inner.Next() }
+func (w *sstableIteratorSeekWrapper) Key() Record   { return w.inner.Key() }
+func (w *sstableIteratorSeekWrapper) Seek(r Record) { w.inner.Seek(r) }
+
+// emptyEntryIterator is an always-invalid iterator returned when no readers match
+type emptyEntryIterator struct{}
+
+func (e emptyEntryIterator) Valid() bool           { return false }
+func (e emptyEntryIterator) SeekToFirst()          {}
+func (e emptyEntryIterator) SeekToLast()           {}
+func (e emptyEntryIterator) Seek(_ iterator.Entry) {}
+func (e emptyEntryIterator) Next()                 {}
+func (e emptyEntryIterator) Prev()                 {}
+func (e emptyEntryIterator) Key() iterator.Entry   { return iterator.Entry{} }
+func (e emptyEntryIterator) Value() iterator.Entry { return iterator.Entry{} }
