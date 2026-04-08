@@ -38,3 +38,9 @@ func (b *BlockCache) Clear() {
 	}
 	b.lru.Clear()
 }
+
+func (bc *BlockCache) InvalidateFile(filePath string) {
+	bc.lru.InvalidateWhere(func(key BlockKey) bool {
+		return key.FilePath == filePath
+	})
+}

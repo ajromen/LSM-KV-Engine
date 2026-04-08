@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/block"
@@ -34,6 +35,7 @@ func (l *Layer) GetSize() int64 {
 	for _, reader := range l.SSTables {
 		size += reader.SizeBytes
 	}
+	l.needsUpdate = false
 	return size
 }
 
@@ -44,6 +46,7 @@ func (l *Layer) AppendSSTable(sstable *SSTableReader) {
 
 func (l *Layer) RemoveSSTable(index int) {
 	l.SSTables = append(l.SSTables[:index], l.SSTables[index+1:]...)
+	l.needsUpdate = true
 }
 
 func newLayer() *Layer {
@@ -59,6 +62,7 @@ type SSTableManager struct {
 	blockManager *block.BlockManager
 	Manifest     *Manifest
 	dataDir      string
+	mu           sync.Mutex
 }
 
 func NewSSTableManager(dataDir string) *SSTableManager {
@@ -167,6 +171,8 @@ func (sm *SSTableManager) addToLayers(reader *SSTableReader, toLayer int) error 
 // 2. add entries
 // 3. create reader and add to manager
 func (sm *SSTableManager) FlushToSSTable(entries []memtable.MemtableEntry) error {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
 	if len(entries) == 0 {
 		return nil
 	}
@@ -215,7 +221,10 @@ func (sm *SSTableManager) FlushToSSTable(entries []memtable.MemtableEntry) error
 }
 
 func (sm *SSTableManager) Get(key []byte) (*Record, bool, error) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
 	t := time.Now().UnixMilli()
+	var best *Record // TODO razmisli kako ovo moze efikasnije
 	for _, layer := range sm.Layers {
 		for i := len(layer.SSTables) - 1; i >= 0; i-- {
 			record, err := layer.SSTables[i].Get(key)
@@ -225,13 +234,16 @@ func (sm *SSTableManager) Get(key []byte) (*Record, bool, error) {
 			if record == nil {
 				continue
 			}
-			if record.Tombstone {
-				return nil, false, nil
+			if best == nil || record.SeqId > best.SeqId {
+				best = record
 			}
-			return sm.checkTTL(record, t)
+
 		}
 	}
-	return nil, false, nil
+	if best == nil {
+		return nil, false, nil
+	}
+	return sm.checkTTL(best, t)
 }
 
 func (sm *SSTableManager) checkTTL(r *Record, t int64) (*Record, bool, error) {
@@ -303,6 +315,8 @@ func (sm *SSTableManager) ClearAll() error {
 // 3. open new reader and add to manager
 // 4. delete old sstables
 func (sm *SSTableManager) MergeSSTables(readers []*SSTableReader, toLayer int, skipTombstones bool) error {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
 	// 1. create new sstable
 
 	expectedElems := uint64(0)
@@ -325,7 +339,7 @@ func (sm *SSTableManager) MergeSSTables(readers []*SSTableReader, toLayer int, s
 	t := time.Now().UnixMilli()
 	for iterator.Valid() {
 		rec := iterator.Value()
-		if rec.Tombstone || rec.ExpiresAt < t && rec.ExpiresAt != 0 {
+		if (skipTombstones && rec.Tombstone) || (rec.ExpiresAt != 0 && rec.ExpiresAt < t) {
 			iterator.Next()
 			continue
 		}
@@ -361,11 +375,19 @@ func (sm *SSTableManager) MergeSSTables(readers []*SSTableReader, toLayer int, s
 	// 4. delete old sstables
 	err = sm.DeleteSSTables(readers)
 
-	return err
+	err = sm.DeleteSSTables(readers)
+	if err != nil {
+		return err
+	}
+	sm.blockManager.ClearCache()
+	return nil
+
 }
 
 // MoveSSTable moves sstable from one layer to another
 func (sm *SSTableManager) MoveSSTable(current *SSTableReader, toLayer int) error {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
 	fromLayer := current.Layer
 
 	readers := sm.Layers[fromLayer].SSTables
@@ -439,12 +461,14 @@ func (sm *SSTableManager) GetAllTTL() (*ttl.ExpiryHeap, map[string]int64, error)
 	heap := ttl.NewExpiryHeap()
 	index := make(map[string]int64)
 	timeNow := time.Now().UnixMilli()
+
 	for _, layer := range sm.Layers {
-		for i := len(layer.SSTables) - 1; i >= 0; i-- {
+		for i := 0; i < len(layer.SSTables); i++ {
 			e, err := layer.SSTables[i].GetTTLEntries()
 			if err != nil {
 				return nil, nil, err
 			}
+
 			for _, entry := range e {
 				if entry.ExpiresAt < timeNow {
 					continue

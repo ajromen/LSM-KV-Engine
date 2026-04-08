@@ -191,7 +191,7 @@ func (sw *SSTableWriter) flushDataBlock() error {
 // 4. Write filter segment on disk
 // 5. Write index blocks on disk
 // 6. Write summary segment on disk
-// 7. TODO Write TTL index on disk
+// 7. Write TTL index on disk
 // 8. Write metadata (merkle tree) segment on disk
 // 9. Write footer and sync storage
 func (sw *SSTableWriter) Finalize() error {

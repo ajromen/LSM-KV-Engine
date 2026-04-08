@@ -1,6 +1,7 @@
 package sstable
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -120,7 +121,7 @@ func (m *Manifest) reconstruct(fileDir string) error {
 }
 
 func (m *Manifest) load() error {
-	err := block.ReadJSON(filepath.Join(m.FileDir, ManifestFileName), m)
+	err := block.ReadJSON(m.filePath(), m)
 	if err != nil {
 		return err
 	}
@@ -128,11 +129,19 @@ func (m *Manifest) load() error {
 }
 
 func (m *Manifest) Save() error {
-	err := block.WriteJSON(filepath.Join(m.FileDir, ManifestFileName), m)
+	data, err := json.MarshalIndent(m, "", "  ")
 	if err != nil {
 		return err
 	}
-	return nil
+	tmpPath := m.filePath() + ".tmp"
+	if err := os.WriteFile(tmpPath, data, 0644); err != nil {
+		return err
+	}
+	return os.Rename(tmpPath, m.filePath())
+}
+
+func (m *Manifest) filePath() string {
+	return filepath.Join(m.FileDir, ManifestFileName)
 }
 
 func (m *Manifest) MoveSSTable(id, fromLayer, toLayer int) error {

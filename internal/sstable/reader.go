@@ -13,6 +13,7 @@ import (
 	"os"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/block"
+	"github.com/ajromen/LSM-KV-Engine/internal/config"
 	"github.com/ajromen/LSM-KV-Engine/internal/encoders"
 	"github.com/ajromen/LSM-KV-Engine/internal/enums"
 	"github.com/ajromen/LSM-KV-Engine/internal/shared"
@@ -121,12 +122,31 @@ func NewSSTableReader(id int, filePath string, format enums.SSTableFormat, layer
 
 // NewSSTableReaderFromWriter make sure writer finalize has been run before
 func NewSSTableReaderFromWriter(w *SSTableWriter, id int) (*SSTableReader, error) {
-	if err := w.storage.Restart(); err != nil {
-		return nil, fmt.Errorf("failed to restart storage: %w", err)
+	if err := w.storage.Sync(); err != nil {
+		return nil, fmt.Errorf("failed to sync storage: %w", err)
+	}
+	if err := w.storage.Close(); err != nil {
+		return nil, fmt.Errorf("failed to close writer storage: %w", err)
 	}
 
+	format := config.GetSettings().SSTable.Format
+	var newStorage SegmentStorage
+	var err error
+	switch format {
+	case enums.FormatSingleFile:
+		newStorage, err = OpenSingleFileStorage(w.filePath)
+	case enums.FormatMultiFile:
+		newStorage, err = OpenMultiFileStorage(w.filePath)
+	default:
+		return nil, fmt.Errorf("unsupported format")
+	}
+	if err != nil {
+		return nil, err
+	}
+	newStorage.SetBlockManager(w.blockManager)
+
 	r := &SSTableReader{
-		storage:        w.storage,
+		storage:        newStorage,
 		Layer:          w.Layer,
 		filePath:       w.filePath,
 		blockManager:   w.blockManager,
@@ -134,7 +154,7 @@ func NewSSTableReaderFromWriter(w *SSTableWriter, id int) (*SSTableReader, error
 		filterSegment:  w.filterSegment,
 		footer:         w.footer,
 		SummarySegment: w.summarySegment,
-		valueDecoder:   w.valueEncoder, // TODO check encoder is decoder
+		valueDecoder:   w.valueEncoder,
 		Metadata:       w.metadataSegment,
 		Id:             id,
 	}
@@ -152,7 +172,6 @@ func NewSSTableReaderFromWriter(w *SSTableWriter, id int) (*SSTableReader, error
 		}
 		r.SizeBytes = info.Size()
 	}
-
 	return r, nil
 }
 

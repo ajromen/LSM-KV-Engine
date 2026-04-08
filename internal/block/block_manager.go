@@ -216,3 +216,7 @@ func (bm *BlockManager) ClearCache() {
 	}
 	bm.cache.Clear()
 }
+
+func (bm *BlockManager) InvalidateFile(filePath string) {
+	bm.cache.InvalidateFile(filePath)
+}
