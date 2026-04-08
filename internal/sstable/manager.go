@@ -340,7 +340,7 @@ func (sm *SSTableManager) MergeSSTables(readers []*SSTableReader, toLayer int, s
 	t := time.Now().UnixMilli()
 	for iterator.Valid() {
 		rec := iterator.Value()
-		if rec.Tombstone || (rec.ExpiresAt != 0 && rec.ExpiresAt < t) {
+		if (skipTombstones && rec.Tombstone) || (rec.ExpiresAt != 0 && rec.ExpiresAt < t) {
 			iterator.Next()
 			continue
 		}
@@ -376,7 +376,13 @@ func (sm *SSTableManager) MergeSSTables(readers []*SSTableReader, toLayer int, s
 	// 4. delete old sstables
 	err = sm.DeleteSSTables(readers)
 
-	return err
+	err = sm.DeleteSSTables(readers)
+	if err != nil {
+		return err
+	}
+	sm.blockManager.ClearCache()
+	return nil
+
 }
 
 // MoveSSTable moves sstable from one layer to another

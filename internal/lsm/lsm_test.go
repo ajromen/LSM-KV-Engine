@@ -21,7 +21,7 @@ func newConfig(compaction enums.LSMCompaction) {
 	cfg.LSMTree.CompactionAlgorithm = compaction
 	cfg.LSMTree.MinMergeThreshold = 4
 	cfg.LSMTree.MaxHeight = 5
-	cfg.LSMTree.LevelSizeMultiplier = 2 // L1MaxBytes = 512 * 2 = 1024B — brzo se puni
+	cfg.LSMTree.LevelSizeMultiplier = 2 // L1MaxBytes = 512 * 2 = 1024B
 	cfg.Memtable.MemtableMaxEntries = 5
 	cfg.Memtable.MemtableMaxSizeBytes = 512
 	config.TESTSetSettings(cfg)
