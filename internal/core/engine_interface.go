@@ -5,6 +5,7 @@ import (
 	"github.com/ajromen/LSM-KV-Engine/internal/lsm"
 	"github.com/ajromen/LSM-KV-Engine/internal/notifier"
 	"github.com/ajromen/LSM-KV-Engine/internal/sequence"
+	"github.com/ajromen/LSM-KV-Engine/internal/token_bucket"
 	"github.com/ajromen/LSM-KV-Engine/internal/ttl"
 )
 
@@ -15,6 +16,7 @@ type Engine struct {
 	ttlJanitor  *ttl.Janitor
 	inMemoryTTL bool
 	notifier    *notifier.Notifier
+	tokenBucket *token_bucket.TokenBucket
 	//wal
 }
 

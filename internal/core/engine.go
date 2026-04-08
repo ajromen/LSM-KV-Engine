@@ -12,6 +12,7 @@ import (
 	"github.com/ajromen/LSM-KV-Engine/internal/notifier"
 	"github.com/ajromen/LSM-KV-Engine/internal/sequence"
 	"github.com/ajromen/LSM-KV-Engine/internal/shared"
+	"github.com/ajromen/LSM-KV-Engine/internal/token_bucket"
 	"github.com/ajromen/LSM-KV-Engine/internal/ttl"
 )
 
@@ -28,6 +29,22 @@ func NewEngine() (*Engine, error) {
 
 	engine.recover()
 
+	cfg := config.GetSettings().TokenBucket
+	if cfg.MaxTokens > 0 {
+		existing, found, err := lsmTree.Get([]byte(token_bucket.InternalKey))
+		if err == nil && found {
+			tb := token_bucket.Deserialize(existing)
+			if tb != nil {
+				engine.tokenBucket = tb
+			}
+		}
+
+		if engine.tokenBucket == nil {
+			engine.tokenBucket = token_bucket.New(cfg.MaxTokens, cfg.ResetIntervalMs)
+			engine.persistTokenBucket()
+		}
+	}
+
 	if engine.inMemoryTTL {
 		engine.ttlJanitor = ttl.NewTTLJanitor(engine.Delete)
 		heap, index, err := engine.lsm.GetAllTTLFomSST()
@@ -43,6 +60,25 @@ func NewEngine() (*Engine, error) {
 	return &engine, nil
 }
 
+func (engine *Engine) persistTokenBucket() {
+	if engine.tokenBucket == nil {
+		return
+	}
+	seqId := engine.seqGen.Next()
+	engine.lsm.Put([]byte(token_bucket.InternalKey), engine.tokenBucket.Serialize(), seqId, enums.OpTypePut)
+}
+
+func (engine *Engine) checkRateLimit() error {
+	if engine.tokenBucket == nil || !engine.tokenBucket.IsEnabled() {
+		return nil
+	}
+	if !engine.tokenBucket.TryConsume() {
+		return fmt.Errorf("rate limit exceeded: too many requests")
+	}
+	engine.persistTokenBucket()
+	return nil
+}
+
 // check manifest
 // check wal
 func (engine *Engine) recover() {
@@ -53,6 +89,15 @@ func (engine *Engine) recover() {
 }
 
 func (engine *Engine) Put(key []byte, value []byte) {
+	if err := engine.checkRateLimit(); err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	if string(key) == token_bucket.InternalKey {
+		return
+	}
+
 	seqId := engine.seqGen.Next()
 	//wal
 	engine.lsm.Put(key, value, seqId, enums.OpTypePut)
@@ -70,6 +115,14 @@ func (engine *Engine) PutWithTTL(key []byte, value []byte, ttl int64) {
 }
 
 func (engine *Engine) Get(key []byte) ([]byte, bool, error) {
+	if err := engine.checkRateLimit(); err != nil {
+		return nil, false, err
+	}
+
+	if string(key) == token_bucket.InternalKey {
+		return nil, false, fmt.Errorf("key not found")
+	}
+
 	value, found, err := engine.lsm.Get(key)
 	return value, found, err
 }
@@ -84,6 +137,14 @@ func (engine *Engine) GetTTL(key []byte) (int64, bool, error) {
 }
 
 func (engine *Engine) Delete(key []byte) {
+	if err := engine.checkRateLimit(); err != nil {
+		fmt.Println(err)
+		return
+	}
+	if string(key) == token_bucket.InternalKey {
+		return
+	}
+
 	if config.GetSettings().Debug {
 		fmt.Printf("\nDeleting key %s\n", string(key))
 	}
