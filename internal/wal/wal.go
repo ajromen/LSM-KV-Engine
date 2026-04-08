@@ -17,6 +17,7 @@ import (
 // Svaki segment ima fiksan broj zapisa koje korisnik specificira.
 // ????
 // ne sece rekord po segmentima kako treba
+// config.GetSettings().SavePath
 
 const (
 	FilePrefix = "wal_"
