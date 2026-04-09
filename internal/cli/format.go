@@ -31,8 +31,9 @@ Commands:
     range-iterate <lower> <upper>   Step through keys in [lower, upper] one at a time
     prefix-iterate <prefix>         Step through keys starting with prefix one at a time
   Scan:
-    range-scan <lower> <upper> <pageNum> <pageSize>   Fetch a page of keys in [lower, upper]
-    prefix-scan <prefix> <pageNum> <pageSize>         Fetch a page of keys starting with prefix
+    range-scan <lower> <upper> <pageSize>   Interactive paginated scan in [lower, upper]
+    prefix-scan <prefix> <pageSize>         Interactive paginated scan with prefix
+    Scan commands: next/n, prev/p, stop/s
 Notes:
   ttl: time-to-live in seconds,
   unit suffixes: ms, s (default), min, h, D, M, Y`
