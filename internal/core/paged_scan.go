@@ -94,17 +94,20 @@ func (s *PagedRangeScan) CurrentPage() ([]ScanResult, bool) {
 	return s.currentPage, wasRefreshed
 }
 
-func (s *PagedRangeScan) NextPage() []ScanResult {
+func (s *PagedRangeScan) NextPage() ([]ScanResult, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.pageNumber++
 	if err := s.fetchCurrentPage(); err != nil || len(s.currentPage) == 0 {
 		s.pageNumber--
 		s.fetchCurrentPage()
+		s.resubscribe()
+		s.dirty = false
+		return nil, false
 	}
 	s.resubscribe()
 	s.dirty = false
-	return s.currentPage
+	return s.currentPage, true
 }
 
 func (s *PagedRangeScan) PrevPage() []ScanResult {
@@ -224,17 +227,20 @@ func (s *PagedPrefixScan) CurrentPage() ([]ScanResult, bool) {
 	return s.currentPage, wasRefreshed
 }
 
-func (s *PagedPrefixScan) NextPage() []ScanResult {
+func (s *PagedPrefixScan) NextPage() ([]ScanResult, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.pageNumber++
 	if err := s.fetchCurrentPage(); err != nil || len(s.currentPage) == 0 {
 		s.pageNumber--
 		s.fetchCurrentPage()
+		s.resubscribe()
+		s.dirty = false
+		return nil, false
 	}
 	s.resubscribe()
 	s.dirty = false
-	return s.currentPage
+	return s.currentPage, true
 }
 
 func (s *PagedPrefixScan) PrevPage() []ScanResult {
