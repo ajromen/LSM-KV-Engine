@@ -39,11 +39,11 @@ func handleRangeScan(engine *core.Engine, parts []string, reader *bufio.Reader) 
 
 		switch line {
 		case "next", "n":
-			results := scan.NextPage()
-			if scan.PageNumber() > 0 && len(results) == 0 {
+			results, ok := scan.NextPage()
+			if !ok {
 				PrintError("(no more pages)")
 			} else {
-				printScanResults(results, false)
+				printScanResults(results)
 			}
 		case "prev", "p":
 			printScanResults(scan.PrevPage(), false)
@@ -91,11 +91,11 @@ func handlePrefixScan(engine *core.Engine, parts []string, reader *bufio.Reader)
 
 		switch line {
 		case "next", "n":
-			results := scan.NextPage()
-			if scan.PageNumber() > 0 && len(results) == 0 {
+			results, ok := scan.NextPage()
+			if !ok {
 				PrintError("(no more pages)")
 			} else {
-				printScanResults(results, false)
+				printScanResults(results)
 			}
 		case "prev", "p":
 			printScanResults(scan.PrevPage(), false)
@@ -114,7 +114,8 @@ func handlePrefixScan(engine *core.Engine, parts []string, reader *bufio.Reader)
 	}
 }
 
-func printScanResults(results []core.ScanResult, refreshed bool) {
+func printScanResults(results []core.ScanResult, flags ...bool) {
+	refreshed := len(flags) > 0 && flags[0]
 	if refreshed {
 		PrintSuccess("--- refreshed ---")
 	}
