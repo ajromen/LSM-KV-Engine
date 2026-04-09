@@ -16,7 +16,8 @@ import (
 // WAL treba implementirati kao segmentirani log.
 // Svaki segment ima fiksan broj zapisa koje korisnik specificira.
 // ????
-// ne sece rekord po segmentima kako treba
+// ne sece rekord po segmentima kako treba, memtable salje neki svoj id na osnovu kog wal mora da zna dokle smije da brise
+// wal salje na disk poslije svakog zapisa, ali moze i na nivou bloka, znaci ne postoji sync policy???
 // config.GetSettings().SavePath
 
 const (
