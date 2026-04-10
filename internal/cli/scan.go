@@ -1,71 +1,145 @@
 package cli
 
 import (
+	"bufio"
 	"fmt"
-	"strconv"
+	"strings"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/core"
 )
 
-func handleRangeScan(engine *core.Engine, parts []string) {
-	if len(parts) != 5 {
-		fmt.Println("Usage: range-scan <lower> <upper> <pageNum> <pageSize>")
+func clearScreen() {
+	fmt.Print("\033[H\033[2J")
+}
+
+func handleRangeScan(engine *core.Engine, parts []string, reader *bufio.Reader) {
+	if len(parts) != 4 {
+		PrintError("Usage: range-scan <lower> <upper> <pageSize>")
 		return
 	}
 	lower := parts[1]
 	upper := parts[2]
-	pageNum, err := strconv.Atoi(parts[3])
-	if err != nil {
-		fmt.Println("Invalid pageNum:", parts[3])
-		return
-	}
-	pageSize, err := strconv.Atoi(parts[4])
-	if err != nil {
-		fmt.Println("Invalid pageSize:", parts[4])
+	var pageSize int
+	fmt.Sscan(parts[3], &pageSize)
+	if pageSize <= 0 {
+		PrintError("Invalid pageSize")
 		return
 	}
 
-	results, err := engine.RangeScan(lower, upper, pageNum, pageSize)
+	scan, err := engine.NewPagedRangeScan(lower, upper, pageSize)
 	if err != nil {
-		fmt.Println("RangeScan error:", err)
+		PrintError(fmt.Sprintf("RangeScan error: %v", err))
 		return
 	}
-	if len(results) == 0 {
-		fmt.Println("(no results)")
-		return
-	}
-	for _, r := range results {
-		fmt.Printf("%s -> %s\n", r.Key, r.Value)
+	defer scan.Close()
+
+	results, _ := scan.CurrentPage()
+	renderScanPage(scan.PageNumber(), results, "")
+
+	for {
+		// provjeri dirty prije cekanja na input
+		if scan.IsDirty() {
+			results, _ = scan.CurrentPage()
+			renderScanPage(scan.PageNumber(), results, "[!] Data on this page changed — auto refreshed")
+		}
+
+		printReady(fmt.Sprintf("scan p%d", scan.PageNumber()))
+		line, _ := reader.ReadString('\n')
+		line = strings.TrimSpace(line)
+
+		switch line {
+		case "n":
+			r, ok := scan.NextPage()
+			if !ok {
+				renderScanPage(scan.PageNumber(), results, "(no more pages)")
+			} else {
+				results = r
+				renderScanPage(scan.PageNumber(), results, "")
+			}
+		case "p":
+			results = scan.PrevPage()
+			renderScanPage(scan.PageNumber(), results, "")
+		case "s":
+			clearScreen()
+			PrintSuccess("Scan stopped.")
+			return
+		default:
+			renderScanPage(scan.PageNumber(), results, "Unknown command. Use: n  p  s")
+		}
 	}
 }
 
-func handlePrefixScan(engine *core.Engine, parts []string) {
-	if len(parts) != 4 {
-		fmt.Println("Usage: prefix-scan <prefix> <pageNum> <pageSize>")
+func handlePrefixScan(engine *core.Engine, parts []string, reader *bufio.Reader) {
+	if len(parts) != 3 {
+		PrintError("Usage: prefix-scan <prefix> <pageSize>")
 		return
 	}
 	prefix := parts[1]
-	pageNum, err := strconv.Atoi(parts[2])
-	if err != nil {
-		fmt.Println("Invalid pageNum:", parts[2])
-		return
-	}
-	pageSize, err := strconv.Atoi(parts[3])
-	if err != nil {
-		fmt.Println("Invalid pageSize:", parts[3])
+	var pageSize int
+	fmt.Sscan(parts[2], &pageSize)
+	if pageSize <= 0 {
+		PrintError("Invalid pageSize")
 		return
 	}
 
-	results, err := engine.PrefixScan(prefix, pageNum, pageSize)
+	scan, err := engine.NewPagedPrefixScan(prefix, pageSize)
 	if err != nil {
-		fmt.Println("PrefixScan error:", err)
+		PrintError(fmt.Sprintf("PrefixScan error: %v", err))
 		return
 	}
+	defer scan.Close()
+
+	results, _ := scan.CurrentPage()
+	renderScanPage(scan.PageNumber(), results, "")
+
+	for {
+		if scan.IsDirty() {
+			results, _ = scan.CurrentPage()
+			renderScanPage(scan.PageNumber(), results, "[!] Data on this page changed — auto refreshed")
+		}
+
+		printReady(fmt.Sprintf("scan p%d", scan.PageNumber()))
+		line, _ := reader.ReadString('\n')
+		line = strings.TrimSpace(line)
+
+		switch line {
+		case "n":
+			r, ok := scan.NextPage()
+			if !ok {
+				renderScanPage(scan.PageNumber(), results, "(no more pages)")
+			} else {
+				results = r
+				renderScanPage(scan.PageNumber(), results, "")
+			}
+		case "p":
+			results = scan.PrevPage()
+			renderScanPage(scan.PageNumber(), results, "")
+		case "s":
+			clearScreen()
+			PrintSuccess("Scan stopped.")
+			return
+		default:
+			renderScanPage(scan.PageNumber(), results, "Unknown command. Use: n  p  s")
+		}
+	}
+}
+
+// renderScanPage clears the screen and renders the current page
+func renderScanPage(pageNum int, results []core.ScanResult, msg string) {
+	clearScreen()
+	PrintSuccess(fmt.Sprintf("=== Page %d ===", pageNum))
+	fmt.Println()
 	if len(results) == 0 {
-		fmt.Println("(no results)")
-		return
+		PrintError("  (no results on this page)")
+	} else {
+		for _, r := range results {
+			PrintSuccess(fmt.Sprintf("  %s -> %s", r.Key, r.Value))
+		}
 	}
-	for _, r := range results {
-		fmt.Printf("%s -> %s\n", r.Key, r.Value)
+	fmt.Println()
+	if msg != "" {
+		PrintError(msg)
 	}
+	PrintSuccess("[n] next   [p] prev   [s] stop")
+	fmt.Println()
 }

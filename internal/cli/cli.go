@@ -42,9 +42,9 @@ func RunCli(engine *core.Engine) {
 		case "clear-all":
 			handleClear(engine, parts)
 		case "range-scan":
-			handleRangeScan(engine, parts)
+			handleRangeScan(engine, parts, reader)
 		case "prefix-scan":
-			handlePrefixScan(engine, parts)
+			handlePrefixScan(engine, parts, reader)
 		case "range-iterate":
 			handleRangeIterate(engine, parts, reader)
 		case "prefix-iterate":
