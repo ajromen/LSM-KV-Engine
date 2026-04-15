@@ -46,7 +46,7 @@ func NewEngine() (*Engine, error) {
 	}
 
 	if engine.inMemoryTTL {
-		engine.ttlJanitor = ttl.NewTTLJanitor(engine.Delete)
+		engine.ttlJanitor = ttl.NewTTLJanitor(engine.notifier)
 		heap, index, err := engine.lsm.GetAllTTLFomSST()
 		if err != nil {
 			return nil, err
