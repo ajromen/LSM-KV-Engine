@@ -1,0 +1,88 @@
+package cache
+
+import (
+	"container/list"
+	"sync"
+)
+
+type LRU[K comparable, V any] struct {
+	maxElements int
+	list        *list.List
+	cache       map[K]*list.Element
+	mu          sync.Mutex
+}
+
+// entry korisnti bilo sta za key/value ako treba moze lako da se promeni
+type entry[K comparable, V any] struct {
+	key   K
+	value V
+}
+
+func NewLRU[K comparable, V any](maxElements int) *LRU[K, V] {
+	return &LRU[K, V]{
+		maxElements: maxElements,
+		list:        list.New(),
+		cache:       make(map[K]*list.Element),
+	}
+}
+
+func (lru *LRU[K, V]) Get(key K) (V, bool) {
+	lru.mu.Lock()
+	defer lru.mu.Unlock()
+	node, ok := lru.cache[key]
+	if !ok {
+		var zero V
+		return zero, false
+	}
+
+	lru.list.MoveToFront(node)
+
+	return node.Value.(*entry[K, V]).value, true
+}
+
+func (lru *LRU[K, V]) Put(key K, value V) {
+	lru.mu.Lock()
+	defer lru.mu.Unlock()
+	if e, ok := lru.cache[key]; ok {
+		e.Value.(*entry[K, V]).value = value
+		lru.list.MoveToFront(e)
+		return
+	}
+
+	elem := lru.list.PushFront(&entry[K, V]{key, value})
+	lru.cache[key] = elem
+
+	if lru.list.Len() > lru.maxElements {
+		lru.removeLast()
+	}
+}
+
+func (lru *LRU[K, V]) removeLast() {
+	element := lru.list.Back()
+	if element == nil {
+		return
+	}
+
+	lru.list.Remove(element)
+	key := element.Value.(*entry[K, V]).key
+	delete(lru.cache, key)
+}
+
+func (lru *LRU[K, V]) Clear() {
+	lru.mu.Lock()
+	defer lru.mu.Unlock()
+
+	lru.list.Init()
+	lru.cache = make(map[K]*list.Element)
+}
+
+func (lru *LRU[K, V]) InvalidateWhere(predicate func(K) bool) {
+	lru.mu.Lock()
+	defer lru.mu.Unlock()
+	for key, elem := range lru.cache {
+		if predicate(key) {
+			lru.list.Remove(elem)
+			delete(lru.cache, key)
+		}
+	}
+}
