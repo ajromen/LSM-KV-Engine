@@ -161,9 +161,15 @@ func (m *GenericMemtable) filtrateNewerRanges(ranges []MemtableEntry, seqId uint
 
 func (m *GenericMemtable) isRangeDeleted(validRanges []MemtableEntry, key []byte) bool {
 	for _, entry := range validRanges {
-		if bytes.Compare(entry.Key, key) <= 0 && bytes.Compare(entry.Value, key) >= 0 {
+		if bytes.Compare(entry.Key, key) <= 0 && bytes.Compare(entry.Value, key) > 0 {
 			return true
 		}
 	}
 	return false
+}
+
+func (m *GenericMemtable) IsCoveredByRangeDel(key []byte, keySeqId uint64) bool {
+	rangeDels := m.gatherAllRangeDeletions(key)
+	validRanges := m.filtrateNewerRanges(rangeDels, keySeqId)
+	return m.isRangeDeleted(validRanges, key)
 }

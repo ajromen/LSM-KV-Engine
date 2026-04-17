@@ -3,7 +3,6 @@ package shared
 import (
 	"encoding/binary"
 	"errors"
-	"fmt"
 )
 
 type RangeDelEntry struct {
@@ -54,7 +53,6 @@ func (entry *RangeDelEntry) EncodeRangeDelEntry() []byte {
 
 // DecodeRangeDelEntry deserializes the range del index entry from given buffer
 func DecodeRangeDelEntry(buf []byte) (*RangeDelEntry, int, error) {
-	fmt.Println(buf)
 	if len(buf) < 5 {
 		return nil, 0, errors.New("buffer too small")
 	}
@@ -65,22 +63,18 @@ func DecodeRangeDelEntry(buf []byte) (*RangeDelEntry, int, error) {
 		return nil, 0, errors.New("invalid index key length")
 	}
 	pos += n
-	fmt.Println(startKeyLength)
 	endKeyLength, n := binary.Uvarint(buf[pos:])
 	if n <= 0 {
 		return nil, 0, errors.New("invalid index key length")
 	}
 	pos += n
-	fmt.Println(endKeyLength)
 
 	startKey := make([]byte, startKeyLength)
 	copy(startKey, buf[pos:pos+int(startKeyLength)])
 	pos += int(startKeyLength)
-	fmt.Println(string(startKey))
 	endKey := make([]byte, endKeyLength)
 	copy(endKey, buf[pos:pos+int(endKeyLength)])
 	pos += int(endKeyLength)
-	fmt.Println(string(endKey))
 
 	seqId := binary.LittleEndian.Uint64(buf[pos:])
 	pos += 8

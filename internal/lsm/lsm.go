@@ -78,6 +78,11 @@ func (l *LSM) Get(key []byte) ([]byte, bool, error) {
 		return nil, false, err
 	}
 	if found {
+		// The key exists in SSTable but a range tombstone in the memtable
+		// may have been written after it. Check with the record's own seqId.
+		if l.memtableeManager.IsCoveredByRangeDel(key, record.SeqId) {
+			return nil, false, nil
+		}
 		return record.Value, true, nil
 	}
 	return nil, false, nil

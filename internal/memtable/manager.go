@@ -215,3 +215,17 @@ func (w *memtableIteratorSeekWrapper) SeekToLast()          { w.inner.SeekToLast
 func (w *memtableIteratorSeekWrapper) Next()                { w.inner.Next() }
 func (w *memtableIteratorSeekWrapper) Key() MemtableEntry   { return w.inner.Key() }
 func (w *memtableIteratorSeekWrapper) Seek(e MemtableEntry) { w.inner.Seek(e) }
+
+func (mm *MemtableManager) IsCoveredByRangeDel(key []byte, keySeqId uint64) bool {
+	mm.mu.Lock()
+	defer mm.mu.Unlock()
+	if mm.active.IsCoveredByRangeDel(key, keySeqId) {
+		return true
+	}
+	for i := len(mm.immutable) - 1; i >= 0; i-- {
+		if mm.immutable[i].IsCoveredByRangeDel(key, keySeqId) {
+			return true
+		}
+	}
+	return false
+}

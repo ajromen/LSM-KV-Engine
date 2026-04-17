@@ -54,6 +54,7 @@ type Memtable interface {
 	Visualize() string
 	RawIterator() iterator.Iterator[MemtableEntry]
 	Iterator() iterator.Iterator[MemtableEntry]
+	IsCoveredByRangeDel(key []byte, keySeqId uint64) bool
 }
 
 // GenericMemtable is a concrete implementation of Memtable.
