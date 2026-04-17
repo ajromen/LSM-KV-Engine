@@ -8,6 +8,7 @@ import (
 	"github.com/ajromen/LSM-KV-Engine/internal/iterator"
 	"github.com/ajromen/LSM-KV-Engine/internal/memtable"
 	"github.com/ajromen/LSM-KV-Engine/internal/sstable"
+	"github.com/ajromen/LSM-KV-Engine/internal/ttl"
 )
 
 type LSM struct {
@@ -40,8 +41,8 @@ func NewLSM(dataDir string) (*LSM, error) {
 	return &lsm, nil
 }
 
-func (l *LSM) onFlush(entries []memtable.MemtableEntry) {
-	err := l.sstableManager.FlushToSSTable(entries)
+func (l *LSM) onFlush(entries []memtable.MemtableEntry, rangeDelEntries []memtable.MemtableEntry) {
+	err := l.sstableManager.FlushToSSTable(entries, rangeDelEntries)
 	if err != nil {
 		panic(fmt.Errorf("error flushing memtable entries: %v", err))
 	}
@@ -143,6 +144,7 @@ func (l *LSM) NewPrefixIterator(prefix []byte) (*iterator.PrefixIterator, error)
 	}
 	return iterator.NewPrefixIterator(dbIt, prefix), nil
 }
-// func (l *LSM) GetAllTTLFomSST() (*ttl.ExpiryHeap, map[string]int64, error) {
-//return l.sstableManager.GetAllTTL()
-//}
+
+func (l *LSM) GetAllTTLFomSST() (*ttl.ExpiryHeap, map[string]int64, error) {
+	return l.sstableManager.GetAllTTL()
+}

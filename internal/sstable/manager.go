@@ -13,7 +13,9 @@ import (
 	"github.com/ajromen/LSM-KV-Engine/internal/enums"
 	"github.com/ajromen/LSM-KV-Engine/internal/iterator"
 	"github.com/ajromen/LSM-KV-Engine/internal/memtable"
+	"github.com/ajromen/LSM-KV-Engine/internal/shared"
 	"github.com/ajromen/LSM-KV-Engine/internal/ttl"
+	"github.com/ajromen/LSM-KV-Engine/internal/utils"
 )
 
 type Layer struct {
@@ -55,10 +57,12 @@ func newLayer() *Layer {
 }
 
 type SSTableManager struct {
-	Layers       []*Layer
-	blockManager *block.BlockManager
-	Manifest     *Manifest
-	dataDir      string
+	Layers          []*Layer
+	blockManager    *block.BlockManager
+	Manifest        *Manifest
+	dataDir         string
+	cachedFragments []shared.RangeDelEntry
+	fragmentsDirty  bool
 }
 
 func NewSSTableManager(dataDir string) *SSTableManager {
@@ -166,7 +170,7 @@ func (sm *SSTableManager) addToLayers(reader *SSTableReader, toLayer int) error 
 // 1. create new sstable
 // 2. add entries
 // 3. create reader and add to manager
-func (sm *SSTableManager) FlushToSSTable(entries []memtable.MemtableEntry) error {
+func (sm *SSTableManager) FlushToSSTable(entries []memtable.MemtableEntry, rangeDelEntries []memtable.MemtableEntry) error {
 	if len(entries) == 0 {
 		return nil
 	}
@@ -187,10 +191,22 @@ func (sm *SSTableManager) FlushToSSTable(entries []memtable.MemtableEntry) error
 			Key:       entry.Key,
 			Value:     entry.Value,
 			SeqId:     entry.SeqId,
-			Tombstone: entry.OpType == enums.OpTypeDel,
+			OpType:    entry.OpType,
 			ExpiresAt: entry.ExpiresAt,
 		}
 		if err := writer.AddRecord(record); err != nil {
+			return fmt.Errorf("cant add record: %w", err)
+		}
+	}
+	for _, entry := range rangeDelEntries {
+		record := Record{
+			Key:       entry.Key,
+			Value:     entry.Value,
+			SeqId:     entry.SeqId,
+			OpType:    entry.OpType,
+			ExpiresAt: entry.ExpiresAt,
+		}
+		if err := writer.AddToRangeDel(record); err != nil {
 			return fmt.Errorf("cant add record: %w", err)
 		}
 	}
@@ -211,11 +227,13 @@ func (sm *SSTableManager) FlushToSSTable(entries []memtable.MemtableEntry) error
 	if config.GetSettings().Debug {
 		fmt.Printf("SSTable %s created with %d entries\n", filepath.Base(filePath), len(entries))
 	}
+	sm.invalidateFragmentCache()
 	return nil
 }
 
 func (sm *SSTableManager) Get(key []byte) (*Record, bool, error) {
 	t := time.Now().UnixMilli()
+	fragments := sm.getFragments()
 	for _, layer := range sm.Layers {
 		for i := len(layer.SSTables) - 1; i >= 0; i-- {
 			record, err := layer.SSTables[i].Get(key)
@@ -225,7 +243,10 @@ func (sm *SSTableManager) Get(key []byte) (*Record, bool, error) {
 			if record == nil {
 				continue
 			}
-			if record.Tombstone {
+			if record.OpType == enums.OpTypeDel {
+				return nil, false, nil
+			}
+			if utils.IsCoveredByRangeTombstone(fragments, key, record.SeqId) {
 				return nil, false, nil
 			}
 			return sm.checkTTL(record, t)
@@ -239,6 +260,10 @@ func (sm *SSTableManager) checkTTL(r *Record, t int64) (*Record, bool, error) {
 		return nil, false, nil
 	}
 	return r, true, nil
+}
+
+func (sm *SSTableManager) checkRangeDel(r *Record, layer int, i int) {
+	sm.Layers[layer].SSTables[i].GetRangeDelEntries()
 }
 
 // DeleteSSTable deletes at specified layer/index
@@ -316,6 +341,9 @@ func (sm *SSTableManager) MergeSSTables(readers []*SSTableReader, toLayer int, s
 		return err
 	}
 
+	// collect and re-fragment all range tombstones from input readers
+	mergedRangeDels := MergeAndFragment(readers)
+
 	// 2. iterate through all elems and add to new sstable
 	iterator, err := NewSSTableMergeIterator(readers, byte(enums.Heap))
 	if err != nil {
@@ -325,7 +353,7 @@ func (sm *SSTableManager) MergeSSTables(readers []*SSTableReader, toLayer int, s
 	t := time.Now().UnixMilli()
 	for iterator.Valid() {
 		rec := iterator.Value()
-		if rec.Tombstone || rec.ExpiresAt < t && rec.ExpiresAt != 0 {
+		if rec.OpType == enums.OpTypeDel || rec.ExpiresAt < t && rec.ExpiresAt != 0 {
 			iterator.Next()
 			continue
 		}
@@ -336,6 +364,25 @@ func (sm *SSTableManager) MergeSSTables(readers []*SSTableReader, toLayer int, s
 		iterator.Next()
 		count++
 	}
+	// write surviving range tombstones
+	// at the bottommost level (skipTombstones=true) drop them: nothing below to cover
+	// at any other level keep them: they must cover keys in layers below
+	if !skipTombstones {
+		for _, rd := range mergedRangeDels {
+			if err := writer.AddToRangeDel(Record{
+				Key:    rd.StartKey,
+				Value:  rd.EndKey,
+				SeqId:  rd.SeqId,
+				OpType: enums.OpTypeRangeDel,
+			}); err != nil {
+				return err
+			}
+		}
+	}
+	if count == 0 && (skipTombstones || len(mergedRangeDels) == 0) {
+		return nil
+	}
+
 	// last layer all tombstones
 	if count == 0 {
 		return nil
@@ -361,6 +408,7 @@ func (sm *SSTableManager) MergeSSTables(readers []*SSTableReader, toLayer int, s
 	// 4. delete old sstables
 	err = sm.DeleteSSTables(readers)
 
+	sm.invalidateFragmentCache()
 	return err
 }
 
@@ -403,6 +451,27 @@ func (sm *SSTableManager) ReadersForRange(start, end []byte) []*SSTableReader {
 	return readers
 }
 
+func (sm *SSTableManager) invalidateFragmentCache() {
+	sm.fragmentsDirty = true
+}
+
+func (sm *SSTableManager) getFragments() []shared.RangeDelEntry {
+	if !sm.fragmentsDirty && sm.cachedFragments != nil {
+		return sm.cachedFragments
+	}
+	var all []shared.RangeDelEntry
+	for _, layer := range sm.Layers {
+		for _, r := range layer.SSTables {
+			if err := r.LoadRangeDels(); err == nil {
+				all = append(all, r.fragmentedRangeDels...)
+			}
+		}
+	}
+	sm.cachedFragments = utils.FragmentRangeTombstones(all)
+	sm.fragmentsDirty = false
+	return sm.cachedFragments
+}
+
 func sstableOverlapsRange(reader *SSTableReader, start, end []byte) bool {
 	if reader == nil || reader.SummarySegment == nil {
 		return true
@@ -442,7 +511,7 @@ func (sm *SSTableManager) EntryIterator(start, end []byte) (iterator.Iterator[it
 			return iterator.Entry{
 				Key:        append([]byte(nil), r.Key...),
 				Value:      append([]byte(nil), r.Value...),
-				Tombstone:  r.Tombstone,
+				Tombstone:  r.OpType == enums.OpTypeDel,
 				SequenceID: r.SeqId,
 			}
 		},

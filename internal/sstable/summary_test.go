@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"os"
 	"testing"
+
+	"github.com/ajromen/LSM-KV-Engine/internal/shared"
 )
 
 func makeTestIndexBlocks() ([]*IndexBlock, []uint64) {
@@ -11,7 +13,7 @@ func makeTestIndexBlocks() ([]*IndexBlock, []uint64) {
 	offsets := []uint64{}
 	for i := 0; i < 5; i++ {
 		block := &IndexBlock{
-			Entries: []IndexEntry{
+			Entries: []shared.IndexEntry{
 				{Key: []byte{byte('a' + i)}, BlockIndex: uint32(i * 10)},
 			},
 		}

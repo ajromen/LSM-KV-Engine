@@ -3,8 +3,9 @@ package sstable
 import (
 	"bytes"
 	"encoding/binary"
-	"errors"
 	"hash/crc32"
+
+	"github.com/ajromen/LSM-KV-Engine/internal/shared"
 )
 
 /*
@@ -40,94 +41,22 @@ CRC32 is calculated over the entire block except the last 4 bytes (CRC itself).
 block_offset points to the beginning of the corresponding Data Block on disk.
 */
 
-// IndexEntry IS A SINGLE RECORD WRITTEN INTO INDEX BLOCK -> IT MAPS A KEY TO THE OFFSET OF A DATA BLOCK IN THE SSTABLE FILE
-type IndexEntry struct {
-	Key        []byte // first key of data block
-	BlockIndex uint32 // file offset of data block
-}
-
-// EncodedSize RETURNS THE NUMBER OF BYTES REQUIRED TO ENCODE THIS ENTRY
-func (entry *IndexEntry) EncodedSize() int {
-	keyLen := uint64(len(entry.Key))
-	buf := make([]byte, binary.MaxVarintLen64)
-	variantLen := binary.PutUvarint(buf, keyLen)
-	return variantLen + len(entry.Key) + 4
-}
-
-// EncodeTo SERIALIZES THE INDEX ENTRY INTO THE PROVIDED BUFFER, RETURNS THE NUMBER OF BYTES WRITTEN
-func (entry *IndexEntry) EncodeTo(buf []byte) int {
-	keyLen := uint64(len(entry.Key))
-	pos := 0
-
-	// encode key-length as varint
-	n := binary.PutUvarint(buf[pos:], keyLen)
-	pos += n
-
-	// encode key bytes
-	copy(buf[pos:], entry.Key)
-	pos += len(entry.Key)
-
-	// encode index of block in data segment
-	binary.LittleEndian.PutUint32(buf[pos:], entry.BlockIndex)
-	pos += 4
-	return pos
-}
-
-// EncodeIndexEntry ALLOCATES A NEW BUFFER AND ENCODES THE ENTRY INTO IT
-func (entry *IndexEntry) EncodeIndexEntry() []byte {
-	size := entry.EncodedSize()
-	buf := make([]byte, size)
-	entry.EncodeTo(buf)
-	return buf
-}
-
-// DecodeIndexEntry DESERIALIZES INDEX ENTRY FROM GIVEN BUFFER -> RETURNS DECODED ENTRY, BYTES CONSUMED AND ERROR IF ANY
-func DecodeIndexEntry(buf []byte) (*IndexEntry, int, error) {
-	if len(buf) < 5 {
-		return nil, 0, errors.New("buffer too small")
-	}
-	pos := 0
-
-	// decode key length
-	keyLength, n := binary.Uvarint(buf[pos:])
-	if n <= 0 {
-		return nil, 0, errors.New("invalid index key length")
-	}
-	pos += n
-	if pos+int(keyLength)+4 > len(buf) {
-		return nil, 0, errors.New("buffer too small")
-	}
-
-	// decode key
-	key := make([]byte, keyLength)
-	copy(key, buf[pos:pos+int(keyLength)])
-	pos += int(keyLength)
-
-	// decode index of block in data segment
-	blockIndex := binary.LittleEndian.Uint32(buf[pos:])
-	pos += 4
-	return &IndexEntry{
-		Key:        key,
-		BlockIndex: blockIndex,
-	}, pos, nil
-}
-
 // IndexBlock IS A GROP OF INDEX ENTRY RECORDS
 type IndexBlock struct {
-	Entries  []IndexEntry
+	Entries  []shared.IndexEntry
 	RealSize uint32 // where numberOfEntries + index entries end
 }
 
 // NewIndexBlock CREATES AN EMPTY INDEX BLOCK WITH PREALLOCATED CAPACITY -> IMPORTANT: 256 != INDEX-BLOCK-SIZE
 func NewIndexBlock() *IndexBlock {
 	return &IndexBlock{
-		Entries:  make([]IndexEntry, 0, 256),
+		Entries:  make([]shared.IndexEntry, 0, 256),
 		RealSize: 4,
 	}
 }
 
 // AddEntry APPENDS AN INDEX ENTRY TO THE BLOCK
-func (block *IndexBlock) AddEntry(entry IndexEntry) {
+func (block *IndexBlock) AddEntry(entry shared.IndexEntry) {
 	block.Entries = append(block.Entries, entry)
 	block.RealSize += uint32(entry.EncodedSize())
 }
@@ -160,14 +89,14 @@ func DecodeIndexBlock(buf []byte) (*IndexBlock, error) {
 	// read number of entries
 	numEntries := binary.LittleEndian.Uint32(buf[0:4])
 	if numEntries == 0 {
-		return &IndexBlock{Entries: []IndexEntry{}}, nil
+		return &IndexBlock{Entries: []shared.IndexEntry{}}, nil
 	}
 	pos := 4
 
 	// read entries
-	entries := make([]IndexEntry, 0, numEntries)
+	entries := make([]shared.IndexEntry, 0, numEntries)
 	for i := 0; i < int(numEntries); i++ {
-		entry, n, err := DecodeIndexEntry(buf[pos:])
+		entry, n, err := shared.DecodeIndexEntry(buf[pos:])
 		if err != nil {
 			return nil, err
 		}
@@ -180,8 +109,6 @@ func DecodeIndexBlock(buf []byte) (*IndexBlock, error) {
 }
 
 // FindBlock PERFORMS BINARY SEARCH IN INDEX BLOCK AND RETURNS THE INDEX OF THE BLOCK IN DATA THAT MAY CONTAIN THE GIVEN KEY
-//
-//goland:noinspection GoRedundantElseInIf
 func (block *IndexBlock) FindBlock(key []byte) int {
 	if len(block.Entries) == 0 {
 		return -1
@@ -219,7 +146,7 @@ func (block *IndexBlock) AddFromDataBlock(dataBlock *DataBlockBuilder, blockIdx 
 	}
 	keyCopy := make([]byte, len(firstKey))
 	copy(keyCopy, firstKey)
-	block.AddEntry(IndexEntry{
+	block.AddEntry(shared.IndexEntry{
 		Key:        keyCopy,
 		BlockIndex: blockIdx,
 	})
@@ -246,7 +173,7 @@ func (seg *IndexSegment) AddBlock(block *IndexBlock) {
 }
 
 // AddEntryToBlock ADDS ENTRY AND CREATES A NEW BLOCK IF THE CURRENT ONE IS FULL
-func (seg *IndexSegment) AddEntryToBlock(entry IndexEntry, blockSize int) {
+func (seg *IndexSegment) AddEntryToBlock(entry shared.IndexEntry, blockSize int) {
 	if len(seg.Blocks) == 0 || len(seg.Blocks[len(seg.Blocks)-1].Entries) >= blockSize {
 		seg.Blocks = append(seg.Blocks, NewIndexBlock())
 	}

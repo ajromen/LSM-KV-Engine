@@ -23,7 +23,7 @@ type MemtableManager struct {
 }
 
 // NewMemtableManager initializes a new instance of a manager and starts the flush worker
-func NewMemtableManager(maxTables int, mergeStructure byte, factory func() Memtable, flushHandler func([]MemtableEntry)) *MemtableManager {
+func NewMemtableManager(maxTables int, mergeStructure byte, factory func() Memtable, flushHandler func([]MemtableEntry, []MemtableEntry)) *MemtableManager {
 	mm := &MemtableManager{
 		maxTables:      maxTables,
 		mergeStructure: mergeStructure,
@@ -76,7 +76,7 @@ func (mm *MemtableManager) rotate() {
 }
 
 // flushWorker runs in a separate goroutine, and it takes immutable memtables and flushes them to disk
-func (mm *MemtableManager) flushWorker(flushHandler func([]MemtableEntry)) {
+func (mm *MemtableManager) flushWorker(flushHandler func([]MemtableEntry, []MemtableEntry)) {
 	for mem := range mm.flushChannel {
 		mm.mu.Lock()
 		shouldFlush := mm.containsImmutable(mem)
@@ -88,9 +88,9 @@ func (mm *MemtableManager) flushWorker(flushHandler func([]MemtableEntry)) {
 			continue
 		}
 
-		entries := mem.Flush()
+		entries, rangeDelEntries := mem.Flush()
 		if flushHandler != nil {
-			flushHandler(entries)
+			flushHandler(entries, rangeDelEntries)
 		}
 	}
 }
@@ -194,7 +194,7 @@ func (mm *MemtableManager) EntryIterator() iterator.Iterator[iterator.Entry] {
 			return iterator.Entry{
 				Key:        append([]byte(nil), e.Key...),
 				Value:      append([]byte(nil), e.Value...),
-				Tombstone:  e.Tombstone,
+				Tombstone:  e.OpType == enums.OpTypeDel,
 				SequenceID: e.SeqId,
 			}
 		},

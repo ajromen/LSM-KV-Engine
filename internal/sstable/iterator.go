@@ -6,6 +6,7 @@ import (
 
 	"github.com/ajromen/LSM-KV-Engine/internal/block"
 	"github.com/ajromen/LSM-KV-Engine/internal/encoders"
+	"github.com/ajromen/LSM-KV-Engine/internal/enums"
 	"github.com/ajromen/LSM-KV-Engine/internal/iterator"
 	"github.com/ajromen/LSM-KV-Engine/internal/structures"
 )
@@ -255,7 +256,7 @@ func (it *SSTableIterator) SeekToLast() {
 	var prevKey []byte
 	for it.raw.Valid() {
 		rec := it.raw.Key()
-		if !rec.Tombstone && !bytes.Equal(rec.Key, prevKey) {
+		if rec.OpType != enums.OpTypeDel && !bytes.Equal(rec.Key, prevKey) {
 			cp := rec
 			last = &cp
 			prevKey = append([]byte(nil), rec.Key...)
@@ -296,7 +297,7 @@ func (it *SSTableIterator) advance(prevKey []byte) {
 			it.raw.Next()
 			continue
 		}
-		if rec.Tombstone {
+		if rec.OpType == enums.OpTypeDel {
 			prevKey = append([]byte(nil), rec.Key...)
 			it.raw.Next()
 			continue
@@ -406,6 +407,7 @@ type SSTableMergeIterator struct {
 	raw     *SSTableMergeIteratorRaw
 	current *Record
 	valid   bool
+	checker *ForwardRangeDelChecker
 }
 
 var _ iterator.Iterator[Record] = (*SSTableMergeIterator)(nil)
@@ -415,17 +417,29 @@ func NewSSTableMergeIterator(readers []*SSTableReader, mergeStructure byte) (*SS
 	if err != nil {
 		return nil, err
 	}
-	m := &SSTableMergeIterator{raw: raw}
+	m := &SSTableMergeIterator{
+		raw:     raw,
+		checker: NewForwardRangeDelChecker(readers),
+	}
 	m.advance(nil)
 	return m, nil
 }
 
-func (m *SSTableMergeIterator) Valid() bool   { return m.valid }
-func (m *SSTableMergeIterator) Key() Record   { return *m.current }
-func (m *SSTableMergeIterator) Value() Record { return *m.current }
+func (m *SSTableMergeIterator) Valid() bool {
+	return m.valid
+}
+
+func (m *SSTableMergeIterator) Key() Record {
+	return *m.current
+}
+
+func (m *SSTableMergeIterator) Value() Record {
+	return *m.current
+}
 
 func (m *SSTableMergeIterator) SeekToFirst() {
 	m.raw.SeekToFirst()
+	m.checker.SeekToFirst()
 	m.advance(nil)
 }
 
@@ -435,7 +449,7 @@ func (m *SSTableMergeIterator) SeekToLast() {
 	var prevKey []byte
 	for m.raw.Valid() {
 		rec := m.raw.Key()
-		if !rec.Tombstone && !bytes.Equal(rec.Key, prevKey) {
+		if rec.OpType != enums.OpTypeDel && !bytes.Equal(rec.Key, prevKey) {
 			cp := rec
 			last = &cp
 			prevKey = rec.Key
@@ -452,6 +466,7 @@ func (m *SSTableMergeIterator) SeekToLast() {
 
 func (m *SSTableMergeIterator) Seek(target Record) {
 	m.raw.Seek(target)
+	m.checker.Seek(target.Key)
 	m.advance(nil)
 }
 
@@ -485,7 +500,12 @@ func (m *SSTableMergeIterator) advance(prevKey []byte) {
 			m.skipCurrentKey()
 			continue
 		}
-		if rec.Tombstone {
+		if rec.OpType == enums.OpTypeDel {
+			prevKey = append([]byte(nil), rec.Key...)
+			m.skipCurrentKey()
+			continue
+		}
+		if m.checker.ShouldDelete(rec.Key, rec.SeqId) {
 			prevKey = append([]byte(nil), rec.Key...)
 			m.skipCurrentKey()
 			continue
