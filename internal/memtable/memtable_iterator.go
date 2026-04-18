@@ -428,15 +428,3 @@ func (m *MergedMemtableIterator) advance() {
 	m.current = nil
 	m.valid = false
 }
-
-// memtableIteratorSeekWrapper wraps Iterator[MemtableEntry] to add TypedSeekIterator interface
-type memtableIteratorSeekWrapper struct {
-	inner iterator.Iterator[MemtableEntry]
-}
-
-func (w *memtableIteratorSeekWrapper) Valid() bool          { return w.inner.Valid() }
-func (w *memtableIteratorSeekWrapper) SeekToFirst()         { w.inner.SeekToFirst() }
-func (w *memtableIteratorSeekWrapper) SeekToLast()          { w.inner.SeekToLast() }
-func (w *memtableIteratorSeekWrapper) Next()                { w.inner.Next() }
-func (w *memtableIteratorSeekWrapper) Key() MemtableEntry   { return w.inner.Key() }
-func (w *memtableIteratorSeekWrapper) Seek(e MemtableEntry) { w.inner.Seek(e) }

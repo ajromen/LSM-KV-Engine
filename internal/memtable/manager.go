@@ -89,9 +89,9 @@ func (mm *MemtableManager) flushWorker(flushHandler func([]MemtableEntry, []Memt
 		mm.mu.Unlock()
 
 		if shouldFlush {
-			entries := mem.Flush()
+			entries, rangeDelEntries := mem.Flush()
 			if flushHandler != nil {
-				flushHandler(entries)
+				flushHandler(entries, rangeDelEntries)
 			}
 		}
 
@@ -217,7 +217,6 @@ func (mm *MemtableManager) EntryIterator() iterator.Iterator[iterator.Entry] {
 			return iterator.Entry{
 				Key:        append([]byte(nil), e.Key...),
 				Value:      append([]byte(nil), e.Value...),
-				Tombstone:  e.OpType == enums.OpTypeDel,
 				OpType:     e.OpType,
 				SequenceID: e.SeqId,
 			}
