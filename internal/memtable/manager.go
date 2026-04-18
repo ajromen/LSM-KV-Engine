@@ -20,6 +20,8 @@ type MemtableManager struct {
 	flushHandler   func([]MemtableEntry) // function that persists flushed entries
 	mu             sync.Mutex            // protets all shared states
 	cond           *sync.Cond            // used to block when to many immutable instances
+	wg             sync.WaitGroup        // wait for flush
+	closing        bool
 }
 
 // NewMemtableManager initializes a new instance of a manager and starts the flush worker
@@ -71,6 +73,7 @@ func (mm *MemtableManager) rotate() {
 	immutable := mm.active
 	mm.immutable = append(mm.immutable, immutable)
 	mm.active = mm.factory()
+	mm.wg.Add(1)
 	mm.mu.Unlock()
 	mm.flushChannel <- immutable
 }
@@ -78,20 +81,25 @@ func (mm *MemtableManager) rotate() {
 // flushWorker runs in a separate goroutine, and it takes immutable memtables and flushes them to disk
 func (mm *MemtableManager) flushWorker(flushHandler func([]MemtableEntry, []MemtableEntry)) {
 	for mem := range mm.flushChannel {
+
 		mm.mu.Lock()
 		shouldFlush := mm.containsImmutable(mem)
 		mm.removeImmutable(mem)
 		mm.cond.Signal()
 		mm.mu.Unlock()
 
-		if !shouldFlush {
-			continue
+		if shouldFlush {
+			entries := mem.Flush()
+			if flushHandler != nil {
+				flushHandler(entries)
+			}
 		}
 
 		entries, rangeDelEntries := mem.Flush()
 		if flushHandler != nil {
 			flushHandler(entries, rangeDelEntries)
 		}
+		mm.wg.Done()
 	}
 }
 
@@ -145,11 +153,11 @@ func (mm *MemtableManager) RawIterator() iterator.Iterator[MemtableEntry] {
 	defer mm.mu.Unlock()
 	var rawIters []iterator.Iterator[MemtableEntry]
 	if mm.active != nil {
-		activeIt := NewRawSingleMemtableIterator(mm.active.Iterator())
+		activeIt := NewRawSingleMemtableIterator(mm.active.RawIterator())
 		rawIters = append(rawIters, activeIt.(*RawSingleMemtableIterator))
 	}
 	for i := len(mm.immutable) - 1; i >= 0; i-- {
-		it := NewRawSingleMemtableIterator(mm.immutable[i].Iterator())
+		it := NewRawSingleMemtableIterator(mm.immutable[i].RawIterator())
 		rawIters = append(rawIters, it.(*RawSingleMemtableIterator))
 	}
 	return NewRawIterator(rawIters, mm.mergeStructure)
@@ -181,13 +189,28 @@ func (mm *MemtableManager) ResetAll() {
 }
 
 func (mm *MemtableManager) Close() {
-	//close(mm.flushChannel) mozda treba
+	mm.mu.Lock()
+
+	if mm.active != nil && mm.active.ShouldFlush() {
+		immutable := mm.active
+		mm.immutable = append(mm.immutable, immutable)
+		mm.active = mm.factory()
+
+		mm.wg.Add(1)
+		mm.flushChannel <- immutable
+	}
+
+	mm.closing = true
+	mm.mu.Unlock()
+
+	close(mm.flushChannel)
+	mm.wg.Wait()
 }
 
 // EntryIterator returns a MergedMemtableIterator adapted to iterator.Entry type
 // This is used by DBIterator which works at the Entry level
 func (mm *MemtableManager) EntryIterator() iterator.Iterator[iterator.Entry] {
-	typedIt := mm.Iterator() // Iterator[MemtableEntry]
+	typedIt := mm.RawIterator() // using raw in order to DBIterator see tombstone
 	return iterator.NewAdaptedIterator(
 		&memtableIteratorSeekWrapper{inner: typedIt},
 		func(e MemtableEntry) iterator.Entry {
@@ -195,6 +218,7 @@ func (mm *MemtableManager) EntryIterator() iterator.Iterator[iterator.Entry] {
 				Key:        append([]byte(nil), e.Key...),
 				Value:      append([]byte(nil), e.Value...),
 				Tombstone:  e.OpType == enums.OpTypeDel,
+				OpType:     e.OpType,
 				SequenceID: e.SeqId,
 			}
 		},

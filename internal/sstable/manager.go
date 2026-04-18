@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/block"
@@ -36,6 +37,7 @@ func (l *Layer) GetSize() int64 {
 	for _, reader := range l.SSTables {
 		size += reader.SizeBytes
 	}
+	l.needsUpdate = false
 	return size
 }
 
@@ -46,6 +48,7 @@ func (l *Layer) AppendSSTable(sstable *SSTableReader) {
 
 func (l *Layer) RemoveSSTable(index int) {
 	l.SSTables = append(l.SSTables[:index], l.SSTables[index+1:]...)
+	l.needsUpdate = true
 }
 
 func newLayer() *Layer {
@@ -63,6 +66,7 @@ type SSTableManager struct {
 	dataDir         string
 	cachedFragments []shared.RangeDelEntry
 	fragmentsDirty  bool
+	mu           sync.Mutex
 }
 
 func NewSSTableManager(dataDir string) *SSTableManager {
@@ -171,6 +175,8 @@ func (sm *SSTableManager) addToLayers(reader *SSTableReader, toLayer int) error 
 // 2. add entries
 // 3. create reader and add to manager
 func (sm *SSTableManager) FlushToSSTable(entries []memtable.MemtableEntry, rangeDelEntries []memtable.MemtableEntry) error {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
 	if len(entries) == 0 {
 		return nil
 	}
@@ -232,8 +238,11 @@ func (sm *SSTableManager) FlushToSSTable(entries []memtable.MemtableEntry, range
 }
 
 func (sm *SSTableManager) Get(key []byte) (*Record, bool, error) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
 	t := time.Now().UnixMilli()
 	fragments := sm.getFragments()
+	var best *Record // TODO razmisli kako ovo moze efikasnije
 	for _, layer := range sm.Layers {
 		for i := len(layer.SSTables) - 1; i >= 0; i-- {
 			record, err := layer.SSTables[i].Get(key)
@@ -248,11 +257,16 @@ func (sm *SSTableManager) Get(key []byte) (*Record, bool, error) {
 			}
 			if utils.IsCoveredByRangeTombstone(fragments, key, record.SeqId) {
 				return nil, false, nil
+			if best == nil || record.SeqId > best.SeqId {
+				best = record
 			}
-			return sm.checkTTL(record, t)
+
 		}
 	}
-	return nil, false, nil
+	if best == nil {
+		return nil, false, nil
+	}
+	return sm.checkTTL(best, t)
 }
 
 func (sm *SSTableManager) checkTTL(r *Record, t int64) (*Record, bool, error) {
@@ -328,6 +342,8 @@ func (sm *SSTableManager) ClearAll() error {
 // 3. open new reader and add to manager
 // 4. delete old sstables
 func (sm *SSTableManager) MergeSSTables(readers []*SSTableReader, toLayer int, skipTombstones bool) error {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
 	// 1. create new sstable
 
 	expectedElems := uint64(0)
@@ -353,7 +369,7 @@ func (sm *SSTableManager) MergeSSTables(readers []*SSTableReader, toLayer int, s
 	t := time.Now().UnixMilli()
 	for iterator.Valid() {
 		rec := iterator.Value()
-		if rec.OpType == enums.OpTypeDel || rec.ExpiresAt < t && rec.ExpiresAt != 0 {
+		if skipTombstones && rec.OpType == enums.OpTypeDel || rec.ExpiresAt < t && rec.ExpiresAt != 0 {
 			iterator.Next()
 			continue
 		}
@@ -409,11 +425,21 @@ func (sm *SSTableManager) MergeSSTables(readers []*SSTableReader, toLayer int, s
 	err = sm.DeleteSSTables(readers)
 
 	sm.invalidateFragmentCache()
-	return err
+
+	err = sm.DeleteSSTables(readers)
+	if err != nil {
+		return err
+	}
+  
+	sm.blockManager.ClearCache()
+	return nil
+
 }
 
 // MoveSSTable moves sstable from one layer to another
 func (sm *SSTableManager) MoveSSTable(current *SSTableReader, toLayer int) error {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
 	fromLayer := current.Layer
 
 	readers := sm.Layers[fromLayer].SSTables
@@ -442,7 +468,7 @@ func (sm *SSTableManager) ReadersForRange(start, end []byte) []*SSTableReader {
 
 	for _, layer := range sm.Layers {
 		for _, reader := range layer.SSTables {
-			if sstableOverlapsRange(reader, start, end) {
+			if reader.OverlapsRange(start, end) {
 				readers = append(readers, reader)
 			}
 		}
@@ -509,9 +535,14 @@ func (sm *SSTableManager) EntryIterator(start, end []byte) (iterator.Iterator[it
 		&sstableIteratorSeekWrapper{inner: raw},
 		func(r Record) iterator.Entry {
 			return iterator.Entry{
-				Key:        append([]byte(nil), r.Key...),
-				Value:      append([]byte(nil), r.Value...),
-				Tombstone:  r.OpType == enums.OpTypeDel,
+				Key:   append([]byte(nil), r.Key...),
+				Value: append([]byte(nil), r.Value...),
+				OpType: func() enums.OpType {
+					if r.Tombstone {
+						return enums.OpTypeDel
+					}
+					return enums.OpTypePut
+				}(),
 				SequenceID: r.SeqId,
 			}
 		},
@@ -521,39 +552,18 @@ func (sm *SSTableManager) EntryIterator(start, end []byte) (iterator.Iterator[it
 	), nil
 }
 
-// sstableIteratorSeekWrapper wraps SSTableMergeIterator to satisfy TypedSeekIterator
-type sstableIteratorSeekWrapper struct {
-	inner *SSTableMergeIterator
-}
-
-func (w *sstableIteratorSeekWrapper) Valid() bool   { return w.inner.Valid() }
-func (w *sstableIteratorSeekWrapper) SeekToFirst()  { w.inner.SeekToFirst() }
-func (w *sstableIteratorSeekWrapper) SeekToLast()   { w.inner.SeekToLast() }
-func (w *sstableIteratorSeekWrapper) Next()         { w.inner.Next() }
-func (w *sstableIteratorSeekWrapper) Key() Record   { return w.inner.Key() }
-func (w *sstableIteratorSeekWrapper) Seek(r Record) { w.inner.Seek(r) }
-
-// emptyEntryIterator is an always-invalid iterator returned when no readers match
-type emptyEntryIterator struct{}
-
-func (e emptyEntryIterator) Valid() bool           { return false }
-func (e emptyEntryIterator) SeekToFirst()          {}
-func (e emptyEntryIterator) SeekToLast()           {}
-func (e emptyEntryIterator) Seek(_ iterator.Entry) {}
-func (e emptyEntryIterator) Next()                 {}
-func (e emptyEntryIterator) Prev()                 {}
-func (e emptyEntryIterator) Key() iterator.Entry   { return iterator.Entry{} }
-func (e emptyEntryIterator) Value() iterator.Entry { return iterator.Entry{} }
 func (sm *SSTableManager) GetAllTTL() (*ttl.ExpiryHeap, map[string]int64, error) {
 	heap := ttl.NewExpiryHeap()
 	index := make(map[string]int64)
 	timeNow := time.Now().UnixMilli()
+
 	for _, layer := range sm.Layers {
-		for i := len(layer.SSTables) - 1; i >= 0; i-- {
+		for i := 0; i < len(layer.SSTables); i++ {
 			e, err := layer.SSTables[i].GetTTLEntries()
 			if err != nil {
 				return nil, nil, err
 			}
+
 			for _, entry := range e {
 				if entry.ExpiresAt < timeNow {
 					continue

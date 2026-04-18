@@ -6,21 +6,22 @@ import (
 	"time"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/config"
+	"github.com/ajromen/LSM-KV-Engine/internal/notifier"
 	"github.com/ajromen/LSM-KV-Engine/internal/shared"
 )
 
 type Janitor struct {
-	delFn  func([]byte)
-	heap   *ExpiryHeap
-	index  map[string]int64 // dva puta se drze svi ttl ako neko zna bolje nek uradi
-	stopCh chan struct{}
-	mu     sync.Mutex
+	heap     *ExpiryHeap
+	notifier *notifier.Notifier
+	index    map[string]int64 // dva puta se drze svi ttl ako neko zna bolje nek uradi
+	stopCh   chan struct{}
+	mu       sync.Mutex
 }
 
-func NewTTLJanitor(delFn func([]byte)) *Janitor {
+func NewTTLJanitor(notifier *notifier.Notifier) *Janitor {
 	j := &Janitor{
-		delFn:  delFn,
-		stopCh: make(chan struct{}),
+		notifier: notifier,
+		stopCh:   make(chan struct{}),
 	}
 	return j
 }
@@ -77,7 +78,7 @@ func (j *Janitor) evict() {
 	j.mu.Unlock()
 
 	for _, key := range expired {
-		j.delFn(key)
+		j.notifier.NotifyDelete(key)
 	}
 }
 

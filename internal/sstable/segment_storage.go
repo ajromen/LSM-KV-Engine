@@ -25,9 +25,11 @@ type SingleFileStorage struct {
 	file         *os.File            // single file all segments are written into
 	offset       uint64              // current write offset in the file
 	BlockManager *block.BlockManager // block manager for writing blocks
+	closed       bool
 }
 
 func (s *SingleFileStorage) Delete() {
+	s.BlockManager.InvalidateFile(s.file.Name())
 	s.Close()
 	os.Remove(s.file.Name())
 }
@@ -113,17 +115,18 @@ func (s *SingleFileStorage) ReadSegment(segType enums.SegmentType, offset uint64
 }
 
 func (s *SingleFileStorage) Close() error {
-	if s.file != nil {
-		return s.file.Close()
+	if s.closed || s.file == nil {
+		return nil
 	}
-	return nil
+	s.closed = true
+	return s.file.Close()
 }
 
 func (s *SingleFileStorage) Sync() error {
-	if s.file != nil {
-		return s.file.Sync()
+	if s.closed || s.file == nil {
+		return nil
 	}
-	return nil
+	return s.file.Sync()
 }
 
 func (s *SingleFileStorage) File() *os.File {
@@ -151,6 +154,7 @@ type MultiFileStorage struct {
 	files        map[enums.SegmentType]*os.File // open file handles per segment type
 	offsets      map[enums.SegmentType]uint64   // current write offsets per segment
 	BlockManager *block.BlockManager            // block manager for writing blocks
+	closed       bool
 }
 
 func (m *MultiFileStorage) Delete() {
@@ -170,6 +174,7 @@ func (m *MultiFileStorage) Delete() {
 		RangeDelIndexExtension,
 	}
 	for _, ext := range extensions {
+		m.BlockManager.InvalidateFile(m.basePath + string(ext))
 		os.Remove(m.basePath + string(ext))
 	}
 }
@@ -304,6 +309,10 @@ func (m *MultiFileStorage) ReadSegment(segType enums.SegmentType, offset uint64,
 }
 
 func (m *MultiFileStorage) Close() error {
+	if m.closed {
+		return nil
+	}
+	m.closed = true
 	var lastErr error
 	for _, file := range m.files {
 		if err := file.Close(); err != nil {
@@ -314,6 +323,9 @@ func (m *MultiFileStorage) Close() error {
 }
 
 func (m *MultiFileStorage) Sync() error {
+	if m.closed {
+		return nil
+	}
 	var lastErr error
 	for _, file := range m.files {
 		if err := file.Sync(); err != nil {
