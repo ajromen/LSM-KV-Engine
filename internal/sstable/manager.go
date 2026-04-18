@@ -66,7 +66,7 @@ type SSTableManager struct {
 	dataDir         string
 	cachedFragments []shared.RangeDelEntry
 	fragmentsDirty  bool
-	mu           sync.Mutex
+	mu              sync.Mutex
 }
 
 func NewSSTableManager(dataDir string) *SSTableManager {
@@ -257,6 +257,7 @@ func (sm *SSTableManager) Get(key []byte) (*Record, bool, error) {
 			}
 			if utils.IsCoveredByRangeTombstone(fragments, key, record.SeqId) {
 				return nil, false, nil
+			}
 			if best == nil || record.SeqId > best.SeqId {
 				best = record
 			}
@@ -421,16 +422,13 @@ func (sm *SSTableManager) MergeSSTables(readers []*SSTableReader, toLayer int, s
 		return err
 	}
 
-	// 4. delete old sstables
-	err = sm.DeleteSSTables(readers)
-
-	sm.invalidateFragmentCache()
-
 	err = sm.DeleteSSTables(readers)
 	if err != nil {
 		return err
 	}
-  
+
+	sm.invalidateFragmentCache()
+
 	sm.blockManager.ClearCache()
 	return nil
 
@@ -535,14 +533,9 @@ func (sm *SSTableManager) EntryIterator(start, end []byte) (iterator.Iterator[it
 		&sstableIteratorSeekWrapper{inner: raw},
 		func(r Record) iterator.Entry {
 			return iterator.Entry{
-				Key:   append([]byte(nil), r.Key...),
-				Value: append([]byte(nil), r.Value...),
-				OpType: func() enums.OpType {
-					if r.Tombstone {
-						return enums.OpTypeDel
-					}
-					return enums.OpTypePut
-				}(),
+				Key:        append([]byte(nil), r.Key...),
+				Value:      append([]byte(nil), r.Value...),
+				OpType:     r.OpType,
 				SequenceID: r.SeqId,
 			}
 		},

@@ -61,6 +61,8 @@ func (l *LSM) Put(key []byte, value []byte, seqId uint64, opType enums.OpType) {
 	l.memtableeManager.Put(key, value, seqId, opType)
 	if opType == enums.OpTypeDel {
 		l.readCache.Put(string(key), nil)
+	} else if opType == enums.OpTypeRangeDel {
+		l.readCache.Put(string(key), nil)
 	} else {
 		l.readCache.Put(string(key), value)
 	}
@@ -72,11 +74,12 @@ func (l *LSM) PutWithTTL(key []byte, value []byte, seqId uint64, opType enums.Op
 
 func (l *LSM) Get(key []byte) ([]byte, bool, error) {
 	// 1. check cache
+	var found bool
 	if val, ok := l.readCache.Get(string(key)); ok {
 		if val == nil {
-			return nil, false, nil
+			found = false
 		}
-		return val, true, nil
+		found = true
 	}
 
 	// 2. check memtable
