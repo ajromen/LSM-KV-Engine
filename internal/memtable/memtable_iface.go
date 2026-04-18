@@ -47,18 +47,19 @@ type Memtable interface {
 	Get(key []byte) (*MemtableEntry, bool)
 	ShouldFlush() bool
 	Reset()
-	Flush() []MemtableEntry
+	Flush() ([]MemtableEntry, []MemtableEntry)
 	ReadEntries() []MemtableEntry
 	NumEntries() int
 	SizeBytes() uint64
 	Visualize() string
 	RawIterator() iterator.Iterator[MemtableEntry]
 	Iterator() iterator.Iterator[MemtableEntry]
+	IsCoveredByRangeDel(key []byte, keySeqId uint64) bool
 }
 
 // GenericMemtable is a concrete implementation of Memtable.
 type GenericMemtable struct {
-	store MemtableStore
+	store         MemtableStore
 	rangeDelStore MemtableStore
 	numEntries    int
 	sizeBytes     uint64

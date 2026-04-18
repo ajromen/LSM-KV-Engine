@@ -25,7 +25,7 @@ type MemtableManager struct {
 }
 
 // NewMemtableManager initializes a new instance of a manager and starts the flush worker
-func NewMemtableManager(maxTables int, mergeStructure byte, factory func() Memtable, flushHandler func([]MemtableEntry)) *MemtableManager {
+func NewMemtableManager(maxTables int, mergeStructure byte, factory func() Memtable, flushHandler func([]MemtableEntry, []MemtableEntry)) *MemtableManager {
 	mm := &MemtableManager{
 		maxTables:      maxTables,
 		mergeStructure: mergeStructure,
@@ -79,7 +79,7 @@ func (mm *MemtableManager) rotate() {
 }
 
 // flushWorker runs in a separate goroutine, and it takes immutable memtables and flushes them to disk
-func (mm *MemtableManager) flushWorker(flushHandler func([]MemtableEntry)) {
+func (mm *MemtableManager) flushWorker(flushHandler func([]MemtableEntry, []MemtableEntry)) {
 	for mem := range mm.flushChannel {
 
 		mm.mu.Lock()
@@ -95,6 +95,10 @@ func (mm *MemtableManager) flushWorker(flushHandler func([]MemtableEntry)) {
 			}
 		}
 
+		entries, rangeDelEntries := mem.Flush()
+		if flushHandler != nil {
+			flushHandler(entries, rangeDelEntries)
+		}
 		mm.wg.Done()
 	}
 }
@@ -213,6 +217,7 @@ func (mm *MemtableManager) EntryIterator() iterator.Iterator[iterator.Entry] {
 			return iterator.Entry{
 				Key:        append([]byte(nil), e.Key...),
 				Value:      append([]byte(nil), e.Value...),
+				Tombstone:  e.OpType == enums.OpTypeDel,
 				OpType:     e.OpType,
 				SequenceID: e.SeqId,
 			}
@@ -221,4 +226,30 @@ func (mm *MemtableManager) EntryIterator() iterator.Iterator[iterator.Entry] {
 			return MemtableEntry{Key: key}
 		},
 	)
+}
+
+// memtableIteratorSeekWrapper wraps Iterator[MemtableEntry] to add TypedSeekIterator interface
+type memtableIteratorSeekWrapper struct {
+	inner iterator.Iterator[MemtableEntry]
+}
+
+func (w *memtableIteratorSeekWrapper) Valid() bool          { return w.inner.Valid() }
+func (w *memtableIteratorSeekWrapper) SeekToFirst()         { w.inner.SeekToFirst() }
+func (w *memtableIteratorSeekWrapper) SeekToLast()          { w.inner.SeekToLast() }
+func (w *memtableIteratorSeekWrapper) Next()                { w.inner.Next() }
+func (w *memtableIteratorSeekWrapper) Key() MemtableEntry   { return w.inner.Key() }
+func (w *memtableIteratorSeekWrapper) Seek(e MemtableEntry) { w.inner.Seek(e) }
+
+func (mm *MemtableManager) IsCoveredByRangeDel(key []byte, keySeqId uint64) bool {
+	mm.mu.Lock()
+	defer mm.mu.Unlock()
+	if mm.active.IsCoveredByRangeDel(key, keySeqId) {
+		return true
+	}
+	for i := len(mm.immutable) - 1; i >= 0; i-- {
+		if mm.immutable[i].IsCoveredByRangeDel(key, keySeqId) {
+			return true
+		}
+	}
+	return false
 }

@@ -17,23 +17,26 @@ import (
 	"github.com/ajromen/LSM-KV-Engine/internal/encoders"
 	"github.com/ajromen/LSM-KV-Engine/internal/enums"
 	"github.com/ajromen/LSM-KV-Engine/internal/shared"
+	"github.com/ajromen/LSM-KV-Engine/internal/utils"
 )
 
 // SSTableReader allows reading an SSTable file, accesing singular records and validating data integrity
 type SSTableReader struct {
-	filePath        string              // file path of given sstable file (base path if multi file format)
-	Id              int                 // SSTable segment id
-	Layer           int                 // number of the lsm layer
-	SizeBytes       int64               //file size in bytes
-	storage         SegmentStorage      // low-level reading of segments
-	blockManager    *block.BlockManager // reading and decoding data blocks
-	footer          *Footer             // footer of given sstable
-	Metadata        *Metadata
-	SummarySegment  *SummarySegment  // summary segment (read into RAM)
-	filterSegment   *FilterSegment   // filter segment (read into RAM)
-	merkleTree      *MerkleTree      // merkle tree - metadata segment (read into RAM)
-	TTLIndexSegment *TTLIndexSegment // read once
-	valueDecoder    *encoders.AdaptiveEncoder
+	filePath            string              // file path of given sstable file (base path if multi file format)
+	Id                  int                 // SSTable segment id
+	Layer               int                 // number of the lsm layer
+	SizeBytes           int64               //file size in bytes
+	storage             SegmentStorage      // low-level reading of segments
+	blockManager        *block.BlockManager // reading and decoding data blocks
+	footer              *Footer             // footer of given sstable
+	Metadata            *Metadata
+	SummarySegment      *SummarySegment  // summary segment (read into RAM)
+	filterSegment       *FilterSegment   // filter segment (read into RAM)
+	merkleTree          *MerkleTree      // merkle tree - metadata segment (read into RAM)
+	TTLIndexSegment     *TTLIndexSegment // read once
+	valueDecoder        *encoders.AdaptiveEncoder
+	fragmentedRangeDels []shared.RangeDelEntry
+	rangeDelLoaded      bool
 }
 
 type ReaderOptions struct {
@@ -209,6 +212,23 @@ func (r *SSTableReader) GetTTLEntries() ([]shared.TTLEntry, error) {
 	return entries, nil
 }
 
+func (r *SSTableReader) GetRangeDelEntries() ([]shared.RangeDelEntry, error) {
+	entries := make([]shared.RangeDelEntry, 0)
+	blockSize := uint64(r.blockManager.BlockSize())
+	for off := uint64(0); uint32(off) < r.footer.RangeDelIndexHandler.Size; off += blockSize {
+		buf, err := r.storage.ReadSegment(enums.SegmentRangeDelIndex, 0, uint32(blockSize))
+		if err != nil {
+			return nil, err
+		}
+		b, err := DecodeRangeDelIndexBlock(buf)
+		if err != nil {
+			return nil, err
+		}
+		entries = append(b.Entries)
+	}
+	return entries, nil
+}
+
 // loadFilter reads and decodes the filter segment -> filter allows quickly checking whether a key exists or nott
 func (r *SSTableReader) loadFilter() error {
 	if r.footer.FilterHandler.Size == 0 {
@@ -284,6 +304,37 @@ func (r *SSTableReader) loadDictionary() error {
 	}
 	r.valueDecoder = decoder
 	return nil
+}
+
+func (r *SSTableReader) LoadRangeDels() error {
+	if r.rangeDelLoaded {
+		return nil
+	}
+	r.rangeDelLoaded = true
+	if r.footer.RangeDelIndexHandler.Size == 0 {
+		return nil
+	}
+	blockSize := uint64(r.blockManager.BlockSize())
+	totalSize := uint64(r.footer.RangeDelIndexHandler.Size)
+	baseOffset := r.footer.RangeDelIndexHandler.Offset
+	var all []shared.RangeDelEntry
+	for off := uint64(0); off < totalSize; off += blockSize {
+		buf, err := r.storage.ReadSegment(enums.SegmentRangeDelIndex, baseOffset+off, uint32(blockSize))
+		if err != nil {
+			return err
+		}
+		blk, err := DecodeRangeDelIndexBlock(buf)
+		if err != nil {
+			return err
+		}
+		all = append(all, blk.Entries...)
+	}
+	r.fragmentedRangeDels = utils.FragmentRangeTombstones(all)
+	return nil
+}
+
+func (r *SSTableReader) IsCoveredByRangeDel(key []byte, keySeqId uint64) bool {
+	return utils.IsCoveredByRangeTombstone(r.fragmentedRangeDels, key, keySeqId)
 }
 
 // Get looks up a record by key in the SSTable in given order:
@@ -369,9 +420,20 @@ func (r *SSTableReader) Get(key []byte) (*Record, error) {
 	if !bytes.Equal(rec.Key, key) {
 		return nil, nil
 	}
+
+	// check whether it is deleted by range delete
+	rangeEntries, err := r.GetRangeDelEntries()
+	if err != nil {
+		return nil, err
+	}
+	r.fragmentedRangeDels = utils.FragmentRangeTombstones(rangeEntries)
+	if r.IsCoveredByRangeDel(key, rec.SeqId) {
+		return nil, nil
+	}
+
 	return &Record{
 		SeqId:     rec.SeqId,
-		Tombstone: rec.Tombstone,
+		OpType:    rec.OpType,
 		Key:       rec.Key,
 		Value:     rec.Value,
 		ExpiresAt: rec.ExpiresAt,

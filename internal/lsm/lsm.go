@@ -44,8 +44,8 @@ func NewLSM(dataDir string) (*LSM, error) {
 	return &lsm, nil
 }
 
-func (l *LSM) onFlush(entries []memtable.MemtableEntry) {
-	err := l.sstableManager.FlushToSSTable(entries)
+func (l *LSM) onFlush(entries []memtable.MemtableEntry, rangeDelEntries []memtable.MemtableEntry) {
+	err := l.sstableManager.FlushToSSTable(entries, rangeDelEntries)
 	if err != nil {
 		panic(fmt.Errorf("error flushing memtable entries: %v", err))
 	}
@@ -100,6 +100,11 @@ func (l *LSM) Get(key []byte) ([]byte, bool, error) {
 		return nil, false, err
 	}
 	if found {
+		// The key exists in SSTable but a range tombstone in the memtable
+		// may have been written after it. Check with the record's own seqId.
+		if l.memtableeManager.IsCoveredByRangeDel(key, record.SeqId) {
+			return nil, false, nil
+		}
 		l.readCache.Put(string(key), record.Value)
 		return record.Value, true, nil
 	}

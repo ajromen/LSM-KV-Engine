@@ -15,7 +15,7 @@ import (
 
 var allTypes = []enums.MemTableType{enums.BTreeMemTable, enums.SkiplistMemTable, enums.HashMapMemTable}
 
-func newMemtable(t *testing.T, mt enums.MemTableType, maxEntries int, maxBytes uint64, handler func([]MemtableEntry)) *MemtableManager {
+func newMemtable(t *testing.T, mt enums.MemTableType, maxEntries int, maxBytes uint64, handler func([]MemtableEntry, []MemtableEntry)) *MemtableManager {
 	t.Helper()
 	factory := NewFactory(config.GetSettings().Memtable)
 	return NewMemtableManager(5, 1, factory, handler)
@@ -325,7 +325,7 @@ func TestManagerIteratorAcrossFlush(t *testing.T) {
 			// maxEntries=3 forces rotations quickly
 			flushed := map[string]bool{}
 			var mu sync.Mutex
-			m := newMemtable(t, mt, 3, 1<<20, func(entries []MemtableEntry) {
+			m := newMemtable(t, mt, 3, 1<<20, func(entries []MemtableEntry, rangeDelEntries []MemtableEntry) {
 				mu.Lock()
 				for _, e := range entries {
 					flushed[string(e.Key)] = true
@@ -371,7 +371,7 @@ func TestConcurrency(t *testing.T) {
 	flushCount := 0
 
 	factory := NewFactory(config.NewDefaultConfig().Memtable)
-	memManager := NewMemtableManager(5, 0, factory, func(entries []MemtableEntry) {
+	memManager := NewMemtableManager(5, 0, factory, func(entries []MemtableEntry, rangeDelEntries []MemtableEntry) {
 		mu.Lock()
 		flushCount++
 		current := flushCount
@@ -492,7 +492,7 @@ func TestMemtableLifecycle(t *testing.T) {
 
 	wg.Add(1)
 
-	mem := NewMemtableManager(5, 0, factory, func(entries []MemtableEntry) {
+	mem := NewMemtableManager(5, 0, factory, func(entries []MemtableEntry, rangeDelEntries []MemtableEntry) {
 		fmt.Println("=== FLUSH START ===")
 		for _, e := range entries {
 			fmt.Printf("flush: key=%s value=%s seqId=%d tomb=%v\n",

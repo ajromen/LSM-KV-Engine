@@ -87,15 +87,6 @@ func (m *GenericMemtable) Get(key []byte) (*MemtableEntry, bool) {
 	return entry, true
 }
 
-//// Delete marks a key deleted by inserting a tombstone entry
-//func (m *GenericMemtable) Delete(key []byte, seqId uint64) {
-//	m.Put(key, nil, seqId, true)
-//}
-//
-//func (m *GenericMemtable) DeleteWithTTL(key []byte, seqId uint64, ttl int64) {
-//	m.PutWithTTL(key, nil, seqId, true, ttl)
-//}
-
 // ShouldFlush determines whether the memtable has reached its capacity
 func (m *GenericMemtable) ShouldFlush() bool {
 	return m.numEntries >= m.maxNumEntries
@@ -109,10 +100,11 @@ func (m *GenericMemtable) Reset() {
 }
 
 // Flush returns all entries in sorted order and then resets the memtable.
-func (m *GenericMemtable) Flush() []MemtableEntry {
+func (m *GenericMemtable) Flush() ([]MemtableEntry, []MemtableEntry) {
 	entries := m.store.EntriesInOrder()
+	rangeDelEntries := m.rangeDelStore.EntriesInOrder()
 	m.Reset()
-	return entries
+	return entries, rangeDelEntries
 }
 
 // ReadEntries returns all entries currently stored in the memtable in order.
@@ -169,9 +161,15 @@ func (m *GenericMemtable) filtrateNewerRanges(ranges []MemtableEntry, seqId uint
 
 func (m *GenericMemtable) isRangeDeleted(validRanges []MemtableEntry, key []byte) bool {
 	for _, entry := range validRanges {
-		if bytes.Compare(entry.Key, key) <= 0 && bytes.Compare(entry.Value, key) >= 0 {
+		if bytes.Compare(entry.Key, key) <= 0 && bytes.Compare(entry.Value, key) > 0 {
 			return true
 		}
 	}
 	return false
+}
+
+func (m *GenericMemtable) IsCoveredByRangeDel(key []byte, keySeqId uint64) bool {
+	rangeDels := m.gatherAllRangeDeletions(key)
+	validRanges := m.filtrateNewerRanges(rangeDels, keySeqId)
+	return m.isRangeDeleted(validRanges, key)
 }
