@@ -149,17 +149,18 @@ func NewSSTableReaderFromWriter(w *SSTableWriter, id int) (*SSTableReader, error
 	newStorage.SetBlockManager(w.blockManager)
 
 	r := &SSTableReader{
-		storage:        newStorage,
-		Layer:          w.Layer,
-		filePath:       w.filePath,
-		blockManager:   w.blockManager,
-		merkleTree:     w.merkleTree,
-		filterSegment:  w.filterSegment,
-		footer:         w.footer,
-		SummarySegment: w.summarySegment,
-		valueDecoder:   w.valueEncoder,
-		Metadata:       w.metadataSegment,
-		Id:             id,
+		storage:         newStorage,
+		Layer:           w.Layer,
+		filePath:        w.filePath,
+		blockManager:    w.blockManager,
+		merkleTree:      w.merkleTree,
+		filterSegment:   w.filterSegment,
+		footer:          w.footer,
+		SummarySegment:  w.summarySegment,
+		valueDecoder:    w.valueEncoder,
+		Metadata:        w.metadataSegment,
+		Id:              id,
+		TTLIndexSegment: w.ttlIndexSegment,
 	}
 	switch s := r.storage.(type) {
 	case *SingleFileStorage:
@@ -194,11 +195,15 @@ func (r *SSTableReader) loadSummary() error {
 
 func (r *SSTableReader) GetTTLEntries() ([]shared.TTLEntry, error) {
 	entries := make([]shared.TTLEntry, 0)
-
+	if r.footer.TTLIndexHandler.Size == 0 {
+		return entries, nil
+	}
 	blockSize := uint64(r.blockManager.BlockSize())
+	baseOffset := r.footer.TTLIndexHandler.Offset
+	totalSize := uint64(r.footer.TTLIndexHandler.Size)
 
-	for off := uint64(0); uint32(off) < r.footer.TTLIndexHandler.Size; off += blockSize { // ovo je pakao sta je ovo sto se ni jedan int ne poklapa
-		buf, err := r.storage.ReadSegment(enums.SegmentTTLIndex, 0, uint32(blockSize))
+	for off := uint64(0); off < totalSize; off += blockSize {
+		buf, err := r.storage.ReadSegment(enums.SegmentTTLIndex, baseOffset+off, uint32(blockSize))
 		if err != nil {
 			return nil, err
 		}
@@ -206,9 +211,8 @@ func (r *SSTableReader) GetTTLEntries() ([]shared.TTLEntry, error) {
 		if err != nil {
 			return nil, err
 		}
-		entries = append(b.Entries)
+		entries = append(entries, b.Entries...)
 	}
-
 	return entries, nil
 }
 

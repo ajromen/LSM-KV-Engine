@@ -79,7 +79,7 @@ func (l *LSM) Get(key []byte) ([]byte, bool, error) {
 		if val == nil {
 			found = false
 		}
-		found = true
+		return val, true, nil
 	}
 
 	// 2. check memtable
