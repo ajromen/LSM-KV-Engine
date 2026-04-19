@@ -301,19 +301,19 @@ func (r *DataBlockReader) ReadRecord() (*Record, error) {
 		return nil, errors.New("unexpected end")
 	}
 
+	// read Expiry Time
+	expiresAt := int64(binary.LittleEndian.Uint64(r.data[r.pos:]))
+	r.pos += 8
+	if r.pos >= r.dataSize {
+		return nil, errors.New("unexpected end")
+	}
+
 	// read OpType
 	opType := r.data[r.pos]
 	if opType > byte(3) {
 		return nil, errors.New("invalid opType")
 	}
 	r.pos += 1
-	if r.pos >= r.dataSize {
-		return nil, errors.New("unexpected end")
-	}
-
-	// read Expiry Time
-	expiresAt := int64(binary.LittleEndian.Uint64(r.data[r.pos:]))
-	r.pos += 8
 	if r.pos >= r.dataSize {
 		return nil, errors.New("unexpected end")
 	}

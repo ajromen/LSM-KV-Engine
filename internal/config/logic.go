@@ -12,6 +12,9 @@ import (
 
 func LoadConfig(flags *flags.FLags) error {
 	cfg := NewDefaultConfig()
+	if flags == nil {
+		return nil
+	}
 	if flags.ConfigPath != nil {
 		err := cfg.loadFromFile(*flags.ConfigPath)
 		if err != nil {

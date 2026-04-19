@@ -77,9 +77,9 @@ func (l *LSM) Get(key []byte) ([]byte, bool, error) {
 	var found bool
 	if val, ok := l.readCache.Get(string(key)); ok {
 		if val == nil {
-			found = false
+			return nil, false, nil
 		}
-		found = true
+		return val, true, nil
 	}
 
 	// 2. check memtable
