@@ -40,6 +40,8 @@ func (bm *BlockManager) Read(key BlockKey) ([]byte, error) {
 	}
 
 	bm.cache.Put(key, data)
+	fmt.Printf("READ BLOCK @%d: %x\n", key.Offset, data)
+
 	return data, nil
 }
 
@@ -76,6 +78,7 @@ func (bm *BlockManager) Write(key BlockKey, value []byte) error {
 	cpy := make([]byte, len(value))
 	copy(cpy, value)
 	bm.cache.Put(key, cpy)
+	fmt.Printf("WRITE BLOCK @%d: %x\n", key.Offset, value)
 	return nil
 }
 

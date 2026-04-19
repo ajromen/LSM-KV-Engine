@@ -73,16 +73,7 @@ func (l *LSM) PutWithTTL(key []byte, value []byte, seqId uint64, opType enums.Op
 }
 
 func (l *LSM) Get(key []byte) ([]byte, bool, error) {
-	// 1. check cache
-	var found bool
-	if val, ok := l.readCache.Get(string(key)); ok {
-		if val == nil {
-			return nil, false, nil
-		}
-		return val, true, nil
-	}
-
-	// 2. check memtable
+	// 1. check memtable
 	entry, found := l.memtableeManager.Get(key)
 	if found {
 		if entry == nil {
@@ -91,6 +82,14 @@ func (l *LSM) Get(key []byte) ([]byte, bool, error) {
 		}
 		l.readCache.Put(string(key), entry.Value)
 		return entry.Value, true, nil
+	}
+
+	// 2. check cache
+	if val, ok := l.readCache.Get(string(key)); ok {
+		if val == nil {
+			return nil, false, nil
+		}
+		return val, true, nil
 	}
 
 	if config.GetSettings().Debug {
