@@ -77,7 +77,7 @@ func (l *LSM) Get(key []byte) ([]byte, bool, error) {
 	var found bool
 	if val, ok := l.readCache.Get(string(key)); ok {
 		if val == nil {
-			found = false
+			return nil, false, nil
 		}
 		return val, true, nil
 	}
