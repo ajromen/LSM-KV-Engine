@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -184,4 +185,16 @@ func (m *Manifest) IncrementId() {
 	if m.NextSStableId >= 10_000_000-1 {
 		m.NextSStableId = 0
 	}
+}
+
+func (m *Manifest) SaveTo(directory string) error {
+	savePath := path.Join(directory, ManifestFileName)
+	realFileDir := m.FileDir
+	m.FileDir = directory
+	err := block.WriteJSON(savePath, m)
+	if err != nil {
+		return err
+	}
+	m.FileDir = realFileDir
+	return nil
 }

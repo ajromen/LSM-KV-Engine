@@ -205,6 +205,23 @@ func EnsureDir(path string) error {
 	return nil
 }
 
+func CopyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+
+	_, err = io.Copy(out, in)
+	return err
+}
+
 func DeleteFile(path string) error {
 	err := os.Remove(path)
 	if err != nil {

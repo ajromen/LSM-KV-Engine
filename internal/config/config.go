@@ -73,8 +73,8 @@ type CheckpointConfig struct {
 }
 
 type BackupConfig struct {
-	BackupEnabled     bool `json:"backup_enabled"`
-	BackupIncremental bool `json:"backup_incremental"`
+	Type          enums.BackupType `json:"backup_type"`
+	SaveDirectory string           `json:"save_directory"`
 }
 
 type TokenBucketConfig struct {
