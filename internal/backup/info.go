@@ -5,7 +5,7 @@ import (
 	"github.com/ajromen/LSM-KV-Engine/internal/enums"
 )
 
-const InfoFileName = "backup_metadata"
+const InfoFileName = "backup_metadata.json"
 
 type BackupInfo struct {
 	Id        string           `json:"id"`
@@ -20,7 +20,7 @@ func (bi *BackupInfo) SaveToFile(filename string) error {
 	return err
 }
 
-func (bi *BackupInfo) LoadFromFile(filename string) BackupInfo {
+func (bi *BackupInfo) LoadFromFile(filename string) error {
 	err := block.ReadJSON(filename, bi)
 	return err
 }

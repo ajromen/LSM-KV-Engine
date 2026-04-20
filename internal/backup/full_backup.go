@@ -31,11 +31,14 @@ func NewFullBackup(saveDirectory *string) *FullBackup {
 			Timestamp: timestamp,
 			Files:     nil,
 		}
-		savePath := path.Join(settings.SavePath, settings.Backup.SaveDirectory, info.Id)
+		savePath := path.Join(settings.SavePath, settings.Backup.SaveDirectory, info.Id+BackupFileExtension)
 		saveDirectory = &savePath
 	} else {
 		info = BackupInfo{}
-		info.LoadFromFile(*saveDirectory)
+		err := info.LoadFromFile(*saveDirectory)
+		if err != nil {
+			panic(err)
+		}
 	}
 
 	return &FullBackup{
@@ -85,7 +88,6 @@ func (f FullBackup) Restore() error {
 	return nil
 }
 
-func (f FullBackup) GetInfo() error {
-	//TODO implement me
-	panic("implement me")
+func (f FullBackup) GetInfo() BackupInfo {
+	return f.info
 }
