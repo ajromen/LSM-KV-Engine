@@ -11,12 +11,12 @@ import (
 	"github.com/ajromen/LSM-KV-Engine/internal/enums"
 )
 
-func createTestRecord(key string, value string, seqId uint64, tombstone bool) Record {
+func createTestRecord(key string, value string, seqId uint64, opType enums.OpType) Record {
 	return Record{
-		SeqId:     seqId,
-		Tombstone: tombstone,
-		Key:       []byte(key),
-		Value:     []byte(value),
+		SeqId:  seqId,
+		OpType: opType,
+		Key:    []byte(key),
+		Value:  []byte(value),
 	}
 }
 
@@ -31,23 +31,23 @@ func TestSSTableWriterBasic(t *testing.T) {
 		t.Fatalf("Failed to create writer: %v", err)
 	}
 	records := []Record{
-		createTestRecord("key001", "value001", 1, false),
-		createTestRecord("key002", "value002", 2, false),
-		createTestRecord("key003", "value003", 3, false),
-		createTestRecord("key004", "value004", 4, false),
-		createTestRecord("key005", "value005", 5, false),
-		createTestRecord("key006", "value005", 5, false),
-		createTestRecord("key007", "value007", 5, false),
-		createTestRecord("key008", "value008", 5, false),
-		createTestRecord("key009", "value009", 5, false),
-		createTestRecord("key010", "value005", 5, false),
-		createTestRecord("key011", "value005", 5, false),
-		createTestRecord("key012", "value005", 5, false),
-		createTestRecord("key013", "value005", 5, false),
-		createTestRecord("key014", "value005", 5, false),
-		createTestRecord("key015", "value005", 5, false),
-		createTestRecord("key016", "value016", 5, false),
-		createTestRecord("key017", "value005", 5, false),
+		createTestRecord("key001", "value001", 1, enums.OpTypePut),
+		createTestRecord("key002", "value002", 2, enums.OpTypePut),
+		createTestRecord("key003", "value003", 3, enums.OpTypePut),
+		createTestRecord("key004", "value004", 4, enums.OpTypePut),
+		createTestRecord("key005", "value005", 5, enums.OpTypePut),
+		createTestRecord("key006", "value005", 5, enums.OpTypePut),
+		createTestRecord("key007", "value007", 5, enums.OpTypePut),
+		createTestRecord("key008", "value008", 5, enums.OpTypePut),
+		createTestRecord("key009", "value009", 5, enums.OpTypePut),
+		createTestRecord("key010", "value005", 5, enums.OpTypePut),
+		createTestRecord("key011", "value005", 5, enums.OpTypePut),
+		createTestRecord("key012", "value005", 5, enums.OpTypePut),
+		createTestRecord("key013", "value005", 5, enums.OpTypePut),
+		createTestRecord("key014", "value005", 5, enums.OpTypePut),
+		createTestRecord("key015", "value005", 5, enums.OpTypePut),
+		createTestRecord("key016", "value016", 5, enums.OpTypePut),
+		createTestRecord("key017", "value005", 5, enums.OpTypePut),
 	}
 	for _, rec := range records {
 		if err := writer.AddRecord(rec); err != nil {
@@ -81,17 +81,51 @@ func TestSSTableWriterBasic(t *testing.T) {
 	}
 	fmt.Println("SUMMARY RAW BYTES:", buf)
 	indexF, _ := os.Open(tempFile)
-	defer summaryF.Close()
+	defer indexF.Close()
 	buf = make([]byte, reader.footer.IndexHandler.Size)
 	_, err = indexF.ReadAt(buf, int64(reader.footer.IndexHandler.Offset))
 	if err != nil {
 		t.Fatalf("ReadAt failed: %v", err)
 	}
 	fmt.Println("INDEX RAW BYTES:", buf)
-	indexSegment, _ := DecodeIndexBlock(buf)
+	blockSize := int(reader.blockManager.BlockSize())
+	var blocks []*IndexBlock
+
+	for offset := 0; offset < len(buf); offset += blockSize {
+		end := offset + blockSize
+		if end > len(buf) {
+			end = len(buf)
+		}
+
+		block, err := DecodeIndexBlock(buf[offset:end])
+		if err != nil {
+			t.Fatalf("failed to decode index block: %v", err)
+		}
+
+		blocks = append(blocks, block)
+	}
 	fmt.Println()
 	fmt.Println([]byte("key001"))
-	fmt.Println("INDEX ENTRIES", indexSegment.Entries)
+	if len(blocks) == 0 {
+		t.Fatalf("expected at least one index block")
+	}
+
+	totalEntries := 0
+	for _, b := range blocks {
+		totalEntries += len(b.Entries)
+	}
+
+	if totalEntries == 0 {
+		t.Fatalf("expected index entries, got 0")
+	}
+	if err := reader.loadSummary(); err != nil {
+		t.Fatalf("failed to load summary: %v", err)
+	}
+
+	if len(reader.SummarySegment.Entries) == 0 {
+		t.Fatalf("summary entries empty")
+	}
+
 	fmt.Println("SUMMARY ENTRIES", reader.SummarySegment.Entries)
 	fmt.Println("INDEX BLOCK OFFSET", reader.SummarySegment.Entries[0].IndexBlockOffset)
 	record, err := reader.Get([]byte("key001"))
@@ -118,23 +152,23 @@ func TestSSTableMultiFileFormat(t *testing.T) {
 	blockManager := block.NewBlockManager(cfg.SSTable.DataSegment.BlockSize)
 	writer, err := NewSSTableWriter(tempFile, blockManager, 100, 0)
 	records := []Record{
-		createTestRecord("key001", "value001", 1, false),
-		createTestRecord("key002", "value002", 2, false),
-		createTestRecord("key003", "value003", 3, false),
-		createTestRecord("key004", "value004", 4, false),
-		createTestRecord("key005", "value005", 5, false),
-		createTestRecord("key006", "value005", 5, false),
-		createTestRecord("key007", "value007", 5, false),
-		createTestRecord("key008", "value008", 5, false),
-		createTestRecord("key009", "value009", 5, false),
-		createTestRecord("key010", "value005", 5, false),
-		createTestRecord("key011", "value005", 5, false),
-		createTestRecord("key012", "value005", 5, false),
-		createTestRecord("key013", "value005", 5, false),
-		createTestRecord("key014", "value005", 5, false),
-		createTestRecord("key015", "value005", 5, false),
-		createTestRecord("key016", "value016", 5, false),
-		createTestRecord("key017", "value005", 5, false),
+		createTestRecord("key001", "value001", 1, enums.OpTypePut),
+		createTestRecord("key002", "value002", 2, enums.OpTypePut),
+		createTestRecord("key003", "value003", 3, enums.OpTypePut),
+		createTestRecord("key004", "value004", 4, enums.OpTypePut),
+		createTestRecord("key005", "value005", 5, enums.OpTypePut),
+		createTestRecord("key006", "value005", 5, enums.OpTypePut),
+		createTestRecord("key007", "value007", 5, enums.OpTypePut),
+		createTestRecord("key008", "value008", 5, enums.OpTypePut),
+		createTestRecord("key009", "value009", 5, enums.OpTypePut),
+		createTestRecord("key010", "value005", 5, enums.OpTypePut),
+		createTestRecord("key011", "value005", 5, enums.OpTypePut),
+		createTestRecord("key012", "value005", 5, enums.OpTypePut),
+		createTestRecord("key013", "value005", 5, enums.OpTypePut),
+		createTestRecord("key014", "value005", 5, enums.OpTypePut),
+		createTestRecord("key015", "value005", 5, enums.OpTypePut),
+		createTestRecord("key016", "value016", 5, enums.OpTypePut),
+		createTestRecord("key017", "value005", 5, enums.OpTypePut),
 	}
 	for _, rec := range records {
 		if err := writer.AddRecord(rec); err != nil {
@@ -178,17 +212,51 @@ func TestSSTableMultiFileFormat(t *testing.T) {
 	}
 	fmt.Println("SUMMARY RAW BYTES:", buf)
 	indexF, _ := os.Open(tempFile + ".index")
-	defer summaryF.Close()
+	defer indexF.Close()
 	buf = make([]byte, reader.footer.IndexHandler.Size)
 	_, err = indexF.ReadAt(buf, int64(reader.footer.IndexHandler.Offset))
 	if err != nil {
 		t.Fatalf("ReadAt failed: %v", err)
 	}
 	fmt.Println("INDEX RAW BYTES:", buf)
-	indexSegment, _ := DecodeIndexBlock(buf)
+	blockSize := int(reader.blockManager.BlockSize())
+	var blocks []*IndexBlock
+
+	for offset := 0; offset < len(buf); offset += blockSize {
+		end := offset + blockSize
+		if end > len(buf) {
+			end = len(buf)
+		}
+
+		block, err := DecodeIndexBlock(buf[offset:end])
+		if err != nil {
+			t.Fatalf("failed to decode index block: %v", err)
+		}
+
+		blocks = append(blocks, block)
+	}
 	fmt.Println()
 	fmt.Println([]byte("key001"))
-	fmt.Println("INDEX ENTRIES", indexSegment.Entries)
+	if len(blocks) == 0 {
+		t.Fatalf("expected at least one index block")
+	}
+
+	totalEntries := 0
+	for _, b := range blocks {
+		totalEntries += len(b.Entries)
+	}
+
+	if totalEntries == 0 {
+		t.Fatalf("expected index entries, got 0")
+	}
+	if err := reader.loadSummary(); err != nil {
+		t.Fatalf("failed to load summary: %v", err)
+	}
+
+	if len(reader.SummarySegment.Entries) == 0 {
+		t.Fatalf("summary entries empty")
+	}
+
 	fmt.Println("SUMMARY ENTRIES", reader.SummarySegment.Entries)
 	fmt.Println("INDEX BLOCK OFFSET", reader.SummarySegment.Entries[0].IndexBlockOffset)
 	record, err := reader.Get([]byte("key009"))
@@ -264,23 +332,23 @@ func TestSSTableIteratorRaw(t *testing.T) {
 		t.Fatalf("Failed to create writer: %v", err)
 	}
 	records := []Record{
-		createTestRecord("key001", "value001", 1, false),
-		createTestRecord("key002", "value002", 2, false),
-		createTestRecord("key003", "value003", 3, false),
-		createTestRecord("key004", "value004", 4, false),
-		createTestRecord("key005", "value005", 5, false),
-		createTestRecord("key006", "value005", 5, false),
-		createTestRecord("key007", "value007", 5, false),
-		createTestRecord("key008", "value008", 5, false),
-		createTestRecord("key009", "value009", 5, false),
-		createTestRecord("key010", "value005", 5, false),
-		createTestRecord("key011", "value005", 5, false),
-		createTestRecord("key012", "value005", 5, false),
-		createTestRecord("key013", "value005", 5, false),
-		createTestRecord("key014", "value005", 5, false),
-		createTestRecord("key015", "value005", 5, false),
-		createTestRecord("key016", "value016", 5, false),
-		createTestRecord("key017", "value005", 5, false),
+		createTestRecord("key001", "value001", 1, enums.OpTypePut),
+		createTestRecord("key002", "value002", 2, enums.OpTypePut),
+		createTestRecord("key003", "value003", 3, enums.OpTypePut),
+		createTestRecord("key004", "value004", 4, enums.OpTypePut),
+		createTestRecord("key005", "value005", 5, enums.OpTypePut),
+		createTestRecord("key006", "value005", 5, enums.OpTypePut),
+		createTestRecord("key007", "value007", 5, enums.OpTypePut),
+		createTestRecord("key008", "value008", 5, enums.OpTypePut),
+		createTestRecord("key009", "value009", 5, enums.OpTypePut),
+		createTestRecord("key010", "value005", 5, enums.OpTypePut),
+		createTestRecord("key011", "value005", 5, enums.OpTypePut),
+		createTestRecord("key012", "value005", 5, enums.OpTypePut),
+		createTestRecord("key013", "value005", 5, enums.OpTypePut),
+		createTestRecord("key014", "value005", 5, enums.OpTypePut),
+		createTestRecord("key015", "value005", 5, enums.OpTypePut),
+		createTestRecord("key016", "value016", 5, enums.OpTypePut),
+		createTestRecord("key017", "value005", 5, enums.OpTypePut),
 	}
 	for _, rec := range records {
 		if err := writer.AddRecord(rec); err != nil {
@@ -300,7 +368,7 @@ func TestSSTableIteratorRaw(t *testing.T) {
 	}
 	for iterator.Valid() {
 		rec := iterator.Key()
-		fmt.Println("RAW:", string(rec.Key), string(rec.Value), rec.Tombstone)
+		fmt.Println("RAW:", string(rec.Key), string(rec.Value), rec.OpType == enums.OpTypeDel)
 		iterator.Next()
 	}
 }
@@ -316,12 +384,12 @@ func TestSSTableIterator(t *testing.T) {
 		t.Fatalf("Failed to create writer: %v", err)
 	}
 	records := []Record{
-		createTestRecord("key001", "value001_new", 2, false),
-		createTestRecord("key001", "value001_old", 1, false),
-		createTestRecord("key002", "value002_new", 2, false),
-		createTestRecord("key002", "value002_old", 1, false),
-		createTestRecord("key003", "value003", 1, true),
-		createTestRecord("key004", "value004", 1, false),
+		createTestRecord("key001", "value001_new", 2, enums.OpTypePut),
+		createTestRecord("key001", "value001_old", 1, enums.OpTypePut),
+		createTestRecord("key002", "value002_new", 2, enums.OpTypePut),
+		createTestRecord("key002", "value002_old", 1, enums.OpTypePut),
+		createTestRecord("key003", "value003", 1, enums.OpTypeDel),
+		createTestRecord("key004", "value004", 1, enums.OpTypePut),
 	}
 	for _, rec := range records {
 		if err := writer.AddRecord(rec); err != nil {
@@ -341,7 +409,7 @@ func TestSSTableIterator(t *testing.T) {
 	}
 	for iterator.Valid() {
 		rec := iterator.Key()
-		fmt.Println("RAW:", string(rec.Key), string(rec.Value), rec.Tombstone)
+		fmt.Println("RAW:", string(rec.Key), string(rec.Value), rec.OpType == 1)
 		iterator.Next()
 	}
 }
@@ -361,12 +429,12 @@ func TestSSTableMergeIteratorRaw(t *testing.T) {
 		t.Fatalf("Failed to create writer1: %v", err)
 	}
 	for _, rec := range []Record{
-		createTestRecord("key001", "value001_sst1", 1, false),
-		createTestRecord("key003", "value003_sst1", 1, false),
-		createTestRecord("key005", "value005_sst1", 1, false),
-		createTestRecord("key007", "value007_sst1", 1, false),
-		createTestRecord("key009", "value007_sst1", 1, false),
-		createTestRecord("key011", "value007_sst1", 1, false),
+		createTestRecord("key001", "value001_sst1", 1, enums.OpTypePut),
+		createTestRecord("key003", "value003_sst1", 1, enums.OpTypePut),
+		createTestRecord("key005", "value005_sst1", 1, enums.OpTypePut),
+		createTestRecord("key007", "value007_sst1", 1, enums.OpTypePut),
+		createTestRecord("key009", "value007_sst1", 1, enums.OpTypePut),
+		createTestRecord("key011", "value007_sst1", 1, enums.OpTypePut),
 	} {
 		if err := writer1.AddRecord(rec); err != nil {
 			t.Fatalf("Failed to add record to writer1: %v", err)
@@ -382,12 +450,12 @@ func TestSSTableMergeIteratorRaw(t *testing.T) {
 		t.Fatalf("Failed to create writer2: %v", err)
 	}
 	for _, rec := range []Record{
-		createTestRecord("key002", "value002_sst2", 1, false),
-		createTestRecord("key004", "value004_sst2", 1, false),
-		createTestRecord("key006", "value006_sst2", 1, false),
-		createTestRecord("key008", "value008_sst2", 1, false),
-		createTestRecord("key010", "value007_sst1", 1, false),
-		createTestRecord("key012", "value007_sst1", 1, false),
+		createTestRecord("key002", "value002_sst2", 1, enums.OpTypePut),
+		createTestRecord("key004", "value004_sst2", 1, enums.OpTypePut),
+		createTestRecord("key006", "value006_sst2", 1, enums.OpTypePut),
+		createTestRecord("key008", "value008_sst2", 1, enums.OpTypePut),
+		createTestRecord("key010", "value007_sst1", 1, enums.OpTypePut),
+		createTestRecord("key012", "value007_sst1", 1, enums.OpTypePut),
 	} {
 		if err := writer2.AddRecord(rec); err != nil {
 			t.Fatalf("Failed to add record to writer2: %v", err)
@@ -414,7 +482,7 @@ func TestSSTableMergeIteratorRaw(t *testing.T) {
 	fmt.Println("=== MergeIteratorRaw: interleaved keys ===")
 	for iterator.Valid() {
 		rec := iterator.Key()
-		fmt.Println("RAW:", string(rec.Key), string(rec.Value), rec.Tombstone)
+		fmt.Println("RAW:", string(rec.Key), string(rec.Value), rec.OpType == enums.OpTypeDel)
 		iterator.Next()
 	}
 }
@@ -432,12 +500,12 @@ func TestSSTableMergeIteratorRawWithDuplicates(t *testing.T) {
 		t.Fatalf("Failed to create writer1: %v", err)
 	}
 	for _, rec := range []Record{
-		createTestRecord("key001", "value001_sst1", 1, false),
-		createTestRecord("key003", "value003_sst1", 1, false),
-		createTestRecord("key005", "value005_sst1", 1, false),
-		createTestRecord("key007", "value007_sst1", 1, false),
-		createTestRecord("key009", "value007_sst1", 1, false),
-		createTestRecord("key011", "value007_sst1", 1, false),
+		createTestRecord("key001", "value001_sst1", 1, enums.OpTypePut),
+		createTestRecord("key003", "value003_sst1", 1, enums.OpTypePut),
+		createTestRecord("key005", "value005_sst1", 1, enums.OpTypePut),
+		createTestRecord("key007", "value007_sst1", 1, enums.OpTypePut),
+		createTestRecord("key009", "value007_sst1", 1, enums.OpTypePut),
+		createTestRecord("key011", "value007_sst1", 1, enums.OpTypePut),
 	} {
 		if err := writer1.AddRecord(rec); err != nil {
 			t.Fatalf("Failed to add record: %v", err)
@@ -451,12 +519,12 @@ func TestSSTableMergeIteratorRawWithDuplicates(t *testing.T) {
 		t.Fatalf("Failed to create writer2: %v", err)
 	}
 	for _, rec := range []Record{
-		createTestRecord("key002", "value002_sst2", 1, false),
-		createTestRecord("key004", "value004_sst2", 1, false),
-		createTestRecord("key006", "value006_sst2", 1, false),
-		createTestRecord("key008", "value008_sst2", 1, false),
-		createTestRecord("key010", "value007_sst1", 1, false),
-		createTestRecord("key012", "value007_sst1", 1, false),
+		createTestRecord("key002", "value002_sst2", 1, enums.OpTypePut),
+		createTestRecord("key004", "value004_sst2", 1, enums.OpTypePut),
+		createTestRecord("key006", "value006_sst2", 1, enums.OpTypePut),
+		createTestRecord("key008", "value008_sst2", 1, enums.OpTypePut),
+		createTestRecord("key010", "value007_sst1", 1, enums.OpTypePut),
+		createTestRecord("key012", "value007_sst1", 1, enums.OpTypePut),
 	} {
 		if err := writer2.AddRecord(rec); err != nil {
 			t.Fatalf("Failed to add record: %v", err)
@@ -509,12 +577,12 @@ func TestSSTableMergeIteratorWithTombstones(t *testing.T) {
 		t.Fatalf("Failed to create writer1: %v", err)
 	}
 	for _, rec := range []Record{
-		createTestRecord("key001", "value001_sst1", 1, false),
-		createTestRecord("key003", "value003_sst1", 1, false),
-		createTestRecord("key005", "value005_sst1", 1, false),
-		createTestRecord("key007", "value007_sst1", 1, false),
-		createTestRecord("key009", "value007_sst1", 1, false),
-		createTestRecord("key011", "value007_sst1", 1, false),
+		createTestRecord("key001", "value001_sst1", 1, enums.OpTypePut),
+		createTestRecord("key003", "value003_sst1", 1, enums.OpTypePut),
+		createTestRecord("key005", "value005_sst1", 1, enums.OpTypePut),
+		createTestRecord("key007", "value007_sst1", 1, enums.OpTypePut),
+		createTestRecord("key009", "value007_sst1", 1, enums.OpTypePut),
+		createTestRecord("key011", "value007_sst1", 1, enums.OpTypePut),
 	} {
 		if err := writer1.AddRecord(rec); err != nil {
 			t.Fatalf("Failed to add record: %v", err)
@@ -528,12 +596,12 @@ func TestSSTableMergeIteratorWithTombstones(t *testing.T) {
 		t.Fatalf("Failed to create writer2: %v", err)
 	}
 	for _, rec := range []Record{
-		createTestRecord("key002", "value002_sst2", 1, false),
-		createTestRecord("key004", "value004_sst2", 1, false),
-		createTestRecord("key006", "value006_sst2", 1, false),
-		createTestRecord("key008", "value008_sst2", 1, false),
-		createTestRecord("key010", "value007_sst1", 1, false),
-		createTestRecord("key012", "value007_sst1", 1, false),
+		createTestRecord("key002", "value002_sst2", 1, enums.OpTypePut),
+		createTestRecord("key004", "value004_sst2", 1, enums.OpTypePut),
+		createTestRecord("key006", "value006_sst2", 1, enums.OpTypePut),
+		createTestRecord("key008", "value008_sst2", 1, enums.OpTypePut),
+		createTestRecord("key010", "value007_sst1", 1, enums.OpTypePut),
+		createTestRecord("key012", "value007_sst1", 1, enums.OpTypePut),
 	} {
 		if err := writer2.AddRecord(rec); err != nil {
 			t.Fatalf("Failed to add record: %v", err)
@@ -557,7 +625,7 @@ func TestSSTableMergeIteratorWithTombstones(t *testing.T) {
 	}
 	for iterRaw.Valid() {
 		rec := iterRaw.Key()
-		fmt.Println("RAW:", string(rec.Key), string(rec.Value), "tombstone:", rec.Tombstone, "seqId:", rec.SeqId)
+		fmt.Println("RAW:", string(rec.Key), string(rec.Value), "tombstone:", rec.OpType == enums.OpTypeDel, "seqId:", rec.SeqId)
 		iterRaw.Next()
 	}
 	fmt.Println("=== MergeIterator: tombstones filtered out ===")
@@ -585,12 +653,12 @@ func TestSSTableGet(t *testing.T) {
 	}
 
 	records := []Record{
-		createTestRecord("key001", "value001_sst1", 1, false),
-		createTestRecord("key003", "value003_sst1", 1, false),
-		createTestRecord("key005", "value005_sst1", 1, false),
-		createTestRecord("key007", "value007_sst1", 1, false),
-		createTestRecord("key009", "value009_sst1", 1, false),
-		createTestRecord("key011", "value011_sst1", 1, false),
+		createTestRecord("key001", "value001_sst1", 1, enums.OpTypePut),
+		createTestRecord("key003", "value003_sst1", 1, enums.OpTypePut),
+		createTestRecord("key005", "value005_sst1", 1, enums.OpTypePut),
+		createTestRecord("key007", "value007_sst1", 1, enums.OpTypePut),
+		createTestRecord("key009", "value009_sst1", 1, enums.OpTypePut),
+		createTestRecord("key011", "value011_sst1", 1, enums.OpTypePut),
 	}
 
 	for _, rec := range records {
@@ -609,14 +677,15 @@ func TestSSTableGet(t *testing.T) {
 	}
 
 	tests := []struct {
-		key   string
-		value string
+		key    string
+		value  string
+		exists bool
 	}{
-		{"key001", "value001_sst1"},
-		{"key003", "value003_sst1"},
-		{"key005", "value005_sst1"},
-		{"key007", "value007_sst1"},
-		{"key009", "value009_sst1"},
+		{"key001", "value001_sst1", true},
+		{"key003", "value003_sst1", true},
+		{"key011", "value011_sst1", true},
+		{"key000", "", false}, // before range
+		{"key999", "", false}, // after range
 	}
 
 	for _, tt := range tests {
@@ -625,12 +694,17 @@ func TestSSTableGet(t *testing.T) {
 			t.Fatalf("Get failed for key %s: %v", tt.key, err)
 		}
 
-		if rec == nil {
-			t.Fatalf("Key %s not found", tt.key)
-		}
-
-		if string(rec.Value) != tt.value {
-			t.Fatalf("Expected %s, got %s", tt.value, string(rec.Value))
+		if tt.exists {
+			if rec == nil {
+				t.Fatalf("expected key %s to exist", tt.key)
+			}
+			if string(rec.Value) != tt.value {
+				t.Fatalf("expected %s, got %s", tt.value, string(rec.Value))
+			}
+		} else {
+			if rec != nil {
+				t.Fatalf("expected key %s to not exist", tt.key)
+			}
 		}
 	}
 
