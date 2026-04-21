@@ -32,7 +32,15 @@ type WAL struct {
 	MaxBlocks      int
 	NextSegmentID  uint64
 	NextSequenceID uint64
+	NextTxnID      uint64
 	BM             *block.BlockManager
+}
+
+type TxnOp struct {
+	Timestamp uint64
+	Tombstone bool
+	Key       []byte
+	Value     []byte
 }
 
 func OpenWAL(dir string, blockSize int, maxBlocks int) (*WAL, error) {
@@ -57,6 +65,7 @@ func OpenWAL(dir string, blockSize int, maxBlocks int) (*WAL, error) {
 		MaxBlocks:      maxBlocks,
 		NextSegmentID:  1,
 		NextSequenceID: 1,
+		NextTxnID:      1,
 		BM:             bm,
 	}
 
@@ -110,6 +119,11 @@ func OpenWAL(dir string, blockSize int, maxBlocks int) (*WAL, error) {
 		return nil, err
 	}
 
+	err = w.InitNextTxnID()
+	if err != nil {
+		return nil, err
+	}
+
 	if w.ActiveSegment.IsFull() {
 		err = w.RotateSegment()
 		if err != nil {
@@ -131,21 +145,17 @@ func (w *WAL) Append(r Record) error {
 
 	sequenceID := w.NextSequenceID
 
-	err := w.ActiveSegment.Append(r, sequenceID)
-	if err == nil {
-		w.NextSequenceID++
-		return nil
-	}
-	if !w.ActiveSegment.IsFull() {
-		return err
-	}
-
-	err = w.RotateSegment()
-	if err != nil {
-		return err
+	wr := WALRecord{
+		FragType:   FULL,
+		RecType:    SINGLE,
+		TxnID:      0,
+		SequenceID: sequenceID,
+		KeySize:    uint64(len(r.Key)),
+		ValueSize:  uint64(len(r.Value)),
+		Record:     r,
 	}
 
-	err = w.ActiveSegment.Append(r, sequenceID)
+	err := w.AppendWALRecord(wr)
 	if err != nil {
 		return err
 	}
@@ -168,6 +178,132 @@ func (w *WAL) Put(key []byte, value []byte, timestamp uint64) error {
 	return nil
 }
 
+func (w *WAL) AppendWALRecord(wr WALRecord) error {
+	if w == nil {
+		return fmt.Errorf("wal is nil")
+	}
+	if w.ActiveSegment == nil {
+		return fmt.Errorf("active segment is nil")
+	}
+
+	err := w.ActiveSegment.AppendWALRecord(wr)
+	if err == nil {
+		return nil
+	}
+	if !w.ActiveSegment.IsFull() {
+		return err
+	}
+
+	err = w.RotateSegment()
+	if err != nil {
+		return err
+	}
+
+	return w.ActiveSegment.AppendWALRecord(wr)
+}
+
+func (w *WAL) BatchWrite(ops []TxnOp) error {
+	if w == nil {
+		return fmt.Errorf("wal is nil")
+	}
+	if w.ActiveSegment == nil {
+		return fmt.Errorf("active segment is nil")
+	}
+	if len(ops) == 0 {
+		return nil
+	}
+
+	txnID := w.NextTxnID
+	w.NextTxnID++
+
+	startSeq := w.NextSequenceID
+
+	startRecord := WALRecord{
+		FragType:   FULL,
+		RecType:    START,
+		TxnID:      txnID,
+		SequenceID: startSeq,
+		KeySize:    0,
+		ValueSize:  0,
+		Record: Record{
+			Timestamp: ops[0].Timestamp,
+			Tombstone: false,
+			Key:       nil,
+			Value:     nil,
+		},
+	}
+
+	err := w.AppendWALRecord(startRecord)
+	if err != nil {
+		return err
+	}
+	w.NextSequenceID++
+
+	for _, op := range ops {
+		seq := w.NextSequenceID
+
+		txRecord := WALRecord{
+			FragType:   FULL,
+			RecType:    TRANSACTION,
+			TxnID:      txnID,
+			SequenceID: seq,
+			KeySize:    uint64(len(op.Key)),
+			ValueSize:  uint64(len(op.Value)),
+			Record: Record{
+				Timestamp: op.Timestamp,
+				Tombstone: op.Tombstone,
+				Key:       op.Key,
+				Value:     op.Value,
+			},
+		}
+
+		err = w.AppendWALRecord(txRecord)
+		if err != nil {
+			return err
+		}
+
+		w.NextSequenceID++
+	}
+
+	commitSeq := w.NextSequenceID
+
+	commitRecord := WALRecord{
+		FragType:   FULL,
+		RecType:    COMMIT,
+		TxnID:      txnID,
+		SequenceID: commitSeq,
+		KeySize:    0,
+		ValueSize:  0,
+		Record: Record{
+			Timestamp: ops[len(ops)-1].Timestamp,
+			Tombstone: false,
+			Key:       nil,
+			Value:     nil,
+		},
+	}
+
+	err = w.AppendWALRecord(commitRecord)
+	if err != nil {
+		return err
+	}
+
+	w.NextSequenceID++
+	return nil
+}
+
+func (w *WAL) DeleteRange(keys [][]byte, timestamp uint64) error {
+	ops := make([]TxnOp, 0, len(keys))
+	for _, key := range keys {
+		ops = append(ops, TxnOp{
+			Timestamp: timestamp,
+			Tombstone: true,
+			Key:       key,
+			Value:     nil,
+		})
+	}
+	return w.BatchWrite(ops)
+}
+
 func (w *WAL) Delete(key []byte, timestamp uint64) error {
 	r := Record{
 		Timestamp: timestamp,
@@ -182,16 +318,22 @@ func (w *WAL) Delete(key []byte, timestamp uint64) error {
 	return nil
 }
 
-func (w *WAL) Recover() ([]Record, error) { // doesnt call memtable, just returns list of records
+func (w *WAL) Recover() ([]Record, error) { // doesnt call memtable just return list of records
 	frags, err := w.ReadAllFragments()
 	if err != nil {
 		return nil, err
 	}
 
-	records, err := JoinFragments(frags)
+	joined, err := JoinFragments(frags)
 	if err != nil {
 		return nil, err
 	}
+
+	records, err := ApplyTransactions(joined)
+	if err != nil {
+		return nil, err
+	}
+
 	return records, nil
 }
 
@@ -261,69 +403,107 @@ func (w *WAL) ReadAllFragments() ([]WALRecord, error) {
 	return all, nil
 }
 
-func JoinFragments(frags []WALRecord) ([]Record, error) { // returns error for unfinished records, maybe should just return existing records
-	records := make([]Record, 0)
+func JoinFragments(frags []WALRecord) ([]WALRecord, error) {
+	records := make([]WALRecord, 0)
 
-	var current *Record
+	var current *WALRecord
 	inFragment := false
 
 	for _, frag := range frags {
 		switch frag.FragType {
 		case FULL:
-			if inFragment { // maybe should immediately return existing records?
-				//return nil, fmt.Errorf("found FULL while fragmented record is unfinished")
+			if inFragment {
 				return records, nil
 			}
-			records = append(records, frag.Record)
+			records = append(records, frag)
+
 		case FIRST:
 			if inFragment {
-				//return nil, fmt.Errorf("found FIRST before previous fragmented record was finished")
 				return records, nil
 			}
 
-			rec := Record{
-				Timestamp: frag.Record.Timestamp,
-				Tombstone: frag.Record.Tombstone,
-				Key:       append([]byte(nil), frag.Record.Key...),
-				Value:     append([]byte(nil), frag.Record.Value...),
+			rec := WALRecord{
+				FragType:   FULL,
+				RecType:    frag.RecType,
+				TxnID:      frag.TxnID,
+				SequenceID: frag.SequenceID,
+				KeySize:    frag.KeySize,
+				ValueSize:  frag.ValueSize,
+				Record: Record{
+					Timestamp: frag.Record.Timestamp,
+					Tombstone: frag.Record.Tombstone,
+					Key:       append([]byte(nil), frag.Record.Key...),
+					Value:     append([]byte(nil), frag.Record.Value...),
+				},
 			}
+
 			current = &rec
 			inFragment = true
 
 		case MIDDLE:
 			if !inFragment || current == nil {
-				//return nil, fmt.Errorf("found MIDDLE without active fragmented record")
 				return records, nil
 			}
 
-			current.Key = append(current.Key, frag.Record.Key...)
-			current.Value = append(current.Value, frag.Record.Value...)
+			current.Record.Key = append(current.Record.Key, frag.Record.Key...)
+			current.Record.Value = append(current.Record.Value, frag.Record.Value...)
 
 		case LAST:
 			if !inFragment || current == nil {
-				//return nil, fmt.Errorf("found LAST without active fragmented record")
 				return records, nil
 			}
-			current.Key = append(current.Key, frag.Record.Key...)
-			current.Value = append(current.Value, frag.Record.Value...)
+
+			current.Record.Key = append(current.Record.Key, frag.Record.Key...)
+			current.Record.Value = append(current.Record.Value, frag.Record.Value...)
+			current.KeySize = uint64(len(current.Record.Key))
+			current.ValueSize = uint64(len(current.Record.Value))
 
 			records = append(records, *current)
 			current = nil
 			inFragment = false
+
 		default:
-			//return nil, fmt.Errorf("invalid frag type")
 			return records, nil
-
 		}
-
 	}
-	if inFragment { // should probably ignore last unfinished fragmented record?
-		//return nil, fmt.Errorf("unfinished fragmented record at the end of WAL")
+
+	if inFragment {
 		return records, nil
 	}
 
 	return records, nil
+}
 
+func ApplyTransactions(records []WALRecord) ([]Record, error) {
+	result := make([]Record, 0)
+
+	pending := make(map[uint64][]Record)
+	started := make(map[uint64]bool)
+
+	for _, rec := range records {
+		switch rec.RecType {
+		case SINGLE:
+			result = append(result, rec.Record)
+
+		case START:
+			started[rec.TxnID] = true
+			pending[rec.TxnID] = make([]Record, 0)
+
+		case TRANSACTION:
+			if started[rec.TxnID] {
+				pending[rec.TxnID] = append(pending[rec.TxnID], rec.Record)
+			}
+
+		case COMMIT:
+			if started[rec.TxnID] {
+				result = append(result, pending[rec.TxnID]...)
+				delete(started, rec.TxnID)
+				delete(pending, rec.TxnID)
+			}
+		}
+	}
+
+	return result, nil
 }
 
 func (w *WAL) RotateSegment() error {
@@ -428,6 +608,27 @@ func (w *WAL) InitNextSequenceID() error {
 	w.NextSequenceID = maxSeq + 1
 	if w.NextSequenceID == 0 {
 		w.NextSequenceID = 1
+	}
+
+	return nil
+}
+
+func (w *WAL) InitNextTxnID() error {
+	frags, err := w.ReadAllFragments()
+	if err != nil {
+		return err
+	}
+
+	var maxTxn uint64 = 0
+	for _, frag := range frags {
+		if frag.TxnID > maxTxn {
+			maxTxn = frag.TxnID
+		}
+	}
+
+	w.NextTxnID = maxTxn + 1
+	if w.NextTxnID == 0 {
+		w.NextTxnID = 1
 	}
 
 	return nil
