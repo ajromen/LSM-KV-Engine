@@ -155,7 +155,7 @@ func (l *LSM) NewDBIterator(start, end []byte) (*iterator.DBIterator, error) {
 	if err != nil {
 		return nil, err
 	}
-	return iterator.NewDBIterator(memIt, sstIt), nil
+	return iterator.NewDBIteratorWithRangeDel(memIt, sstIt, l.memtableeManager.IsCoveredByRangeDel), nil
 }
 
 // NewRangeIterator creates a RangeIterator over [lower, upper]
