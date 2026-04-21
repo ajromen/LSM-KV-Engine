@@ -25,9 +25,11 @@ type SingleFileStorage struct {
 	file         *os.File            // single file all segments are written into
 	offset       uint64              // current write offset in the file
 	BlockManager *block.BlockManager // block manager for writing blocks
+	closed       bool
 }
 
 func (s *SingleFileStorage) Delete() {
+	s.BlockManager.InvalidateFile(s.file.Name())
 	s.Close()
 	os.Remove(s.file.Name())
 }
@@ -58,7 +60,7 @@ func OpenSingleFileStorage(filePath string) (*SingleFileStorage, error) {
 
 // WriteSegment APPENDS SEGMENT TO A FILE AND RETURNS ITS OFFSET + SIZE
 func (s *SingleFileStorage) WriteSegment(segType enums.SegmentType, data []byte) (uint64, uint32, error) {
-	if (segType == enums.SegmentData || segType == enums.SegmentIndex || segType == enums.SegmentTTLIndex) && s.BlockManager != nil {
+	if (segType == enums.SegmentData || segType == enums.SegmentIndex || segType == enums.SegmentTTLIndex || segType == enums.SegmentRangeDelIndex) && s.BlockManager != nil {
 		blockSize := uint64(s.BlockManager.BlockSize())
 		remainder := s.offset % blockSize
 		if remainder != 0 {
@@ -97,7 +99,7 @@ func (s *SingleFileStorage) WriteSegment(segType enums.SegmentType, data []byte)
 
 // ReadSegment READS SEGMENT FROM A FILE (OFFSET AND SIZE ARE FORWARDED FROM FOOTER)
 func (s *SingleFileStorage) ReadSegment(segType enums.SegmentType, offset uint64, size uint32) ([]byte, error) {
-	if (segType == enums.SegmentData || segType == enums.SegmentIndex || segType == enums.SegmentTTLIndex) && s.BlockManager != nil {
+	if (segType == enums.SegmentData || segType == enums.SegmentIndex || segType == enums.SegmentTTLIndex || segType == enums.SegmentRangeDelIndex) && s.BlockManager != nil {
 		blockSize := uint64(s.BlockManager.BlockSize())
 		blockKey := block.BlockKey{
 			FilePath: s.file.Name(),
@@ -113,17 +115,18 @@ func (s *SingleFileStorage) ReadSegment(segType enums.SegmentType, offset uint64
 }
 
 func (s *SingleFileStorage) Close() error {
-	if s.file != nil {
-		return s.file.Close()
+	if s.closed || s.file == nil {
+		return nil
 	}
-	return nil
+	s.closed = true
+	return s.file.Close()
 }
 
 func (s *SingleFileStorage) Sync() error {
-	if s.file != nil {
-		return s.file.Sync()
+	if s.closed || s.file == nil {
+		return nil
 	}
-	return nil
+	return s.file.Sync()
 }
 
 func (s *SingleFileStorage) File() *os.File {
@@ -142,6 +145,7 @@ const (
 	DictionarySegmentExtension MultiFileSegmentExtensions = ".dictionary"
 	MetadataSegmentExtension   MultiFileSegmentExtensions = ".metadata"
 	TTLIndexExtension          MultiFileSegmentExtensions = ".ttl"
+	RangeDelIndexExtension     MultiFileSegmentExtensions = ".rangedel"
 )
 
 // MultiFileStorage STORES EACH SSTABLE SEGMENT IN A SEPARATE FILE
@@ -150,6 +154,7 @@ type MultiFileStorage struct {
 	files        map[enums.SegmentType]*os.File // open file handles per segment type
 	offsets      map[enums.SegmentType]uint64   // current write offsets per segment
 	BlockManager *block.BlockManager            // block manager for writing blocks
+	closed       bool
 }
 
 func (m *MultiFileStorage) Delete() {
@@ -166,8 +171,10 @@ func (m *MultiFileStorage) Delete() {
 		FooterSegmentExtension,
 		DictionarySegmentExtension,
 		TTLIndexExtension,
+		RangeDelIndexExtension,
 	}
 	for _, ext := range extensions {
+		m.BlockManager.InvalidateFile(m.basePath + string(ext))
 		os.Remove(m.basePath + string(ext))
 	}
 }
@@ -239,6 +246,8 @@ func (m *MultiFileStorage) getFilePath(segType enums.SegmentType) string {
 		return m.basePath + string(DictionarySegmentExtension)
 	case enums.SegmentTTLIndex:
 		return m.basePath + string(TTLIndexExtension)
+	case enums.SegmentRangeDelIndex:
+		return m.basePath + string(RangeDelIndexExtension)
 	default:
 		return m.basePath
 	}
@@ -251,7 +260,7 @@ func (m *MultiFileStorage) WriteSegment(segType enums.SegmentType, data []byte) 
 		return 0, 0, err
 	}
 	offset := m.offsets[segType]
-	if (segType == enums.SegmentData || segType == enums.SegmentIndex || segType == enums.SegmentTTLIndex) && m.BlockManager != nil {
+	if (segType == enums.SegmentData || segType == enums.SegmentIndex || segType == enums.SegmentTTLIndex || segType == enums.SegmentRangeDelIndex) && m.BlockManager != nil {
 		if len(data) < m.BlockManager.BlockSize() {
 			padding := make([]byte, m.BlockManager.BlockSize()-len(data))
 			data = append(data, padding...)
@@ -282,7 +291,7 @@ func (m *MultiFileStorage) ReadSegment(segType enums.SegmentType, offset uint64,
 	if err != nil {
 		return nil, err
 	}
-	if (segType == enums.SegmentData || segType == enums.SegmentIndex || segType == enums.SegmentTTLIndex) && m.BlockManager != nil {
+	if (segType == enums.SegmentData || segType == enums.SegmentIndex || segType == enums.SegmentTTLIndex || segType == enums.SegmentRangeDelIndex) && m.BlockManager != nil {
 		blockSize := uint64(m.BlockManager.BlockSize())
 		blockKey := block.BlockKey{
 			FilePath: file.Name(),
@@ -300,6 +309,10 @@ func (m *MultiFileStorage) ReadSegment(segType enums.SegmentType, offset uint64,
 }
 
 func (m *MultiFileStorage) Close() error {
+	if m.closed {
+		return nil
+	}
+	m.closed = true
 	var lastErr error
 	for _, file := range m.files {
 		if err := file.Close(); err != nil {
@@ -310,6 +323,9 @@ func (m *MultiFileStorage) Close() error {
 }
 
 func (m *MultiFileStorage) Sync() error {
+	if m.closed {
+		return nil
+	}
 	var lastErr error
 	for _, file := range m.files {
 		if err := file.Sync(); err != nil {

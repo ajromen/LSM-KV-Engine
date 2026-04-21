@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 
+	"github.com/ajromen/LSM-KV-Engine/internal/config"
 	"github.com/ajromen/LSM-KV-Engine/internal/sstable"
 )
 
@@ -21,38 +22,48 @@ type LeveledCompaction struct {
 func (l LeveledCompaction) Compact(manager *sstable.SSTableManager) error {
 	for i := 0; i < len(manager.Layers); i++ {
 		size := manager.Layers[i].GetSize()
-		print(size, " ", l.L1MaxBytes*int64(math.Pow(float64(l.LevelSizeMultiplier), float64(i))))
-		if size < l.L1MaxBytes*int64(math.Pow(float64(l.LevelSizeMultiplier), float64(i))) {
-			continue
-		}
-		if i == l.MaxHeight-1 && len(manager.Layers[i].SSTables) > 1 { // last allowed layer
-			err := manager.MergeSSTables(manager.Layers[i].SSTables, i, true)
-			if err != nil {
-				return err
-			}
-			return nil
-		}
-		pickedCurrent := l.pickFromCurrent(manager.Layers[i].SSTables)
-		// there is no next layer
+		maxSize := l.L1MaxBytes * int64(math.Pow(float64(l.LevelSizeMultiplier), float64(i)))
 
-		if i+1 == len(manager.Layers) {
-			err := manager.MoveSSTable(pickedCurrent, min(i+1, l.MaxHeight-1))
-			if err != nil {
-				return err
-			}
-			break
+		if size < maxSize {
+			continue
 		}
-		pickedNextLayer := l.pickFromNext(pickedCurrent, manager.Layers[i+1].SSTables)
-		fmt.Printf("Compacting %d SSTables at layer %d\n", len(pickedNextLayer)+1, i)
-		// if it doesn't have overlapping just move it layer down
-		if len(pickedNextLayer) == 0 {
-			err := manager.MoveSSTable(pickedCurrent, min(i+1, l.MaxHeight-1))
-			if err != nil {
+
+		isLastLayer := i == l.MaxHeight-1
+		if isLastLayer {
+			if len(manager.Layers[i].SSTables) > 1 {
+				return manager.MergeSSTables(manager.Layers[i].SSTables, i, true)
+			}
+			continue
+		}
+
+		pickedCurrent := l.pickFromCurrent(manager.Layers[i].SSTables)
+		if pickedCurrent == nil {
+			continue
+		}
+
+		targetLayer := min(i+1, l.MaxHeight-1)
+
+		if i+1 >= len(manager.Layers) {
+			if err := manager.MoveSSTable(pickedCurrent, targetLayer); err != nil {
 				return err
 			}
 			continue
 		}
-		err := manager.MergeSSTables(append(pickedNextLayer, pickedCurrent), min(i+1, l.MaxHeight-1), false)
+
+		pickedNextLayer := l.pickFromNext(pickedCurrent, manager.Layers[i+1].SSTables)
+
+		if config.GetSettings().Debug {
+			fmt.Printf("Compacting %d SSTables at layer %d\n", len(pickedNextLayer)+1, i)
+		}
+
+		if len(pickedNextLayer) == 0 {
+			if err := manager.MoveSSTable(pickedCurrent, targetLayer); err != nil {
+				return err
+			}
+			continue
+		}
+
+		err := manager.MergeSSTables(append(pickedNextLayer, pickedCurrent), targetLayer, false)
 		if err != nil {
 			return err
 		}
@@ -97,14 +108,18 @@ func (s SizeTiredCompaction) Compact(manager *sstable.SSTableManager) error {
 		readers := make([]*sstable.SSTableReader, len(manager.Layers[i].SSTables))
 		copy(readers, manager.Layers[i].SSTables)
 		if i+1 == s.MaxHeight {
-			fmt.Printf("Compacting %d SSTables at layer %d\n", len(readers), i)
+			if config.GetSettings().Debug {
+				fmt.Printf("Compacting %d SSTables at layer %d\n", len(readers), i)
+			}
 			err := manager.MergeSSTables(readers, i, true)
 			if err != nil {
 				return err
 			}
 			return nil
 		}
-		fmt.Printf("Compacting %d SSTables at layer %d\n", len(readers), i)
+		if config.GetSettings().Debug {
+			fmt.Printf("Compacting %d SSTables at layer %d\n", len(readers), i)
+		}
 		err := manager.MergeSSTables(readers, min(i+1, s.MaxHeight-1), false)
 		if err != nil {
 			return err

@@ -6,6 +6,7 @@ import (
 
 	"github.com/ajromen/LSM-KV-Engine/internal/block"
 	"github.com/ajromen/LSM-KV-Engine/internal/encoders"
+	"github.com/ajromen/LSM-KV-Engine/internal/enums"
 	"github.com/ajromen/LSM-KV-Engine/internal/iterator"
 	"github.com/ajromen/LSM-KV-Engine/internal/structures"
 )
@@ -110,6 +111,12 @@ func (it *SSTableIteratorRaw) SeekToLast() {
 // Seek positions the iterator to the first record >= target
 // this uses the sstable indexing structure - Summary -> Index -> Data
 func (it *SSTableIteratorRaw) Seek(target Record) {
+	if it.src.reader.SummarySegment == nil {
+		if err := it.src.reader.loadSummary(); err != nil {
+			it.valid = false
+			return
+		}
+	}
 	// find index block containing the key from summary
 	indexBlockNum := it.src.reader.SummarySegment.FindIndexBlockNumber(target.Key)
 	if indexBlockNum < 0 {
@@ -145,8 +152,8 @@ func (it *SSTableIteratorRaw) Seek(target Record) {
 		it.current = &rec
 		it.valid = true
 	} else {
-		it.current = nil
-		it.valid = false
+		it.blockIdx++
+		it.advanceBlock()
 	}
 }
 
@@ -249,7 +256,7 @@ func (it *SSTableIterator) SeekToLast() {
 	var prevKey []byte
 	for it.raw.Valid() {
 		rec := it.raw.Key()
-		if !rec.Tombstone && !bytes.Equal(rec.Key, prevKey) {
+		if rec.OpType != enums.OpTypeDel && !bytes.Equal(rec.Key, prevKey) {
 			cp := rec
 			last = &cp
 			prevKey = append([]byte(nil), rec.Key...)
@@ -290,7 +297,7 @@ func (it *SSTableIterator) advance(prevKey []byte) {
 			it.raw.Next()
 			continue
 		}
-		if rec.Tombstone {
+		if rec.OpType == enums.OpTypeDel {
 			prevKey = append([]byte(nil), rec.Key...)
 			it.raw.Next()
 			continue
@@ -400,6 +407,7 @@ type SSTableMergeIterator struct {
 	raw     *SSTableMergeIteratorRaw
 	current *Record
 	valid   bool
+	checker *ForwardRangeDelChecker
 }
 
 var _ iterator.Iterator[Record] = (*SSTableMergeIterator)(nil)
@@ -409,17 +417,29 @@ func NewSSTableMergeIterator(readers []*SSTableReader, mergeStructure byte) (*SS
 	if err != nil {
 		return nil, err
 	}
-	m := &SSTableMergeIterator{raw: raw}
+	m := &SSTableMergeIterator{
+		raw:     raw,
+		checker: NewForwardRangeDelChecker(readers),
+	}
 	m.advance(nil)
 	return m, nil
 }
 
-func (m *SSTableMergeIterator) Valid() bool   { return m.valid }
-func (m *SSTableMergeIterator) Key() Record   { return *m.current }
-func (m *SSTableMergeIterator) Value() Record { return *m.current }
+func (m *SSTableMergeIterator) Valid() bool {
+	return m.valid
+}
+
+func (m *SSTableMergeIterator) Key() Record {
+	return *m.current
+}
+
+func (m *SSTableMergeIterator) Value() Record {
+	return *m.current
+}
 
 func (m *SSTableMergeIterator) SeekToFirst() {
 	m.raw.SeekToFirst()
+	m.checker.SeekToFirst()
 	m.advance(nil)
 }
 
@@ -429,7 +449,7 @@ func (m *SSTableMergeIterator) SeekToLast() {
 	var prevKey []byte
 	for m.raw.Valid() {
 		rec := m.raw.Key()
-		if !rec.Tombstone && !bytes.Equal(rec.Key, prevKey) {
+		if rec.OpType != enums.OpTypeDel && !bytes.Equal(rec.Key, prevKey) {
 			cp := rec
 			last = &cp
 			prevKey = rec.Key
@@ -446,6 +466,7 @@ func (m *SSTableMergeIterator) SeekToLast() {
 
 func (m *SSTableMergeIterator) Seek(target Record) {
 	m.raw.Seek(target)
+	m.checker.Seek(target.Key)
 	m.advance(nil)
 }
 
@@ -479,7 +500,12 @@ func (m *SSTableMergeIterator) advance(prevKey []byte) {
 			m.skipCurrentKey()
 			continue
 		}
-		if rec.Tombstone {
+		if rec.OpType == enums.OpTypeDel {
+			prevKey = append([]byte(nil), rec.Key...)
+			m.skipCurrentKey()
+			continue
+		}
+		if m.checker.ShouldDelete(rec.Key, rec.SeqId) {
 			prevKey = append([]byte(nil), rec.Key...)
 			m.skipCurrentKey()
 			continue
@@ -492,3 +518,27 @@ func (m *SSTableMergeIterator) advance(prevKey []byte) {
 	m.current = nil
 	m.valid = false
 }
+
+// sstableIteratorSeekWrapper wraps SSTableMergeIterator to satisfy TypedSeekIterator
+type sstableIteratorSeekWrapper struct {
+	inner *SSTableMergeIterator
+}
+
+func (w *sstableIteratorSeekWrapper) Valid() bool   { return w.inner.Valid() }
+func (w *sstableIteratorSeekWrapper) SeekToFirst()  { w.inner.SeekToFirst() }
+func (w *sstableIteratorSeekWrapper) SeekToLast()   { w.inner.SeekToLast() }
+func (w *sstableIteratorSeekWrapper) Next()         { w.inner.Next() }
+func (w *sstableIteratorSeekWrapper) Key() Record   { return w.inner.Key() }
+func (w *sstableIteratorSeekWrapper) Seek(r Record) { w.inner.Seek(r) }
+
+// emptyEntryIterator is an always-invalid iterator returned when no readers match
+type emptyEntryIterator struct{}
+
+func (e emptyEntryIterator) Valid() bool           { return false }
+func (e emptyEntryIterator) SeekToFirst()          {}
+func (e emptyEntryIterator) SeekToLast()           {}
+func (e emptyEntryIterator) Seek(_ iterator.Entry) {}
+func (e emptyEntryIterator) Next()                 {}
+func (e emptyEntryIterator) Prev()                 {}
+func (e emptyEntryIterator) Key() iterator.Entry   { return iterator.Entry{} }
+func (e emptyEntryIterator) Value() iterator.Entry { return iterator.Entry{} }

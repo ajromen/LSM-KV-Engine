@@ -13,26 +13,30 @@ import (
 	"os"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/block"
+	"github.com/ajromen/LSM-KV-Engine/internal/config"
 	"github.com/ajromen/LSM-KV-Engine/internal/encoders"
 	"github.com/ajromen/LSM-KV-Engine/internal/enums"
 	"github.com/ajromen/LSM-KV-Engine/internal/shared"
+	"github.com/ajromen/LSM-KV-Engine/internal/utils"
 )
 
 // SSTableReader allows reading an SSTable file, accesing singular records and validating data integrity
 type SSTableReader struct {
-	filePath        string              // file path of given sstable file (base path if multi file format)
-	Id              int                 // SSTable segment id
-	Layer           int                 // number of the lsm layer
-	SizeBytes       int64               //file size in bytes
-	storage         SegmentStorage      // low-level reading of segments
-	blockManager    *block.BlockManager // reading and decoding data blocks
-	footer          *Footer             // footer of given sstable
-	Metadata        *Metadata
-	SummarySegment  *SummarySegment  // summary segment (read into RAM)
-	filterSegment   *FilterSegment   // filter segment (read into RAM)
-	merkleTree      *MerkleTree      // merkle tree - metadata segment (read into RAM)
-	TTLIndexSegment *TTLIndexSegment // read once
-	valueDecoder    *encoders.AdaptiveEncoder
+	filePath            string              // file path of given sstable file (base path if multi file format)
+	Id                  int                 // SSTable segment id
+	Layer               int                 // number of the lsm layer
+	SizeBytes           int64               //file size in bytes
+	storage             SegmentStorage      // low-level reading of segments
+	blockManager        *block.BlockManager // reading and decoding data blocks
+	footer              *Footer             // footer of given sstable
+	Metadata            *Metadata
+	SummarySegment      *SummarySegment  // summary segment (read into RAM)
+	filterSegment       *FilterSegment   // filter segment (read into RAM)
+	merkleTree          *MerkleTree      // merkle tree - metadata segment (read into RAM)
+	TTLIndexSegment     *TTLIndexSegment // read once
+	valueDecoder        *encoders.AdaptiveEncoder
+	fragmentedRangeDels []shared.RangeDelEntry
+	rangeDelLoaded      bool
 }
 
 type ReaderOptions struct {
@@ -121,22 +125,42 @@ func NewSSTableReader(id int, filePath string, format enums.SSTableFormat, layer
 
 // NewSSTableReaderFromWriter make sure writer finalize has been run before
 func NewSSTableReaderFromWriter(w *SSTableWriter, id int) (*SSTableReader, error) {
-	if err := w.storage.Restart(); err != nil {
-		return nil, fmt.Errorf("failed to restart storage: %w", err)
+	if err := w.storage.Sync(); err != nil {
+		return nil, fmt.Errorf("failed to sync storage: %w", err)
+	}
+	if err := w.storage.Close(); err != nil {
+		return nil, fmt.Errorf("failed to close writer storage: %w", err)
 	}
 
+	format := config.GetSettings().SSTable.Format
+	var newStorage SegmentStorage
+	var err error
+	switch format {
+	case enums.FormatSingleFile:
+		newStorage, err = OpenSingleFileStorage(w.filePath)
+	case enums.FormatMultiFile:
+		newStorage, err = OpenMultiFileStorage(w.filePath)
+	default:
+		return nil, fmt.Errorf("unsupported format")
+	}
+	if err != nil {
+		return nil, err
+	}
+	newStorage.SetBlockManager(w.blockManager)
+
 	r := &SSTableReader{
-		storage:        w.storage,
-		Layer:          w.Layer,
-		filePath:       w.filePath,
-		blockManager:   w.blockManager,
-		merkleTree:     w.merkleTree,
-		filterSegment:  w.filterSegment,
-		footer:         w.footer,
-		SummarySegment: w.summarySegment,
-		valueDecoder:   w.valueEncoder, // TODO check encoder is decoder
-		Metadata:       w.metadataSegment,
-		Id:             id,
+		storage:         newStorage,
+		Layer:           w.Layer,
+		filePath:        w.filePath,
+		blockManager:    w.blockManager,
+		merkleTree:      w.merkleTree,
+		filterSegment:   w.filterSegment,
+		footer:          w.footer,
+		SummarySegment:  w.summarySegment,
+		valueDecoder:    w.valueEncoder,
+		Metadata:        w.metadataSegment,
+		Id:              id,
+		TTLIndexSegment: w.ttlIndexSegment,
 	}
 	switch s := r.storage.(type) {
 	case *SingleFileStorage:
@@ -152,7 +176,6 @@ func NewSSTableReaderFromWriter(w *SSTableWriter, id int) (*SSTableReader, error
 		}
 		r.SizeBytes = info.Size()
 	}
-
 	return r, nil
 }
 
@@ -172,11 +195,15 @@ func (r *SSTableReader) loadSummary() error {
 
 func (r *SSTableReader) GetTTLEntries() ([]shared.TTLEntry, error) {
 	entries := make([]shared.TTLEntry, 0)
-
+	if r.footer.TTLIndexHandler.Size == 0 {
+		return entries, nil
+	}
 	blockSize := uint64(r.blockManager.BlockSize())
+	baseOffset := r.footer.TTLIndexHandler.Offset
+	totalSize := uint64(r.footer.TTLIndexHandler.Size)
 
-	for off := uint64(0); uint32(off) < r.footer.TTLIndexHandler.Size; off += blockSize { // ovo je pakao sta je ovo sto se ni jedan int ne poklapa
-		buf, err := r.storage.ReadSegment(enums.SegmentTTLIndex, 0, uint32(blockSize))
+	for off := uint64(0); off < totalSize; off += blockSize {
+		buf, err := r.storage.ReadSegment(enums.SegmentTTLIndex, baseOffset+off, uint32(blockSize))
 		if err != nil {
 			return nil, err
 		}
@@ -184,9 +211,25 @@ func (r *SSTableReader) GetTTLEntries() ([]shared.TTLEntry, error) {
 		if err != nil {
 			return nil, err
 		}
+		entries = append(entries, b.Entries...)
+	}
+	return entries, nil
+}
+
+func (r *SSTableReader) GetRangeDelEntries() ([]shared.RangeDelEntry, error) {
+	entries := make([]shared.RangeDelEntry, 0)
+	blockSize := uint64(r.blockManager.BlockSize())
+	for off := uint64(0); uint32(off) < r.footer.RangeDelIndexHandler.Size; off += blockSize {
+		buf, err := r.storage.ReadSegment(enums.SegmentRangeDelIndex, 0, uint32(blockSize))
+		if err != nil {
+			return nil, err
+		}
+		b, err := DecodeRangeDelIndexBlock(buf)
+		if err != nil {
+			return nil, err
+		}
 		entries = append(b.Entries)
 	}
-
 	return entries, nil
 }
 
@@ -265,6 +308,37 @@ func (r *SSTableReader) loadDictionary() error {
 	}
 	r.valueDecoder = decoder
 	return nil
+}
+
+func (r *SSTableReader) LoadRangeDels() error {
+	if r.rangeDelLoaded {
+		return nil
+	}
+	r.rangeDelLoaded = true
+	if r.footer.RangeDelIndexHandler.Size == 0 {
+		return nil
+	}
+	blockSize := uint64(r.blockManager.BlockSize())
+	totalSize := uint64(r.footer.RangeDelIndexHandler.Size)
+	baseOffset := r.footer.RangeDelIndexHandler.Offset
+	var all []shared.RangeDelEntry
+	for off := uint64(0); off < totalSize; off += blockSize {
+		buf, err := r.storage.ReadSegment(enums.SegmentRangeDelIndex, baseOffset+off, uint32(blockSize))
+		if err != nil {
+			return err
+		}
+		blk, err := DecodeRangeDelIndexBlock(buf)
+		if err != nil {
+			return err
+		}
+		all = append(all, blk.Entries...)
+	}
+	r.fragmentedRangeDels = utils.FragmentRangeTombstones(all)
+	return nil
+}
+
+func (r *SSTableReader) IsCoveredByRangeDel(key []byte, keySeqId uint64) bool {
+	return utils.IsCoveredByRangeTombstone(r.fragmentedRangeDels, key, keySeqId)
 }
 
 // Get looks up a record by key in the SSTable in given order:
@@ -350,10 +424,44 @@ func (r *SSTableReader) Get(key []byte) (*Record, error) {
 	if !bytes.Equal(rec.Key, key) {
 		return nil, nil
 	}
+
+	// check whether it is deleted by range delete
+	rangeEntries, err := r.GetRangeDelEntries()
+	if err != nil {
+		return nil, err
+	}
+	r.fragmentedRangeDels = utils.FragmentRangeTombstones(rangeEntries)
+	if r.IsCoveredByRangeDel(key, rec.SeqId) {
+		return nil, nil
+	}
+
 	return &Record{
 		SeqId:     rec.SeqId,
-		Tombstone: rec.Tombstone,
+		OpType:    rec.OpType,
 		Key:       rec.Key,
 		Value:     rec.Value,
+		ExpiresAt: rec.ExpiresAt,
 	}, nil
+}
+
+func (reader *SSTableReader) OverlapsRange(start, end []byte) bool {
+	if reader == nil || reader.SummarySegment == nil {
+		return true
+	}
+
+	minKey := reader.Metadata.GetBytes(FieldMinKey)
+	maxKey := reader.Metadata.GetBytes(FieldMaxKey)
+
+	if len(minKey) == 0 || len(maxKey) == 0 {
+		return true
+	}
+
+	if len(end) > 0 && bytes.Compare(minKey, end) > 0 {
+		return false
+	}
+	if len(start) > 0 && bytes.Compare(maxKey, start) < 0 {
+		return false
+	}
+
+	return true
 }

@@ -170,7 +170,11 @@ func NewRawIterator(iterators []iterator.Iterator[MemtableEntry], mergeStructure
 	}
 	active := []iterator.Iterator[MemtableEntry]{}
 	for _, it := range iterators {
-		if it != nil && it.Valid() {
+		if it == nil {
+			continue
+		}
+		it.SeekToFirst()
+		if it.Valid() {
 			active = append(active, it)
 		}
 	}
@@ -260,6 +264,11 @@ func (i *RawIterator) SeekToLast() {
 
 // Seek positions all iterators at key and recomputes winner
 func (i *RawIterator) Seek(key MemtableEntry) {
+	if i.structure == nil {
+		i.current = nil
+		i.valid = false
+		return
+	}
 	for _, it := range i.structure.Iterators() {
 		it.Seek(key)
 	}
@@ -404,6 +413,7 @@ func (m *MergedMemtableIterator) advance() {
 	for m.rawIterator.Valid() {
 		entry := m.rawIterator.Key()
 		if entry.OpType == enums.OpTypeDel {
+			m.prevKey = append([]byte(nil), entry.Key...)
 			m.rawIterator.Next()
 			continue
 		}

@@ -1,4 +1,4 @@
-package cli
+package flags
 
 import (
 	"flag"
@@ -6,17 +6,19 @@ import (
 )
 
 type FLags struct {
-	ConfigPath             *string
-	Debug                  *bool
-	MemtableMaxSize        *int
-	MemtableMaxSizeB       *uint64
-	MemtableType           *string
-	Instances              *int
-	SSTableFormat          *string
-	BlockCacheMaxBlocks    *int
-	LSMCompactionAlgorithm *string
-	TTLInMemoryTTL         *bool
-	TTLRefreshRate         *uint64
+	ConfigPath                 *string
+	Debug                      *bool
+	MemtableMaxSize            *int
+	MemtableMaxSizeB           *uint64
+	MemtableType               *string
+	Instances                  *int
+	SSTableFormat              *string
+	BlockCacheMaxBlocks        *int
+	LSMCompactionAlgorithm     *string
+	TTLInMemoryTTL             *bool
+	TTLRefreshRate             *uint64
+	TokenBucketMaxTokens       *int64
+	TokenBucketResetIntervalMs *int64
 }
 
 func ParseFlags() *FLags {
@@ -31,6 +33,8 @@ func ParseFlags() *FLags {
 	var LSMCompactionAlgorithmOpt OptionalString
 	var TTLInMemoryTTLOpt OptionalBool
 	var TTLRefreshRateOpt OptionalUInt64
+	var tokenBucketMaxTokensOpt OptionalInt64
+	var tokenBucketResetIntervalMsOpt OptionalInt64
 
 	flagString(&configPathOpt, "config", "Path to config file")
 	flagString(&configPathOpt, "c", "Path to config file")
@@ -46,20 +50,24 @@ func ParseFlags() *FLags {
 	flagString(&LSMCompactionAlgorithmOpt, "lsm-compaction", "LSM compaction algorithm: size-tiered, leveled")
 	flagBool(&TTLInMemoryTTLOpt, "ttl-in-memory", "Keep {Key,TTL} in memory and allow expiry notifications")
 	flagUint64(&TTLRefreshRateOpt, "ttl-refresh-rate", "Timer in ms for checking expiring keys (Works only if ttl-in-memory=true")
+	flagInt64(&tokenBucketMaxTokensOpt, "token-bucket-max-tokens", "Max tokens in token bucket (0 = disabled)")
+	flagInt64(&tokenBucketResetIntervalMsOpt, "token-bucket-reset-ms", "Token bucket reset interval in milliseconds")
 
 	flag.Parse()
 
 	return &FLags{
-		ConfigPath:             configPathOpt.Get(),
-		Debug:                  debugOpt.Get(),
-		MemtableMaxSize:        mtMaxSizeOpt.Get(),
-		MemtableMaxSizeB:       mtMaxSizeBOpt.Get(),
-		MemtableType:           mtTypeOpt.Get(),
-		Instances:              instancesOpt.Get(),
-		SSTableFormat:          sstFormatOpt.Get(),
-		LSMCompactionAlgorithm: LSMCompactionAlgorithmOpt.Get(),
-		TTLInMemoryTTL:         TTLInMemoryTTLOpt.Get(),
-		TTLRefreshRate:         TTLRefreshRateOpt.Get(),
+		ConfigPath:                 configPathOpt.Get(),
+		Debug:                      debugOpt.Get(),
+		MemtableMaxSize:            mtMaxSizeOpt.Get(),
+		MemtableMaxSizeB:           mtMaxSizeBOpt.Get(),
+		MemtableType:               mtTypeOpt.Get(),
+		Instances:                  instancesOpt.Get(),
+		SSTableFormat:              sstFormatOpt.Get(),
+		LSMCompactionAlgorithm:     LSMCompactionAlgorithmOpt.Get(),
+		TTLInMemoryTTL:             TTLInMemoryTTLOpt.Get(),
+		TTLRefreshRate:             TTLRefreshRateOpt.Get(),
+		TokenBucketMaxTokens:       tokenBucketMaxTokensOpt.Get(),
+		TokenBucketResetIntervalMs: tokenBucketResetIntervalMsOpt.Get(),
 	}
 }
 

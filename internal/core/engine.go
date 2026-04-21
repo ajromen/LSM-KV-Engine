@@ -2,7 +2,6 @@ package core
 
 import (
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"time"
@@ -10,20 +9,12 @@ import (
 	"github.com/ajromen/LSM-KV-Engine/internal/config"
 	"github.com/ajromen/LSM-KV-Engine/internal/enums"
 	"github.com/ajromen/LSM-KV-Engine/internal/lsm"
+	"github.com/ajromen/LSM-KV-Engine/internal/notifier"
 	"github.com/ajromen/LSM-KV-Engine/internal/sequence"
 	"github.com/ajromen/LSM-KV-Engine/internal/shared"
-	"github.com/ajromen/LSM-KV-Engine/internal/sstable"
+	"github.com/ajromen/LSM-KV-Engine/internal/token_bucket"
 	"github.com/ajromen/LSM-KV-Engine/internal/ttl"
 )
-
-type Engine struct {
-	config      *config.Config
-	lsm         *lsm.LSM
-	seqGen      *sequence.SequenceGenerator
-	ttlJanitor  *ttl.Janitor
-	inMemoryTTL bool
-	//wal
-}
 
 func NewEngine() (*Engine, error) {
 	dataDir := config.GetSettings().SavePath
@@ -34,19 +25,58 @@ func NewEngine() (*Engine, error) {
 	if err != nil {
 		return nil, err
 	}
-	engine := Engine{lsm: lsmTree, inMemoryTTL: config.GetSettings().TTL.InMemoryTTL}
+	engine := Engine{lsm: lsmTree, inMemoryTTL: config.GetSettings().TTL.InMemoryTTL, notifier: notifier.NewNotifier()}
+
+	engine.recover()
+
+	cfg := config.GetSettings().TokenBucket
+	if cfg.MaxTokens > 0 {
+		existing, found, err := lsmTree.Get([]byte(token_bucket.InternalKey))
+		if err == nil && found {
+			tb := token_bucket.Deserialize(existing)
+			if tb != nil {
+				engine.tokenBucket = tb
+			}
+		}
+
+		if engine.tokenBucket == nil {
+			engine.tokenBucket = token_bucket.New(cfg.MaxTokens, cfg.ResetIntervalMs)
+			engine.persistTokenBucket()
+		}
+	}
 
 	if engine.inMemoryTTL {
-		engine.ttlJanitor = ttl.NewTTLJanitor(engine.Delete)
+		engine.ttlJanitor = ttl.NewTTLJanitor(engine.notifier)
 		heap, index, err := engine.lsm.GetAllTTLFomSST()
 		if err != nil {
 			return nil, err
 		}
 		engine.ttlJanitor.Init(heap, index)
+		go engine.ttlJanitor.Run()
 	}
-
-	engine.recover()
+	if config.GetSettings().Debug {
+		print("Engine created\n")
+	}
 	return &engine, nil
+}
+
+func (engine *Engine) persistTokenBucket() {
+	if engine.tokenBucket == nil {
+		return
+	}
+	seqId := engine.seqGen.Next()
+	engine.lsm.Put([]byte(token_bucket.InternalKey), engine.tokenBucket.Serialize(), seqId, enums.OpTypePut)
+}
+
+func (engine *Engine) checkRateLimit() error {
+	if engine.tokenBucket == nil || !engine.tokenBucket.IsEnabled() {
+		return nil
+	}
+	if !engine.tokenBucket.TryConsume() {
+		return fmt.Errorf("rate limit exceeded: too many requests")
+	}
+	engine.persistTokenBucket()
+	return nil
 }
 
 // check manifest
@@ -59,9 +89,19 @@ func (engine *Engine) recover() {
 }
 
 func (engine *Engine) Put(key []byte, value []byte) {
+	if err := engine.checkRateLimit(); err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	if string(key) == token_bucket.InternalKey {
+		return
+	}
+
 	seqId := engine.seqGen.Next()
 	//wal
 	engine.lsm.Put(key, value, seqId, enums.OpTypePut)
+	engine.notifier.NotifyPut(key, value)
 }
 
 func (engine *Engine) PutWithTTL(key []byte, value []byte, ttl int64) {
@@ -71,16 +111,24 @@ func (engine *Engine) PutWithTTL(key []byte, value []byte, ttl int64) {
 		engine.ttlJanitor.AddTTL(shared.TTLEntry{ExpiresAt: time.Now().UnixMilli() + ttl, Key: key})
 	}
 	engine.lsm.PutWithTTL(key, value, seqId, enums.OpTypePut, ttl)
+	engine.notifier.NotifyPut(key, value)
 }
 
 func (engine *Engine) Get(key []byte) ([]byte, bool, error) {
+	if err := engine.checkRateLimit(); err != nil {
+		return nil, false, err
+	}
+
+	if string(key) == token_bucket.InternalKey {
+		return nil, false, fmt.Errorf("key not found")
+	}
+
 	value, found, err := engine.lsm.Get(key)
 	return value, found, err
 }
 
 func (engine *Engine) GetTTL(key []byte) (int64, bool, error) {
 	if !config.GetSettings().TTL.InMemoryTTL {
-
 		value, found, err := engine.lsm.GetTTL(key)
 		return value, found, err
 	}
@@ -89,17 +137,33 @@ func (engine *Engine) GetTTL(key []byte) (int64, bool, error) {
 }
 
 func (engine *Engine) Delete(key []byte) {
+	if err := engine.checkRateLimit(); err != nil {
+		fmt.Println(err)
+		return
+	}
+	if string(key) == token_bucket.InternalKey {
+		return
+	}
+
+	if config.GetSettings().Debug {
+		fmt.Printf("\nDeleting key %s\n", string(key))
+	}
 	seqId := engine.seqGen.Next()
 	// wal
 	engine.lsm.Put(key, nil, seqId, enums.OpTypeDel)
+	engine.notifier.NotifyDelete(key)
 }
 
 func (engine *Engine) RangeDelete(startKey []byte, endKey []byte) {
 	seqId := engine.seqGen.Next()
 	engine.lsm.Put(startKey, endKey, seqId, enums.OpTypeRangeDel)
+	engine.notifier.NotifyDeleteRange(startKey, endKey)
 }
 
 func (engine *Engine) Close() error {
+	if engine.inMemoryTTL {
+		engine.ttlJanitor.Stop()
+	}
 	//wal finish write
 	err := engine.lsm.Finish()
 	if err != nil {
@@ -119,67 +183,17 @@ func (engine *Engine) ClearAll() error {
 	if err := os.Remove(manifestPath); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("clear-all: failed to remove manifest: %w", err)
 	}
-	engine.ttlJanitor.ClearAll()
+	if engine.inMemoryTTL {
+		engine.ttlJanitor.ClearAll()
+	}
 
 	return nil
 }
 
-func (engine *Engine) DataRaw(index int) {
-	basePath := fmt.Sprintf(
-		"/home/rikic/.local/share/lsm-kv-engine/%06d.sst",
-		index,
-	)
-	dataPath := basePath + ".data"
-	var filePath string
-	var readSize int64
-	if _, err := os.Stat(dataPath); err == nil {
-		filePath = dataPath
+func (engine *Engine) Subscribe(lower, upper string, bufferSize int) *notifier.Listener {
+	return engine.notifier.Subscribe([]byte(lower), []byte(upper), bufferSize)
+}
 
-		info, err := os.Stat(dataPath)
-		if err != nil {
-			fmt.Println("stat error:", err)
-			return
-		}
-		readSize = info.Size()
-
-	} else {
-		filePath = basePath
-
-		f, err := os.Open(filePath)
-		if err != nil {
-			fmt.Println("open error:", err)
-			return
-		}
-		defer f.Close()
-		info, err := f.Stat()
-		if err != nil {
-			fmt.Println("stat error:", err)
-			return
-		}
-		footerBuf := make([]byte, sstable.FooterSize)
-		_, err = f.ReadAt(footerBuf, info.Size()-sstable.FooterSize)
-		if err != nil {
-			fmt.Println("footer read error:", err)
-			return
-		}
-		footer := &sstable.Footer{}
-		footer.Decode(footerBuf)
-		readSize = int64(footer.FilterHandler.Offset)
-	}
-	f, err := os.Open(filePath)
-	if err != nil {
-		fmt.Println("open error:", err)
-		return
-	}
-	defer f.Close()
-	buf := make([]byte, readSize)
-	n, err := f.ReadAt(buf, 0)
-	if err != nil && err != io.EOF {
-		fmt.Println("read error:", err)
-		return
-	}
-	buf = buf[:n]
-	fmt.Println("File:", filePath)
-	fmt.Println("Data bytes:", buf)
-	fmt.Println("-----")
+func (engine *Engine) Unsubscribe(l *notifier.Listener) {
+	engine.notifier.Unsubscribe(l)
 }

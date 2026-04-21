@@ -25,3 +25,8 @@ func Compare[T any](a, b Iterator[T], cmp func(a, b T) int) Iterator[T] {
 	}
 	return b
 }
+
+type CurrentIterator[T any] interface {
+	Iterator[T]
+	Current() T
+}

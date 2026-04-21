@@ -15,7 +15,7 @@ import (
 
 var allTypes = []enums.MemTableType{enums.BTreeMemTable, enums.SkiplistMemTable, enums.HashMapMemTable}
 
-func newMemtable(t *testing.T, mt enums.MemTableType, maxEntries int, maxBytes uint64, handler func([]MemtableEntry)) *MemtableManager {
+func newMemtable(t *testing.T, mt enums.MemTableType, maxEntries int, maxBytes uint64, handler func([]MemtableEntry, []MemtableEntry)) *MemtableManager {
 	t.Helper()
 	factory := NewFactory(config.GetSettings().Memtable)
 	return NewMemtableManager(5, 1, factory, handler)
@@ -32,7 +32,7 @@ func TestPutGet(t *testing.T) {
 			m := newMemtable(t, mt, 100, 1<<20, nil)
 			keys := []string{"key1", "key2", "key3", "key4", "key5"}
 			for i, k := range keys {
-				m.Put([]byte(k), []byte(fmt.Sprintf("value%d", i+1)), 10, false)
+				m.Put([]byte(k), []byte(fmt.Sprintf("value%d", i+1)), 10, enums.OpTypePut)
 			}
 			for i, k := range keys {
 				got, ok := m.Get([]byte(k))
@@ -40,7 +40,7 @@ func TestPutGet(t *testing.T) {
 					t.Fatalf("Get(%q): not found", k)
 				}
 				want := fmt.Sprintf("value%d", i+1)
-				if !bytes.Equal(got, []byte(want)) {
+				if !bytes.Equal(got.Value, []byte(want)) {
 					t.Errorf("Get(%q) = %q, want %q", k, got, want)
 				}
 			}
@@ -70,13 +70,13 @@ func TestNewerSeqIdWins(t *testing.T) {
 		mt := mt
 		t.Run(string(mt), func(t *testing.T) {
 			m := newMemtable(t, mt, 100, 1<<20, nil)
-			m.Put([]byte("key"), []byte("old"), 10, false)
-			m.Put([]byte("key"), []byte("new"), 20, false)
+			m.Put([]byte("key"), []byte("old"), 10, enums.OpTypePut)
+			m.Put([]byte("key"), []byte("new"), 20, enums.OpTypePut)
 			got, ok := m.Get([]byte("key"))
 			if !ok {
 				t.Fatal("Get: not found")
 			}
-			if !bytes.Equal(got, []byte("new")) {
+			if !bytes.Equal(got.Value, []byte("new")) {
 				t.Errorf("got %q, want %q", got, "new")
 			}
 		})
@@ -89,13 +89,13 @@ func TestOlderSeqIdDoesNotOverwrite(t *testing.T) {
 		mt := mt
 		t.Run(string(mt), func(t *testing.T) {
 			m := newMemtable(t, mt, 100, 1<<20, nil)
-			m.Put([]byte("key"), []byte("old"), 10, false)
-			m.Put([]byte("key"), []byte("new"), 20, false)
+			m.Put([]byte("key"), []byte("old"), 10, enums.OpTypePut)
+			m.Put([]byte("key"), []byte("new"), 20, enums.OpTypePut)
 			got, ok := m.Get([]byte("key"))
 			if !ok {
 				t.Fatal("Get: not found")
 			}
-			if !bytes.Equal(got, []byte("new")) {
+			if !bytes.Equal(got.Value, []byte("new")) {
 				t.Errorf("older write overwrote newer: got %q, want %q", got, "new")
 			}
 		})
@@ -116,8 +116,8 @@ func TestTombstoneHidesEntry(t *testing.T) {
 		mt := mt
 		t.Run(string(mt), func(t *testing.T) {
 			m := newMemtable(t, mt, cfg.Memtable.MemtableMaxEntries, cfg.Memtable.MemtableMaxSizeBytes, nil)
-			m.Put([]byte("key"), []byte("value"), 10, false)
-			m.Put([]byte("key"), []byte(""), 20, true)
+			m.Put([]byte("key"), []byte("value"), 10, enums.OpTypePut)
+			m.Put([]byte("key"), []byte(""), 20, enums.OpTypeDel)
 			got, ok := m.Get([]byte("key"))
 			if got != nil {
 				t.Errorf("expected deleted key to be hidden, got (%v, %v)", got, ok)
@@ -136,8 +136,8 @@ func TestDeleteHidesEntry(t *testing.T) {
 		mt := mt
 		t.Run(string(mt), func(t *testing.T) {
 			m := newMemtable(t, mt, 100, 1<<20, nil)
-			m.Put([]byte("key"), []byte("value"), 10, false)
-			m.Delete([]byte("key"), 20)
+			m.Put([]byte("key"), []byte("value"), 10, enums.OpTypePut)
+			m.Put([]byte("key"), nil, 20, enums.OpTypeDel)
 			got, ok := m.Get([]byte("key"))
 			if got != nil {
 				t.Errorf("expected deleted key to be hidden, got (%v, %v)", got, ok)
@@ -152,13 +152,13 @@ func TestOlderTombstoneDoesNotHideNewerWrite(t *testing.T) {
 		mt := mt
 		t.Run(string(mt), func(t *testing.T) {
 			m := newMemtable(t, mt, 100, 1<<20, nil)
-			m.Put([]byte("key"), []byte(""), 10, true) // older tombstone
-			m.Put([]byte("key"), []byte("value"), 20, false)
+			m.Put([]byte("key"), []byte(""), 10, enums.OpTypeDel) // older tombstone
+			m.Put([]byte("key"), []byte("value"), 20, enums.OpTypePut)
 			got, ok := m.Get([]byte("key"))
 			if !ok {
 				t.Fatal("Get: not found — older tombstone should not hide newer write")
 			}
-			if !bytes.Equal(got, []byte("value")) {
+			if !bytes.Equal(got.Value, []byte("value")) {
 				t.Errorf("got %q, want %q", got, "value")
 			}
 		})
@@ -174,9 +174,9 @@ func TestRawSingleIteratorAllVersions(t *testing.T) {
 		mt := mt
 		t.Run(string(mt), func(t *testing.T) {
 			m := newMemtable(t, mt, 100, 1<<20, nil)
-			m.Put([]byte("a"), []byte("old"), 10, false)
-			m.Put([]byte("a"), []byte("new"), 20, false)
-			m.Put([]byte("b"), []byte("only"), 10, false)
+			m.Put([]byte("a"), []byte("old"), 10, enums.OpTypePut)
+			m.Put([]byte("a"), []byte("new"), 20, enums.OpTypePut)
+			m.Put([]byte("b"), []byte("only"), 10, enums.OpTypePut)
 
 			rawIt := m.active.RawIterator()
 			rawIt.SeekToFirst()
@@ -202,11 +202,11 @@ func TestSingleIteratorDeduplication(t *testing.T) {
 		mt := mt
 		t.Run(string(mt), func(t *testing.T) {
 			m := newMemtable(t, mt, 100, 1<<20, nil)
-			m.Put([]byte("key1"), []byte("old"), 10, false)
-			m.Put([]byte("key1"), []byte("new"), 20, false)
-			m.Put([]byte("key2"), []byte("only"), 10, false)
-			m.Put([]byte("key3"), []byte("v"), 10, false)
-			m.Put([]byte("key3"), []byte(""), 20, true) // tombstone
+			m.Put([]byte("key1"), []byte("old"), 10, enums.OpTypePut)
+			m.Put([]byte("key1"), []byte("new"), 20, enums.OpTypePut)
+			m.Put([]byte("key2"), []byte("only"), 10, enums.OpTypePut)
+			m.Put([]byte("key3"), []byte("v"), 10, enums.OpTypePut)
+			m.Put([]byte("key3"), []byte(""), 20, enums.OpTypeDel) // tombstone
 
 			it := m.active.Iterator()
 			it.SeekToFirst()
@@ -225,7 +225,7 @@ func TestSingleIteratorDeduplication(t *testing.T) {
 				t.Error("key2 missing from iterator")
 			}
 			// key3: tombstone — should NOT appear in merged iterator
-			if e, ok := seen["key3"]; ok && !e.Tombstone {
+			if e, ok := seen["key3"]; ok && e.OpType != enums.OpTypeDel {
 				t.Errorf("key3 should be absent or tombstoned, got %v", e)
 			}
 		})
@@ -242,11 +242,11 @@ func TestRawIteratorAcrossTwoMemtables(t *testing.T) {
 		t.Run(string(mt), func(t *testing.T) {
 			m1 := newMemtable(t, mt, 100, 1<<20, nil)
 			m2 := newMemtable(t, mt, 100, 1<<20, nil)
-			m1.Put([]byte("key1"), []byte("v1old"), 10, false)
-			m1.Put([]byte("key1"), []byte("v1new"), 20, false)
-			m2.Put([]byte("key2"), []byte("v2old"), 10, false)
-			m2.Put([]byte("key2"), []byte("v2new"), 20, false)
-			m1.Put([]byte("key3"), []byte("v3"), 10, false)
+			m1.Put([]byte("key1"), []byte("v1old"), 10, enums.OpTypePut)
+			m1.Put([]byte("key1"), []byte("v1new"), 20, enums.OpTypePut)
+			m2.Put([]byte("key2"), []byte("v2old"), 10, enums.OpTypePut)
+			m2.Put([]byte("key2"), []byte("v2new"), 20, enums.OpTypePut)
+			m1.Put([]byte("key3"), []byte("v3"), 10, enums.OpTypePut)
 
 			rawIt1 := m1.active.RawIterator()
 			rawIt1.SeekToFirst()
@@ -281,10 +281,10 @@ func TestIteratorSeek(t *testing.T) {
 			m1 := newMemtable(t, mt, 100, 1<<20, nil)
 			m2 := newMemtable(t, mt, 100, 1<<20, nil)
 			for _, k := range []string{"key1", "key3", "key5"} {
-				m1.Put([]byte(k), []byte("v"), 10, false)
+				m1.Put([]byte(k), []byte("v"), 10, enums.OpTypePut)
 			}
 			for _, k := range []string{"key2", "key4"} {
-				m2.Put([]byte(k), []byte("v"), 10, false)
+				m2.Put([]byte(k), []byte("v"), 10, enums.OpTypePut)
 			}
 
 			rawIt1 := m1.active.RawIterator()
@@ -325,7 +325,7 @@ func TestManagerIteratorAcrossFlush(t *testing.T) {
 			// maxEntries=3 forces rotations quickly
 			flushed := map[string]bool{}
 			var mu sync.Mutex
-			m := newMemtable(t, mt, 3, 1<<20, func(entries []MemtableEntry) {
+			m := newMemtable(t, mt, 3, 1<<20, func(entries []MemtableEntry, rangeDelEntries []MemtableEntry) {
 				mu.Lock()
 				for _, e := range entries {
 					flushed[string(e.Key)] = true
@@ -335,7 +335,7 @@ func TestManagerIteratorAcrossFlush(t *testing.T) {
 
 			keys := []string{"a", "b", "c", "d", "e", "f", "g"}
 			for _, k := range keys {
-				m.Put([]byte(k), []byte("v-"+k), 10, false)
+				m.Put([]byte(k), []byte("v-"+k), 10, enums.OpTypePut)
 			}
 
 			time.Sleep(100 * time.Millisecond)
@@ -371,7 +371,7 @@ func TestConcurrency(t *testing.T) {
 	flushCount := 0
 
 	factory := NewFactory(config.NewDefaultConfig().Memtable)
-	memManager := NewMemtableManager(5, 0, factory, func(entries []MemtableEntry) {
+	memManager := NewMemtableManager(5, 0, factory, func(entries []MemtableEntry, rangeDelEntries []MemtableEntry) {
 		mu.Lock()
 		flushCount++
 		current := flushCount
@@ -402,7 +402,7 @@ func TestConcurrency(t *testing.T) {
 				key := fmt.Sprintf("worker%d-key%04d", workerID, i)
 				value := fmt.Sprintf("value-%d-%d", workerID, i)
 				ts := uint64(workerID*writesPerWriter + i)
-				memManager.Put([]byte(key), []byte(value), ts, false)
+				memManager.Put([]byte(key), []byte(value), ts, enums.OpTypePut)
 			}
 		}(w)
 	}
@@ -416,7 +416,7 @@ func TestConcurrency(t *testing.T) {
 				key := fmt.Sprintf("worker%d-key%04d", readerID, i)
 				v, ok := memManager.Get([]byte(key))
 				if ok {
-					t.Logf("reader %d: got key=%s value=%s", readerID, key, v)
+					t.Logf("reader %d: got key=%s value=%s", readerID, key, v.Value)
 				}
 			}
 		}(r)
@@ -428,7 +428,7 @@ func TestConcurrency(t *testing.T) {
 		defer wg.Done()
 		for i := 0; i < 50; i++ {
 			key := fmt.Sprintf("worker0-key%04d", i)
-			memManager.Delete([]byte(key), uint64(999999+i))
+			memManager.Put([]byte(key), nil, uint64(999999+i), enums.OpTypeDel)
 		}
 	}()
 
@@ -492,11 +492,11 @@ func TestMemtableLifecycle(t *testing.T) {
 
 	wg.Add(1)
 
-	mem := NewMemtableManager(5, 0, factory, func(entries []MemtableEntry) {
+	mem := NewMemtableManager(5, 0, factory, func(entries []MemtableEntry, rangeDelEntries []MemtableEntry) {
 		fmt.Println("=== FLUSH START ===")
 		for _, e := range entries {
 			fmt.Printf("flush: key=%s value=%s seqId=%d tomb=%v\n",
-				e.Key, e.Value, e.SeqId, e.Tombstone)
+				e.Key, e.Value, e.SeqId, e.OpType)
 		}
 		mu.Lock()
 		flushed = append(flushed, entries...)
@@ -505,13 +505,13 @@ func TestMemtableLifecycle(t *testing.T) {
 		wg.Done()
 	})
 	fmt.Println("=== PUT PHASE ===")
-	mem.Put([]byte("a"), []byte("1"), 10, false)
-	mem.Put([]byte("b"), []byte("2"), 20, false)
-	mem.Put([]byte("c"), []byte("3"), 30, false)
+	mem.Put([]byte("a"), []byte("1"), 10, enums.OpTypePut)
+	mem.Put([]byte("b"), []byte("2"), 20, enums.OpTypePut)
+	mem.Put([]byte("c"), []byte("3"), 30, enums.OpTypePut)
 	fmt.Println("ACTIVE MEMTABLE:")
 	fmt.Println(mem.active.Visualize())
-	mem.Put([]byte("d"), []byte("4"), 40, false)
-	mem.Put([]byte("e"), []byte("5"), 40, false)
+	mem.Put([]byte("d"), []byte("4"), 40, enums.OpTypePut)
+	mem.Put([]byte("e"), []byte("5"), 40, enums.OpTypePut)
 	wg.Wait()
 	fmt.Println("=== ITERATOR VIEW ===")
 	it := mem.Iterator()

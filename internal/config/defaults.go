@@ -10,8 +10,8 @@ import (
 
 // Engine defaults
 const (
+	defaultDebug = false
 	//WAL
-
 	defaultWalSegmentSize = 1 * 1024 * 1024
 
 	//memtable
@@ -42,14 +42,21 @@ const (
 	defaultLSMLevelSizeMultiplier = 10
 	defaultMaxLSMHeight           = 5
 
+	defaultReadCacheSize = 1000
+
 	//TTL
 	defaultTTLInMemoryTTL = true
 	defaultTTLRefreshRate = 1000 // 1s
+
+	// Token Bucket
+	defaultTokenBucketMaxTokens       int64 = 0    // 0
+	defaultTokenBucketResetIntervalMs int64 = 1000 // 1s
 )
 
 func NewDefaultConfig() *Config {
 	return &Config{
 		SavePath: getDefaultSavePath(),
+		Debug:    defaultDebug,
 		WAL: WALConfig{
 			SegmentSize:  defaultWalSegmentSize,
 			BlockSize:    defaultBlockSize, // MUST match BlockManager.BlockSize
@@ -83,6 +90,7 @@ func NewDefaultConfig() *Config {
 			MinMergeThreshold:   defaultLSMMinMergeThreshold,
 			CompactionAlgorithm: defaultLSMCompactionAlgorithm,
 			LevelSizeMultiplier: defaultLSMLevelSizeMultiplier,
+			ReadCacheSize:       defaultReadCacheSize,
 		},
 		SkipList: SkipListConfig{
 			MaxLevel: defaultSkipListMaxLevel,
@@ -105,6 +113,10 @@ func NewDefaultConfig() *Config {
 		TTL: TTLConfig{
 			InMemoryTTL: defaultTTLInMemoryTTL,
 			RefreshRate: defaultTTLRefreshRate,
+		},
+		TokenBucket: TokenBucketConfig{
+			MaxTokens:       defaultTokenBucketMaxTokens,
+			ResetIntervalMs: defaultTokenBucketResetIntervalMs,
 		},
 	}
 }

@@ -2,6 +2,7 @@ package memtable
 
 import (
 	"sync"
+	"time"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/enums"
 	"github.com/ajromen/LSM-KV-Engine/internal/iterator"
@@ -19,10 +20,12 @@ type MemtableManager struct {
 	flushHandler   func([]MemtableEntry) // function that persists flushed entries
 	mu             sync.Mutex            // protets all shared states
 	cond           *sync.Cond            // used to block when to many immutable instances
+	wg             sync.WaitGroup        // wait for flush
+	closing        bool
 }
 
 // NewMemtableManager initializes a new instance of a manager and starts the flush worker
-func NewMemtableManager(maxTables int, mergeStructure byte, factory func() Memtable, flushHandler func([]MemtableEntry)) *MemtableManager {
+func NewMemtableManager(maxTables int, mergeStructure byte, factory func() Memtable, flushHandler func([]MemtableEntry, []MemtableEntry)) *MemtableManager {
 	mm := &MemtableManager{
 		maxTables:      maxTables,
 		mergeStructure: mergeStructure,
@@ -70,27 +73,33 @@ func (mm *MemtableManager) rotate() {
 	immutable := mm.active
 	mm.immutable = append(mm.immutable, immutable)
 	mm.active = mm.factory()
+	mm.wg.Add(1)
 	mm.mu.Unlock()
 	mm.flushChannel <- immutable
 }
 
 // flushWorker runs in a separate goroutine, and it takes immutable memtables and flushes them to disk
-func (mm *MemtableManager) flushWorker(flushHandler func([]MemtableEntry)) {
+func (mm *MemtableManager) flushWorker(flushHandler func([]MemtableEntry, []MemtableEntry)) {
 	for mem := range mm.flushChannel {
+
 		mm.mu.Lock()
 		shouldFlush := mm.containsImmutable(mem)
 		mm.removeImmutable(mem)
 		mm.cond.Signal()
 		mm.mu.Unlock()
 
-		if !shouldFlush {
-			continue
+		if shouldFlush {
+			entries, rangeDelEntries := mem.Flush()
+			if flushHandler != nil {
+				flushHandler(entries, rangeDelEntries)
+			}
 		}
 
-		entries := mem.Flush()
+		entries, rangeDelEntries := mem.Flush()
 		if flushHandler != nil {
-			flushHandler(entries)
+			flushHandler(entries, rangeDelEntries)
 		}
+		mm.wg.Done()
 	}
 }
 
@@ -118,38 +127,25 @@ func (mm *MemtableManager) Get(key []byte) (*MemtableEntry, bool) {
 	mm.mu.Lock()
 	defer mm.mu.Unlock()
 	if v, ok := mm.active.Get(key); ok {
-		return v, true
+		return mm.checkTTL(v, ok)
 	}
 	for i := len(mm.immutable) - 1; i >= 0; i-- {
 		if v, ok := mm.immutable[i].Get(key); ok {
-			return v, true
+			return mm.checkTTL(v, ok)
 		}
 	}
-
 	return nil, false
 }
 
-//// Delete inserts a tombstone for a key into the active memtable
-//// Works the same as Put, but marks entry as deleted
-//func (mm *MemtableManager) Delete(key []byte, seqId uint64) {
-//	mm.mu.Lock()
-//	mm.active.Put(key, []byte{}, seqId, true)
-//	shouldRotate := mm.active.ShouldFlush()
-//	mm.mu.Unlock()
-//	if shouldRotate {
-//		mm.rotate()
-//	}
-//}
-//
-//func (mm *MemtableManager) DeleteWithTTL(key []byte, seqId uint64, ttl int64) {
-//	mm.mu.Lock()
-//	mm.active.PutWithTTL(key, []byte{}, seqId, true, ttl)
-//	shouldRotate := mm.active.ShouldFlush()
-//	mm.mu.Unlock()
-//	if shouldRotate {
-//		mm.rotate()
-//	}
-//}
+func (mm *MemtableManager) checkTTL(entry *MemtableEntry, ok bool) (*MemtableEntry, bool) {
+	if entry == nil {
+		return nil, true
+	}
+	if entry.ExpiresAt != 0 && time.UnixMilli(entry.ExpiresAt).Before(time.Now()) {
+		return nil, false
+	}
+	return entry, ok
+}
 
 // RawIterator returns a merged iterator over all memtables without higher-level filtering.
 func (mm *MemtableManager) RawIterator() iterator.Iterator[MemtableEntry] {
@@ -157,11 +153,11 @@ func (mm *MemtableManager) RawIterator() iterator.Iterator[MemtableEntry] {
 	defer mm.mu.Unlock()
 	var rawIters []iterator.Iterator[MemtableEntry]
 	if mm.active != nil {
-		activeIt := NewRawSingleMemtableIterator(mm.active.Iterator())
+		activeIt := NewRawSingleMemtableIterator(mm.active.RawIterator())
 		rawIters = append(rawIters, activeIt.(*RawSingleMemtableIterator))
 	}
 	for i := len(mm.immutable) - 1; i >= 0; i-- {
-		it := NewRawSingleMemtableIterator(mm.immutable[i].Iterator())
+		it := NewRawSingleMemtableIterator(mm.immutable[i].RawIterator())
 		rawIters = append(rawIters, it.(*RawSingleMemtableIterator))
 	}
 	return NewRawIterator(rawIters, mm.mergeStructure)
@@ -193,5 +189,66 @@ func (mm *MemtableManager) ResetAll() {
 }
 
 func (mm *MemtableManager) Close() {
-	//close(mm.flushChannel) mozda treba
+	mm.mu.Lock()
+
+	if mm.active != nil && mm.active.ShouldFlush() {
+		immutable := mm.active
+		mm.immutable = append(mm.immutable, immutable)
+		mm.active = mm.factory()
+
+		mm.wg.Add(1)
+		mm.flushChannel <- immutable
+	}
+
+	mm.closing = true
+	mm.mu.Unlock()
+
+	close(mm.flushChannel)
+	mm.wg.Wait()
+}
+
+// EntryIterator returns a MergedMemtableIterator adapted to iterator.Entry type
+// This is used by DBIterator which works at the Entry level
+func (mm *MemtableManager) EntryIterator() iterator.Iterator[iterator.Entry] {
+	typedIt := mm.RawIterator() // using raw in order to DBIterator see tombstone
+	return iterator.NewAdaptedIterator(
+		&memtableIteratorSeekWrapper{inner: typedIt},
+		func(e MemtableEntry) iterator.Entry {
+			return iterator.Entry{
+				Key:        append([]byte(nil), e.Key...),
+				Value:      append([]byte(nil), e.Value...),
+				OpType:     e.OpType,
+				SequenceID: e.SeqId,
+			}
+		},
+		func(key []byte) MemtableEntry {
+			return MemtableEntry{Key: key}
+		},
+	)
+}
+
+// memtableIteratorSeekWrapper wraps Iterator[MemtableEntry] to add TypedSeekIterator interface
+type memtableIteratorSeekWrapper struct {
+	inner iterator.Iterator[MemtableEntry]
+}
+
+func (w *memtableIteratorSeekWrapper) Valid() bool          { return w.inner.Valid() }
+func (w *memtableIteratorSeekWrapper) SeekToFirst()         { w.inner.SeekToFirst() }
+func (w *memtableIteratorSeekWrapper) SeekToLast()          { w.inner.SeekToLast() }
+func (w *memtableIteratorSeekWrapper) Next()                { w.inner.Next() }
+func (w *memtableIteratorSeekWrapper) Key() MemtableEntry   { return w.inner.Key() }
+func (w *memtableIteratorSeekWrapper) Seek(e MemtableEntry) { w.inner.Seek(e) }
+
+func (mm *MemtableManager) IsCoveredByRangeDel(key []byte, keySeqId uint64) bool {
+	mm.mu.Lock()
+	defer mm.mu.Unlock()
+	if mm.active.IsCoveredByRangeDel(key, keySeqId) {
+		return true
+	}
+	for i := len(mm.immutable) - 1; i >= 0; i-- {
+		if mm.immutable[i].IsCoveredByRangeDel(key, keySeqId) {
+			return true
+		}
+	}
+	return false
 }

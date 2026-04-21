@@ -1,6 +1,7 @@
 package sstable
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -8,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/block"
+	"github.com/ajromen/LSM-KV-Engine/internal/config"
 	"github.com/ajromen/LSM-KV-Engine/internal/enums"
 )
 
@@ -38,10 +40,16 @@ func NewManifest(fileDir string) (*Manifest, error) {
 		if err != nil {
 			return nil, err
 		}
+		if config.GetSettings().Debug {
+			fmt.Printf("Reconstructed manifest from folder\n")
+		}
 	} else {
 		err := manifest.load()
 		if err != nil {
 			return nil, err
+		}
+		if config.GetSettings().Debug {
+			fmt.Printf("Manifest loaded from file \n")
 		}
 	}
 	return manifest, nil
@@ -113,7 +121,7 @@ func (m *Manifest) reconstruct(fileDir string) error {
 }
 
 func (m *Manifest) load() error {
-	err := block.ReadJSON(filepath.Join(m.FileDir, ManifestFileName), m)
+	err := block.ReadJSON(m.filePath(), m)
 	if err != nil {
 		return err
 	}
@@ -121,11 +129,19 @@ func (m *Manifest) load() error {
 }
 
 func (m *Manifest) Save() error {
-	err := block.WriteJSON(filepath.Join(m.FileDir, ManifestFileName), m)
+	data, err := json.MarshalIndent(m, "", "  ")
 	if err != nil {
 		return err
 	}
-	return nil
+	tmpPath := m.filePath() + ".tmp"
+	if err := os.WriteFile(tmpPath, data, 0644); err != nil {
+		return err
+	}
+	return os.Rename(tmpPath, m.filePath())
+}
+
+func (m *Manifest) filePath() string {
+	return filepath.Join(m.FileDir, ManifestFileName)
 }
 
 func (m *Manifest) MoveSSTable(id, fromLayer, toLayer int) error {

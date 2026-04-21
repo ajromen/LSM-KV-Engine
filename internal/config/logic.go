@@ -6,15 +6,16 @@ import (
 	"os"
 	"strings"
 
-	"github.com/ajromen/LSM-KV-Engine/internal/cli"
 	"github.com/ajromen/LSM-KV-Engine/internal/enums"
+	"github.com/ajromen/LSM-KV-Engine/internal/flags"
 )
 
-func LoadConfig(flags *cli.FLags) error {
+func LoadConfig(flags *flags.FLags) error {
 	cfg := NewDefaultConfig()
-
-	// load JSON if provided
-	if flags != nil && flags.ConfigPath != nil {
+	if flags == nil {
+		return nil
+	}
+	if flags.ConfigPath != nil {
 		err := cfg.loadFromFile(*flags.ConfigPath)
 		if err != nil {
 			return err
@@ -33,8 +34,10 @@ func LoadConfig(flags *cli.FLags) error {
 	return nil
 }
 
-func (c *Config) applyFlags(flags *cli.FLags) error {
-	// Memtable
+func (c *Config) applyFlags(flags *flags.FLags) error {
+	if flags.Debug != nil {
+		c.Debug = *flags.Debug
+	}
 	if flags.MemtableMaxSize != nil {
 		c.Memtable.MemtableMaxEntries = *flags.MemtableMaxSize
 	}
@@ -101,6 +104,12 @@ func (c *Config) applyFlags(flags *cli.FLags) error {
 	}
 	if flags.TTLRefreshRate != nil {
 		c.TTL.RefreshRate = int64(*flags.TTLRefreshRate)
+	}
+	if flags.TokenBucketMaxTokens != nil {
+		c.TokenBucket.MaxTokens = *flags.TokenBucketMaxTokens
+	}
+	if flags.TokenBucketResetIntervalMs != nil {
+		c.TokenBucket.ResetIntervalMs = *flags.TokenBucketResetIntervalMs
 	}
 	return nil
 }
