@@ -132,9 +132,10 @@ func (l *LSM) GetTTL(key []byte) (int64, bool, error) {
 	return 0, false, nil
 }
 
+// flushes memtable
 func (l *LSM) Finish() error {
 	l.memtableeManager.Close()
-	return l.sstableManager.Manifest.Save()
+	return nil
 }
 
 func (l *LSM) ClearAll() error {
@@ -179,4 +180,8 @@ func (l *LSM) NewPrefixIterator(prefix []byte) (*iterator.PrefixIterator, error)
 
 func (l *LSM) GetAllTTLFomSST() (*ttl.ExpiryHeap, map[string]int64, error) {
 	return l.sstableManager.GetAllTTL()
+}
+
+func (l *LSM) GetManifest() sstable.Manifest {
+	return *l.sstableManager.Manifest
 }

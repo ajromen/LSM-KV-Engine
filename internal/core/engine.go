@@ -3,9 +3,9 @@ package core
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"time"
 
+	"github.com/ajromen/LSM-KV-Engine/internal/backup"
 	"github.com/ajromen/LSM-KV-Engine/internal/config"
 	"github.com/ajromen/LSM-KV-Engine/internal/enums"
 	"github.com/ajromen/LSM-KV-Engine/internal/lsm"
@@ -25,7 +25,17 @@ func NewEngine() (*Engine, error) {
 	if err != nil {
 		return nil, err
 	}
-	engine := Engine{lsm: lsmTree, inMemoryTTL: config.GetSettings().TTL.InMemoryTTL, notifier: notifier.NewNotifier()}
+	backupManager, err := backup.NewBackupManager()
+	if err != nil {
+		return nil, err
+	}
+
+	engine := Engine{
+		lsm:           lsmTree,
+		inMemoryTTL:   config.GetSettings().TTL.InMemoryTTL,
+		notifier:      notifier.NewNotifier(),
+		backupManager: backupManager,
+	}
 
 	engine.recover()
 
@@ -177,12 +187,6 @@ func (engine *Engine) ClearAll() error {
 		return fmt.Errorf("clear-all: lsm clear failed: %w", err)
 	}
 
-	dataDir := config.GetSettings().SavePath
-	manifestPath := filepath.Join(dataDir, "MANIFEST")
-
-	if err := os.Remove(manifestPath); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("clear-all: failed to remove manifest: %w", err)
-	}
 	if engine.inMemoryTTL {
 		engine.ttlJanitor.ClearAll()
 	}
