@@ -11,7 +11,7 @@ import (
 )
 
 type BackupManager struct {
-	Backups    map[string]IBackup
+	Backups    map[string]*IBackup
 	Manifest   *BackupManifest
 	LastBackup *IBackup
 }
@@ -25,7 +25,7 @@ func NewBackupManager() (*BackupManager, error) {
 	}
 	backupManager := &BackupManager{
 		Manifest: manifest,
-		Backups:  make(map[string]IBackup),
+		Backups:  make(map[string]*IBackup),
 	}
 
 	err = backupManager.restoreManagerFromManifest()
@@ -45,15 +45,20 @@ func (bm *BackupManager) restoreManagerFromManifest() error {
 		case enums.IncrementalBackup:
 			backup = NewIncrementalBackup(&entry.BackupDirectory, nil)
 		}
-
-		bm.Backups[backup.GetId()] = backup
-		bm.LastBackup = &backup
+		b := backup
+		bm.Backups[b.GetId()] = &b
+		bm.LastBackup = &b
 	}
 
-	if config.GetSettings().Debug {
-		fmt.Printf("Loaded %d backups\n", len(bm.Backups))
+	for _, backup := range bm.Backups {
+		info := (*backup).GetInfo()
+		if info.BaseId != "" {
+			base := bm.GetById(info.BaseId)
+			if base != nil {
+				info.Base = base
+			}
+		}
 	}
-
 	return nil
 }
 
@@ -66,12 +71,9 @@ func (bm *BackupManager) CreateBackup(manifest sstable.Manifest, backupType enum
 			break
 		}
 		backup = NewIncrementalBackup(nil, bm.LastBackup)
-		info := backup.GetInfo()
-		info.Base = bm.GetById(info.Id)
 	case enums.FullBackup:
 		backup = NewFullBackup(nil)
 	}
-
 	err := backup.Backup(manifest)
 	if err != nil {
 		return "", err
@@ -80,14 +82,14 @@ func (bm *BackupManager) CreateBackup(manifest sstable.Manifest, backupType enum
 	if err != nil {
 		return "", err
 	}
-
 	return backup.GetId(), nil
 }
 
 func (bm *BackupManager) addBackup(backup IBackup) error {
-	bm.Backups[backup.GetId()] = backup
-	bm.LastBackup = &backup
-	return bm.Manifest.AddBackup(backup.GetInfo())
+	b := backup
+	bm.Backups[b.GetId()] = &b
+	bm.LastBackup = &b
+	return bm.Manifest.AddBackup(b.GetInfo())
 }
 
 func (bm *BackupManager) GetById(id string) *IBackup {
@@ -95,13 +97,15 @@ func (bm *BackupManager) GetById(id string) *IBackup {
 	if !ok {
 		return nil
 	}
-	return &backup
+	_ = backup
+	b := bm.Backups[id]
+	return b
 }
 
 func (bm *BackupManager) GetAll() []BackupInfo {
 	var backups []BackupInfo
 	for _, backup := range bm.Backups {
-		backups = append(backups, *backup.GetInfo())
+		backups = append(backups, *(*backup).GetInfo())
 	}
 	return backups
 }
@@ -112,16 +116,16 @@ func (bm *BackupManager) DeleteBackup(id string) error {
 		return fmt.Errorf("cannot delete: backup %s doesnt exist", id)
 	}
 	for _, b := range bm.Backups {
-		if b.GetInfo().BaseId == id {
-			return fmt.Errorf("cannot delete: backup %s depends on it", b.GetInfo().Id)
+		if (*b).GetInfo().BaseId == id {
+			return fmt.Errorf("cannot delete: backup %s depends on it", (*b).GetInfo().Id)
 		}
 	}
-	err := block.DeleteDirectory(backup.GetInfo().SaveDirectory)
+	err := block.DeleteDirectory((*backup).GetInfo().SaveDirectory)
 	if err != nil {
 		return err
 	}
 	delete(bm.Backups, id)
-	return bm.Manifest.RemoveBackup(backup.GetInfo().SaveDirectory)
+	return bm.Manifest.RemoveBackup((*backup).GetInfo().SaveDirectory)
 }
 
 func (bm *BackupManager) RestoreFrom(backup *IBackup, toDirectory string) error {
@@ -138,18 +142,18 @@ func (bm *BackupManager) CascadeDelete(id string) error {
 		return fmt.Errorf("cannot delete: backup %s doesnt exist", id)
 	}
 	for _, b := range bm.Backups {
-		if b.GetInfo().BaseId == id {
-			err := bm.CascadeDelete(b.GetInfo().Id)
+		if (*b).GetInfo().BaseId == id {
+			err := bm.CascadeDelete((*b).GetInfo().Id)
 			if err != nil {
 				return err
 			}
 		}
 	}
 
-	err := block.DeleteDirectory(backup.GetInfo().SaveDirectory)
+	err := block.DeleteDirectory((*backup).GetInfo().SaveDirectory)
 	if err != nil {
 		return err
 	}
 	delete(bm.Backups, id)
-	return bm.Manifest.RemoveBackup(backup.GetInfo().SaveDirectory)
+	return bm.Manifest.RemoveBackup((*backup).GetInfo().SaveDirectory)
 }

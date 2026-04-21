@@ -1,6 +1,7 @@
 package backup
 
 import (
+	"fmt"
 	"path"
 	"path/filepath"
 	"strconv"
@@ -87,8 +88,30 @@ func (i *IncrementalBackup) Backup(manifest sstable.Manifest) error {
 }
 
 func (i *IncrementalBackup) Restore(directory string) error {
-	//TODO implement me
-	panic("implement me")
+	if i.info.Base == nil {
+		return fmt.Errorf("incremental backup %s has no base", i.info.Id)
+	}
+	err := (*i.info.Base).Restore(directory)
+	if err != nil {
+		return fmt.Errorf("failed to restore base backup: %w", err)
+	}
+
+	for _, file := range i.info.NewFiles {
+		filePath := path.Join(i.info.SaveDirectory, file)
+		destPath := path.Join(directory, filepath.Base(file))
+		err := block.CopyFile(filePath, destPath)
+		if err != nil {
+			return err
+		}
+	}
+
+	destManifest := path.Join(directory, sstable.ManifestFileName)
+	err = block.CopyFile(path.Join(i.info.SaveDirectory, sstable.ManifestFileName), destManifest)
+	if err != nil {
+		return fmt.Errorf("failed to restore manifest: %w", err)
+	}
+
+	return nil
 }
 
 func (i *IncrementalBackup) GetInfo() *BackupInfo {
