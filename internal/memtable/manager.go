@@ -22,6 +22,7 @@ type MemtableManager struct {
 	cond           *sync.Cond            // used to block when to many immutable instances
 	wg             sync.WaitGroup        // wait for flush
 	closing        bool
+	snapshots      map[string]struct{}
 }
 
 // NewMemtableManager initializes a new instance of a manager and starts the flush worker
@@ -31,6 +32,7 @@ func NewMemtableManager(maxTables int, mergeStructure byte, factory func() Memta
 		mergeStructure: mergeStructure,
 		factory:        factory,
 		flushChannel:   make(chan Memtable, maxTables),
+		snapshots:      make(map[string]struct{}),
 	}
 	mm.cond = sync.NewCond(&mm.mu)
 	mm.active = mm.factory()
@@ -38,10 +40,27 @@ func NewMemtableManager(maxTables int, mergeStructure byte, factory func() Memta
 	return mm
 }
 
+// Snapshot marks key so that all future writes to it create new versions
+// rather than overwriting the previous one.
+func (mm *MemtableManager) Snapshot(key []byte) {
+	mm.mu.Lock()
+	defer mm.mu.Unlock()
+	mm.snapshots[string(key)] = struct{}{}
+}
+
+func (mm *MemtableManager) isSnapshotted(key []byte) bool {
+	_, ok := mm.snapshots[string(key)]
+	return ok
+}
+
 // Put inserts an entry into active memtable and if the memtable reaches max capacity, triggers rotation
 func (mm *MemtableManager) Put(key []byte, value []byte, seqId uint64, opType enums.OpType) {
 	mm.mu.Lock()
-	mm.active.Put(key, value, seqId, opType)
+	if opType == enums.OpTypeRangeDel || mm.isSnapshotted(key) {
+		mm.active.Put(key, value, seqId, opType)
+	} else {
+		mm.active.Upsert(key, value, seqId, opType)
+	}
 	shouldRotate := mm.active.ShouldFlush()
 	mm.mu.Unlock()
 	if shouldRotate {
@@ -51,7 +70,11 @@ func (mm *MemtableManager) Put(key []byte, value []byte, seqId uint64, opType en
 
 func (mm *MemtableManager) PutWithTTL(key []byte, value []byte, seqId uint64, opType enums.OpType, ttl int64) {
 	mm.mu.Lock()
-	mm.active.PutWithTTL(key, value, seqId, opType, ttl)
+	if mm.isSnapshotted(key) {
+		mm.active.PutWithTTL(key, value, seqId, opType, ttl)
+	} else {
+		mm.active.UpsertWithTTL(key, value, seqId, opType, ttl)
+	}
 	shouldRotate := mm.active.ShouldFlush()
 	mm.mu.Unlock()
 	if shouldRotate {

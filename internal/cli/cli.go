@@ -49,6 +49,8 @@ func RunCli(engine *core.Engine) {
 			handleRangeIterate(engine, parts, reader)
 		case "prefix-iterate":
 			handlePrefixIterate(engine, parts, reader)
+		case "snapshot":
+			handleSnapshot(engine, parts)
 		case "exit", "quit", "q":
 			print(blue + "Exiting...")
 			err := engine.Close()

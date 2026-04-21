@@ -90,3 +90,12 @@ func handleClear(engine *core.Engine, parts []string) {
 	}
 	PrintSuccess(fmt.Sprint("ClearAll: OK"))
 }
+
+func handleSnapshot(engine *core.Engine, parts []string) {
+	if len(parts) != 2 {
+		PrintError("Usage: snapshot <key>")
+		return
+	}
+	engine.Snapshot([]byte(parts[1]))
+	PrintSuccess(fmt.Sprintf("Snapshot: key '%s' will now retain all versions", parts[1]))
+}

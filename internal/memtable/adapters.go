@@ -1,6 +1,9 @@
 package memtable
 
 import (
+	"bytes"
+	"math"
+
 	"github.com/ajromen/LSM-KV-Engine/internal/iterator"
 	"github.com/ajromen/LSM-KV-Engine/internal/structures"
 )
@@ -57,6 +60,17 @@ func (s *BTreeStore) Iterator() iterator.Iterator[MemtableEntry] {
 	return NewSingleMemtableIterator(rawIt)
 }
 
+func (s *BTreeStore) Upsert(entry MemtableEntry) bool {
+	dummy := MemtableEntry{Key: entry.Key, SeqId: math.MaxUint64}
+	existing, found := s.tree.LowerBound(dummy)
+	replaced := found && bytes.Equal(existing.Key, entry.Key)
+	if replaced {
+		s.tree.Delete(existing)
+	}
+	s.tree.Insert(entry)
+	return replaced
+}
+
 // ---- Skiplist store adapter ----
 
 type SkipListStore struct {
@@ -102,6 +116,17 @@ func (s *SkipListStore) RawIterator() iterator.Iterator[MemtableEntry] {
 func (s *SkipListStore) Iterator() iterator.Iterator[MemtableEntry] {
 	rawIt := s.RawIterator().(*RawSingleMemtableIterator)
 	return NewSingleMemtableIterator(rawIt)
+}
+
+func (s *SkipListStore) Upsert(entry MemtableEntry) bool {
+	dummy := MemtableEntry{Key: entry.Key, SeqId: math.MaxUint64}
+	existing, found := s.list.LowerBound(dummy)
+	replaced := found && bytes.Equal(existing.Key, entry.Key)
+	if replaced {
+		s.list.Delete(existing)
+	}
+	s.list.Insert(entry)
+	return replaced
 }
 
 // ---- Hashmap store adapter ----
@@ -161,6 +186,10 @@ func (s *HashMapStore) Iterator() iterator.Iterator[MemtableEntry] {
 	return NewSingleMemtableIterator(rawIt)
 }
 
+func (s *HashMapStore) Upsert(entry MemtableEntry) bool {
+	return s.hmap.Upsert(entry)
+}
+
 // ---- RBTree store adapter ----
 
 type RBTreeStore struct {
@@ -215,6 +244,17 @@ func (s *RBTreeStore) Iterator() iterator.Iterator[MemtableEntry] {
 	return NewSingleMemtableIterator(rawIt)
 }
 
+func (s *RBTreeStore) Upsert(entry MemtableEntry) bool {
+	dummy := MemtableEntry{Key: entry.Key, SeqId: math.MaxUint64}
+	node := s.tree.LowerBound(dummy)
+	replaced := node != nil && bytes.Equal(node.Key.Key, entry.Key)
+	if replaced {
+		s.tree.Delete(node)
+	}
+	s.tree.Insert(entry)
+	return replaced
+}
+
 // ---- AVLTree store adapter ----
 
 type AVLTreeStore struct {
@@ -266,4 +306,15 @@ func (s *AVLTreeStore) RawIterator() iterator.Iterator[MemtableEntry] {
 func (s *AVLTreeStore) Iterator() iterator.Iterator[MemtableEntry] {
 	rawIt := s.RawIterator().(*RawSingleMemtableIterator)
 	return NewSingleMemtableIterator(rawIt)
+}
+
+func (s *AVLTreeStore) Upsert(entry MemtableEntry) bool {
+	dummy := MemtableEntry{Key: entry.Key, SeqId: math.MaxUint64}
+	node := s.tree.LowerBound(dummy)
+	replaced := node != nil && bytes.Equal(node.Key.Key, entry.Key)
+	if replaced {
+		s.tree.Delete(node.Key)
+	}
+	s.tree.Insert(entry)
+	return replaced
 }

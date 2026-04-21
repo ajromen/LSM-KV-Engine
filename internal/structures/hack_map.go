@@ -278,3 +278,12 @@ func (hm *HackMap[T]) Visualize(formatter func(T) string) string {
 
 	return sb.String()
 }
+
+func (hm *HackMap[T]) Upsert(entry T) bool {
+	key := entry.HashKey()
+	_, existed := hm.data[key]
+	stack := New[T]()
+	stack.Push(entry)
+	hm.data[key] = stack
+	return existed
+}

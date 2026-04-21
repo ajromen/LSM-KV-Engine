@@ -154,6 +154,10 @@ func (engine *Engine) Delete(key []byte) {
 	engine.notifier.NotifyDelete(key)
 }
 
+func (engine *Engine) Snapshot(key []byte) {
+	engine.lsm.Snapshot(key)
+}
+
 func (engine *Engine) RangeDelete(startKey []byte, endKey []byte) {
 	seqId := engine.seqGen.Next()
 	engine.lsm.Put(startKey, endKey, seqId, enums.OpTypeRangeDel)

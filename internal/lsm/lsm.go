@@ -87,9 +87,9 @@ func (l *LSM) Get(key []byte) ([]byte, bool, error) {
 	// 2. check cache
 	if val, ok := l.readCache.Get(string(key)); ok {
 		if val == nil {
-			return nil, false, nil
+			found = false
 		}
-		return val, true, nil
+		found = true
 	}
 
 	if config.GetSettings().Debug {
@@ -179,4 +179,8 @@ func (l *LSM) NewPrefixIterator(prefix []byte) (*iterator.PrefixIterator, error)
 
 func (l *LSM) GetAllTTLFomSST() (*ttl.ExpiryHeap, map[string]int64, error) {
 	return l.sstableManager.GetAllTTL()
+}
+
+func (l *LSM) Snapshot(key []byte) {
+	l.memtableeManager.Snapshot(key)
 }
