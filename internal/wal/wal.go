@@ -1,7 +1,6 @@
 package wal
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -559,30 +558,69 @@ func (w *WAL) Sync() error {
 	return w.ActiveSegment.Sync()
 }
 
-func (w *WAL) PrintAll() error { //func for debugging
-	id := uint(1)
-	for {
-		path := w.SegmentPath(uint64(id))
-		if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
-			break
+func (w *WAL) PrintAll() error { // func for debugging
+	if w == nil {
+		return fmt.Errorf("wal is nil")
+	}
+
+	entries, err := ListFiles(w.Dir)
+	if err != nil {
+		return err
+	}
+
+	type segInfo struct {
+		id   uint64
+		path string
+	}
+
+	segments := make([]segInfo, 0)
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
 		}
-		s, err := OpenSegment(uint64(id), w.SegmentPath(uint64(id)), w.MaxBlocks, w.BM)
+
+		name := entry.Name()
+		if !strings.HasPrefix(name, FilePrefix) || !strings.HasSuffix(name, FileSuffix) {
+			continue
+		}
+
+		id, err := ParseSegmentID(name)
 		if err != nil {
-			break
+			return err
 		}
-		bindex := 0
-		//fmt.Println("Segment", id)
-		for {
+
+		segments = append(segments, segInfo{
+			id:   id,
+			path: filepath.Join(w.Dir, name),
+		})
+	}
+
+	for i := 0; i < len(segments); i++ {
+		for j := i + 1; j < len(segments); j++ {
+			if segments[j].id < segments[i].id {
+				segments[i], segments[j] = segments[j], segments[i]
+			}
+		}
+	}
+
+	for _, segInfo := range segments {
+		s, err := OpenSegment(segInfo.id, segInfo.path, w.MaxBlocks, w.BM)
+		if err != nil {
+			return err
+		}
+
+		fmt.Println("Segment", segInfo.id)
+
+		for bindex := 0; bindex < w.MaxBlocks; bindex++ {
 			block, err := s.ReadBlock(uint32(bindex))
 			if err != nil {
-				break
+				return err
 			}
 			fmt.Println(block)
-			bindex++
 		}
-		id++
-
 	}
+
 	return nil
 }
 
