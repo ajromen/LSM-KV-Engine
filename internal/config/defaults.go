@@ -115,6 +115,10 @@ func NewDefaultConfig() *Config {
 			MaxTokens:       defaultTokenBucketMaxTokens,
 			ResetIntervalMs: defaultTokenBucketResetIntervalMs,
 		},
+		Backup: BackupConfig{
+			Type:          enums.FullBackup,
+			SaveDirectory: "backups",
+		},
 	}
 }
 

@@ -34,6 +34,11 @@ Commands:
     range-scan <lower> <upper> <pageSize>   Interactive paginated scan in [lower, upper]
     prefix-scan <prefix> <pageSize>         Interactive paginated scan with prefix
     Scan commands: next/n, prev/p, stop/s
+  Backups:
+    list-backups                 List all backups (includes checkpoints)
+    create-backup [type]         Create backup of type: full, incremental, checkpoint (if none is provided uses default)
+    delete-backup <id>           Delete backup by id
+    cascade-delete-backup <id>   Delete backup and all backups that are dependent on it
 Notes:
   ttl: time-to-live in seconds,
   unit suffixes: ms, s (default), min, h, D, M, Y`
@@ -48,6 +53,12 @@ func PrintSuccess(str string) {
 	fmt.Println(green + str + reset)
 
 }
+
+func PrintSpecial(str string) {
+	fmt.Println(blue + str + reset)
+
+}
+
 func printBanner() {
 	fmt.Println(banner)
 }

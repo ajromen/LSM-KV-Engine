@@ -8,12 +8,14 @@ import (
 
 	"github.com/ajromen/LSM-KV-Engine/internal/block"
 	"github.com/ajromen/LSM-KV-Engine/internal/config"
+	"github.com/ajromen/LSM-KV-Engine/internal/enums"
 )
 
 const ManifestFileName = "MANIFEST.json"
 
 type BackupManifestEntry struct {
-	FileName string `json:"filename"`
+	BackupDirectory string           `json:"backup_directory"`
+	Type            enums.BackupType `json:"type"`
 }
 
 type BackupManifest struct {
@@ -22,11 +24,15 @@ type BackupManifest struct {
 }
 
 func NewBackupManifest(fileDir string) (*BackupManifest, error) {
+	err := block.EnsureDir(fileDir)
+	if err != nil {
+		return nil, err
+	}
 	manifest := &BackupManifest{
 		FileDir: fileDir,
 		Backups: make([]BackupManifestEntry, 0),
 	}
-	_, err := os.Stat(manifest.filePath())
+	_, err = os.Stat(manifest.filePath())
 	if err != nil {
 		err = manifest.reconstruct(fileDir)
 		if err != nil {
@@ -65,7 +71,7 @@ func (bm *BackupManifest) reconstruct(fileDir string) error {
 				}
 				continue
 			}
-			bm.Backups = append(bm.Backups, BackupManifestEntry{FileName: dirName})
+			bm.Backups = append(bm.Backups, BackupManifestEntry{BackupDirectory: dirName})
 		}
 	}
 
@@ -91,13 +97,13 @@ func (bm *BackupManifest) load() error {
 }
 
 func (bm *BackupManifest) AddBackup(info *BackupInfo) error {
-	bm.Backups = append(bm.Backups, BackupManifestEntry{FileName: info.SaveDirectory})
+	bm.Backups = append(bm.Backups, BackupManifestEntry{BackupDirectory: info.SaveDirectory, Type: info.Type})
 	return bm.Save()
 }
 
 func (bm *BackupManifest) RemoveBackup(saveDirectory string) error {
 	for i, entry := range bm.Backups {
-		if entry.FileName == saveDirectory {
+		if entry.BackupDirectory == saveDirectory {
 			bm.Backups = append(bm.Backups[:i], bm.Backups[i+1:]...)
 		}
 	}

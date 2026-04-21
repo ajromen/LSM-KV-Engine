@@ -24,10 +24,11 @@ func NewFullBackup(saveDirectory *string) *FullBackup {
 
 	if saveDirectory == nil {
 		timestamp := time.Now().Unix()
-		savePath := path.Join(settings.SavePath, settings.Backup.SaveDirectory, info.Id)
+		id := strconv.FormatInt(timestamp, 10)
+		savePath := path.Join(settings.SavePath, settings.Backup.SaveDirectory, id)
 		saveDirectory = &savePath
 		info = BackupInfo{
-			Id:            strconv.FormatInt(timestamp, 10),
+			Id:            id,
 			BaseId:        "",
 			Type:          enums.FullBackup,
 			Timestamp:     timestamp,
@@ -36,7 +37,7 @@ func NewFullBackup(saveDirectory *string) *FullBackup {
 		}
 	} else {
 		info = BackupInfo{}
-		err := info.LoadFromFile(*saveDirectory)
+		err := info.LoadFromFile(path.Join(*saveDirectory, InfoFileName))
 		info.SaveDirectory = *saveDirectory
 		if err != nil {
 			panic(err)
@@ -58,14 +59,12 @@ func (f FullBackup) Backup(manifest sstable.Manifest) error {
 		return err
 	}
 
-	var files []string
-	var newFileNames []string
+	var fileNames []string
 	for _, layer := range manifest.Layers {
 		for _, sstableManifest := range layer {
 			file := sstableManifest.BaseFileName
-			files = append(files, file)
+			fileNames = append(fileNames, filepath.Base(file))
 			newFile := path.Join(f.info.SaveDirectory, filepath.Base(file))
-			newFileNames = append(newFileNames, newFile)
 			err := block.CopyFile(file, newFile)
 			if err != nil {
 				return err
@@ -73,7 +72,7 @@ func (f FullBackup) Backup(manifest sstable.Manifest) error {
 		}
 	}
 
-	f.info.Files = newFileNames
+	f.info.Files = fileNames
 
 	err = f.info.SaveToFile(path.Join(f.info.SaveDirectory, InfoFileName))
 	if err != nil {
@@ -86,7 +85,8 @@ func (f FullBackup) Backup(manifest sstable.Manifest) error {
 
 func (f FullBackup) Restore(directory string) error {
 	for _, file := range f.info.Files {
-		err := block.CopyFile(file, directory)
+		filePath := path.Join(f.info.SaveDirectory, file)
+		err := block.CopyFile(filePath, directory)
 		if err != nil {
 			return err
 		}
@@ -104,4 +104,13 @@ func (f FullBackup) GetInfo() *BackupInfo {
 
 func (f FullBackup) GetId() string {
 	return f.info.Id
+}
+
+func (f FullBackup) ContainsFile(filename string) bool {
+	for _, file := range f.info.Files {
+		if file == filename {
+			return true
+		}
+	}
+	return false
 }

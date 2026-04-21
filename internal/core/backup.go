@@ -1,6 +1,7 @@
 package core
 
 import (
+	"encoding/base64"
 	"fmt"
 	"time"
 
@@ -11,18 +12,24 @@ import (
 func (engine *Engine) GetAllBackups() []string {
 	var formated []string
 	backups := engine.backupManager.GetAll()
+	formated = append(formated, "    Id      |  Type  |      Created At")
 	for _, backup := range backups {
 		var backupType string
 		switch backup.Type {
 		case enums.FullBackup:
 			backupType = "full"
 		case enums.IncrementalBackup:
-			backupType = "incremental"
+			backupType = "incr"
 		default:
 			backupType = "unknown"
 		}
-
-		formated = append(formated, fmt.Sprintf("%d    %s    %s", backup.Id, backupType, time.Unix(backup.Timestamp, 0).String()))
+		encoded := base64.StdEncoding.EncodeToString([]byte(backup.Id))
+		copySeq := fmt.Sprintf("\033]52;c;%s\a", encoded)
+		formated = append(formated, fmt.Sprintf(" \033[4m%s\033[24m%s    %s    %s",
+			backup.Id,
+			copySeq,
+			backupType,
+			time.Unix(backup.Timestamp, 0).Format("15:04:05 02 Jan 2006")))
 	}
 	return formated
 }
@@ -81,6 +88,10 @@ func (engine *Engine) CreateBackup(backupType enums.BackupType) (string, error) 
 
 func (engine *Engine) DeleteBackup(backupId string) error {
 	return engine.backupManager.DeleteBackup(backupId)
+}
+
+func (engine *Engine) CascadeDeleteBackup(backupId string) error {
+	return engine.backupManager.CascadeDelete(backupId)
 }
 
 func (engine *Engine) CreateSnapshot() error {

@@ -9,4 +9,5 @@ type IBackup interface {
 	GetInfo() *BackupInfo
 	GetId() string
 	Restore(directory string) error
+	ContainsFile(filename string) bool
 }
