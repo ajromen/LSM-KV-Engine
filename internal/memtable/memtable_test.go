@@ -293,7 +293,7 @@ func TestIteratorSeek(t *testing.T) {
 			rawIt2.SeekToFirst()
 
 			globalRaw := NewRawIterator([]iterator.Iterator[MemtableEntry]{rawIt1, rawIt2}, 1)
-			globalIt := NewMergedMemtableIterator(globalRaw)
+			globalIt := NewMergedMemtableIterator(globalRaw, nil)
 			globalIt.Seek(MemtableEntry{Key: []byte("key3"), SeqId: math.MaxInt64})
 
 			var got []string
