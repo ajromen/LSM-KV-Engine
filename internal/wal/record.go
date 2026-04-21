@@ -7,9 +7,9 @@ import (
 )
 
 /*
-	+---------------+-----------------+--------------+---------------+--------------+---------------+---------------+-----------------+-...-+--...--+
-	|    CRC (4B)   | Timestamp (8B)  | FragType(1B) | Tombstone(1B) | RecType(1B)  |   TxnID (8B)  | Key Size (8B) | Value Size (8B) | Key | Value |
-	+---------------+-----------------+--------------+---------------+--------------+---------------+---------------+-----------------+-...-+--...--+
+	+---------------+-----------------+--------------+---------------+--------------+---------------+---------------+---------------+-----------------+-...-+--...--+
+	|    CRC (4B)   | Timestamp (8B)  | FragType(1B) | Tombstone(1B) | RecType(1B)  |   TxnID (8B)  | SequenceID(8B)| Key Size (8B) | Value Size (8B) | Key | Value |
+	+---------------+-----------------+--------------+---------------+--------------+---------------+---------------+---------------+-----------------+-...-+--...--+
 
 	CRC = 32bit hash computed over the rest of the record using CRC
 	Timestamp = Timestamp of the record
@@ -17,6 +17,7 @@ import (
 	Tombstone = If this record is a delete operation
 	RecType = Record Type (SINGLE, START, TRANSACTION, COMMIT)
 	TxnID = Transaction ID
+	SequenceID = Sequence ID
 	Key Size = Length of the Key data
    	Value Size = Length of the Value data
 	Key = Key data
@@ -30,6 +31,7 @@ const (
 	TOMBSTONE_SIZE  = 1
 	RECTYPE_SIZE    = 1
 	TXNID_SIZE      = 8
+	SEQUENCEID_SIZE = 8
 	KEY_SIZE_SIZE   = 8
 	VALUE_SIZE_SIZE = 8
 
@@ -39,7 +41,8 @@ const (
 	TOMBSTONE_START  = FRAGTYPE_START + FRAGTYPE_SIZE
 	RECTYPE_START    = TOMBSTONE_START + TOMBSTONE_SIZE
 	TXNID_START      = RECTYPE_START + RECTYPE_SIZE
-	KEY_SIZE_START   = TXNID_START + TXNID_SIZE
+	SEQUENCEID_START = TXNID_START + TXNID_SIZE
+	KEY_SIZE_START   = SEQUENCEID_START + SEQUENCEID_SIZE
 	VALUE_SIZE_START = KEY_SIZE_START + KEY_SIZE_SIZE
 	KEY_START        = VALUE_SIZE_START + VALUE_SIZE_SIZE
 )
@@ -70,12 +73,13 @@ type Record struct {
 }
 
 type WALRecord struct {
-	FragType  FragmentType
-	RecType   RecordType
-	TxnID     uint64
-	KeySize   uint64
-	ValueSize uint64
-	Record    Record
+	FragType   FragmentType
+	RecType    RecordType
+	TxnID      uint64
+	SequenceID uint64
+	KeySize    uint64
+	ValueSize  uint64
+	Record     Record
 }
 
 func Encode(r WALRecord) []byte {
@@ -95,7 +99,8 @@ func Encode(r WALRecord) []byte {
 
 	buf[RECTYPE_START] = byte(r.RecType)
 
-	binary.LittleEndian.PutUint64(buf[TXNID_START:KEY_SIZE_START], r.TxnID)
+	binary.LittleEndian.PutUint64(buf[TXNID_START:SEQUENCEID_START], r.TxnID)
+	binary.LittleEndian.PutUint64(buf[SEQUENCEID_START:KEY_SIZE_START], r.SequenceID)
 
 	binary.LittleEndian.PutUint64(buf[KEY_SIZE_START:VALUE_SIZE_START], uint64(len(r.Record.Key)))
 	binary.LittleEndian.PutUint64(buf[VALUE_SIZE_START:KEY_START], uint64(len(r.Record.Value)))
@@ -148,7 +153,8 @@ func Decode(buf []byte) (WALRecord, error) {
 		r.RecType = COMMIT
 	}
 
-	r.TxnID = binary.LittleEndian.Uint64(buf[TXNID_START:KEY_SIZE_START])
+	r.TxnID = binary.LittleEndian.Uint64(buf[TXNID_START:SEQUENCEID_START])
+	r.SequenceID = binary.LittleEndian.Uint64(buf[SEQUENCEID_START:KEY_SIZE_START])
 
 	r.KeySize = binary.LittleEndian.Uint64(buf[KEY_SIZE_START:VALUE_SIZE_START])
 	r.ValueSize = binary.LittleEndian.Uint64(buf[VALUE_SIZE_START:KEY_START])

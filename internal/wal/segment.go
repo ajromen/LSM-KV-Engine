@@ -107,17 +107,18 @@ func OpenSegment(id uint64, path string, maxBlocks int, bm *block.BlockManager) 
 	}
 }
 
-func (s *Segment) Append(r Record) error {
+func (s *Segment) Append(r Record, sequenceID uint64) error {
 	headerSize := KEY_START
 	totalSize := headerSize + len(r.Key) + len(r.Value)
 	if s.CurrentBlock.Remaining() >= totalSize { // if full record can fit
 		wr := WALRecord{
-			FragType:  FULL,
-			RecType:   SINGLE, // to be updated
-			TxnID:     0,      // to be updated
-			KeySize:   uint64(len(r.Key)),
-			ValueSize: uint64(len(r.Value)),
-			Record:    r,
+			FragType:   FULL,
+			RecType:    SINGLE, // to be updated
+			TxnID:      0,      // to be updated
+			SequenceID: sequenceID,
+			KeySize:    uint64(len(r.Key)),
+			ValueSize:  uint64(len(r.Value)),
+			Record:     r,
 		}
 		buf := Encode(wr)
 
@@ -140,11 +141,12 @@ func (s *Segment) Append(r Record) error {
 
 		if payloadSpace < pValueStart { // part of key fits
 			wr = WALRecord{
-				FragType:  FIRST,
-				RecType:   SINGLE, // to be updated
-				TxnID:     0,      // to be updated
-				KeySize:   uint64(payloadSpace),
-				ValueSize: 0,
+				FragType:   FIRST,
+				RecType:    SINGLE, // to be updated
+				TxnID:      0,      // to be updated
+				SequenceID: sequenceID,
+				KeySize:    uint64(payloadSpace),
+				ValueSize:  0,
 				Record: Record{
 					Timestamp: r.Timestamp,
 					Tombstone: r.Tombstone,
@@ -156,11 +158,12 @@ func (s *Segment) Append(r Record) error {
 			pValueStart = pValueStart - payloadSpace
 		} else if payloadSpace == pValueStart { // exactly key fits
 			wr = WALRecord{
-				FragType:  FIRST,
-				RecType:   SINGLE, // to be updated
-				TxnID:     0,      // to be updated
-				KeySize:   uint64(pValueStart),
-				ValueSize: 0,
+				FragType:   FIRST,
+				RecType:    SINGLE, // to be updated
+				TxnID:      0,      // to be updated
+				SequenceID: sequenceID,
+				KeySize:    uint64(pValueStart),
+				ValueSize:  0,
 				Record: Record{
 					Timestamp: r.Timestamp,
 					Tombstone: r.Tombstone,
@@ -172,11 +175,12 @@ func (s *Segment) Append(r Record) error {
 			pValueStart = 0
 		} else { // key and part of value fits
 			wr = WALRecord{
-				FragType:  FIRST,
-				RecType:   SINGLE, // to be updated
-				TxnID:     0,      // to be updated
-				KeySize:   uint64(pValueStart),
-				ValueSize: uint64(payloadSpace - pValueStart),
+				FragType:   FIRST,
+				RecType:    SINGLE, // to be updated
+				TxnID:      0,      // to be updated
+				SequenceID: sequenceID,
+				KeySize:    uint64(pValueStart),
+				ValueSize:  uint64(payloadSpace - pValueStart),
 				Record: Record{
 					Timestamp: r.Timestamp,
 					Tombstone: r.Tombstone,
@@ -212,11 +216,12 @@ func (s *Segment) Append(r Record) error {
 
 			if payloadSpace < pValueStart { // part of key fits
 				wr = WALRecord{
-					FragType:  MIDDLE,
-					RecType:   SINGLE, // to be updated
-					TxnID:     0,      // to be updated
-					KeySize:   uint64(payloadSpace),
-					ValueSize: 0,
+					FragType:   MIDDLE,
+					RecType:    SINGLE, // to be updated
+					TxnID:      0,      // to be updated
+					SequenceID: sequenceID,
+					KeySize:    uint64(payloadSpace),
+					ValueSize:  0,
 					Record: Record{
 						Timestamp: r.Timestamp,
 						Tombstone: r.Tombstone,
@@ -228,11 +233,12 @@ func (s *Segment) Append(r Record) error {
 				pValueStart = pValueStart - payloadSpace
 			} else if payloadSpace == pValueStart { // exactly key fits
 				wr = WALRecord{
-					FragType:  MIDDLE,
-					RecType:   SINGLE, // to be updated
-					TxnID:     0,      // to be updated
-					KeySize:   uint64(pValueStart),
-					ValueSize: 0,
+					FragType:   MIDDLE,
+					RecType:    SINGLE, // to be updated
+					TxnID:      0,      // to be updated
+					SequenceID: sequenceID,
+					KeySize:    uint64(pValueStart),
+					ValueSize:  0,
 					Record: Record{
 						Timestamp: r.Timestamp,
 						Tombstone: r.Tombstone,
@@ -244,11 +250,12 @@ func (s *Segment) Append(r Record) error {
 				pValueStart = 0
 			} else { // part of value fits
 				wr = WALRecord{
-					FragType:  MIDDLE,
-					RecType:   SINGLE, // to be updated
-					TxnID:     0,      // to be updated
-					KeySize:   uint64(pValueStart),
-					ValueSize: uint64(payloadSpace - pValueStart),
+					FragType:   MIDDLE,
+					RecType:    SINGLE, // to be updated
+					TxnID:      0,      // to be updated
+					SequenceID: sequenceID,
+					KeySize:    uint64(pValueStart),
+					ValueSize:  uint64(payloadSpace - pValueStart),
 					Record: Record{
 						Timestamp: r.Timestamp,
 						Tombstone: r.Tombstone,
@@ -268,11 +275,12 @@ func (s *Segment) Append(r Record) error {
 		}
 		//fmt.Println(payload)
 		wr = WALRecord{
-			FragType:  LAST,
-			RecType:   SINGLE, // to be updated
-			TxnID:     0,      // to be updated
-			KeySize:   uint64(pValueStart),
-			ValueSize: uint64(len(payload) - pValueStart),
+			FragType:   LAST,
+			RecType:    SINGLE, // to be updated
+			TxnID:      0,      // to be updated
+			SequenceID: sequenceID,
+			KeySize:    uint64(pValueStart),
+			ValueSize:  uint64(len(payload) - pValueStart),
 			Record: Record{
 				Timestamp: r.Timestamp,
 				Tombstone: r.Tombstone,
@@ -295,7 +303,7 @@ func (s *Segment) Append(r Record) error {
 			return err
 		}
 
-		return s.Append(r) // crash if headersize > block size, but that should be checked way earlier
+		return s.Append(r, sequenceID) // crash if headersize > block size, but that should be checked way earlier
 	}
 
 	return fmt.Errorf("block remaining size error")

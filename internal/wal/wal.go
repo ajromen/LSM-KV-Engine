@@ -26,12 +26,13 @@ const (
 )
 
 type WAL struct {
-	Dir           string
-	ActiveSegment *Segment
-	BlockSize     int
-	MaxBlocks     int
-	NextSegmentID uint64
-	BM            *block.BlockManager
+	Dir            string
+	ActiveSegment  *Segment
+	BlockSize      int
+	MaxBlocks      int
+	NextSegmentID  uint64
+	NextSequenceID uint64
+	BM             *block.BlockManager
 }
 
 func OpenWAL(dir string, blockSize int, maxBlocks int) (*WAL, error) {
@@ -51,11 +52,12 @@ func OpenWAL(dir string, blockSize int, maxBlocks int) (*WAL, error) {
 	bm := block.NewBlockManager(blockSize)
 
 	w := &WAL{
-		Dir:           dir,
-		BlockSize:     blockSize,
-		MaxBlocks:     maxBlocks,
-		NextSegmentID: 1,
-		BM:            bm,
+		Dir:            dir,
+		BlockSize:      blockSize,
+		MaxBlocks:      maxBlocks,
+		NextSegmentID:  1,
+		NextSequenceID: 1,
+		BM:             bm,
 	}
 
 	entries, err := ListFiles(dir)
@@ -103,6 +105,11 @@ func OpenWAL(dir string, blockSize int, maxBlocks int) (*WAL, error) {
 	w.ActiveSegment = seg
 	w.NextSegmentID = maxID + 1
 
+	err = w.InitNextSequenceID()
+	if err != nil {
+		return nil, err
+	}
+
 	if w.ActiveSegment.IsFull() {
 		err = w.RotateSegment()
 		if err != nil {
@@ -121,8 +128,12 @@ func (w *WAL) Append(r Record) error {
 	if w.ActiveSegment == nil {
 		return fmt.Errorf("active segment is nil")
 	}
-	err := w.ActiveSegment.Append(r)
+
+	sequenceID := w.NextSequenceID
+
+	err := w.ActiveSegment.Append(r, sequenceID)
 	if err == nil {
+		w.NextSequenceID++
 		return nil
 	}
 	if !w.ActiveSegment.IsFull() {
@@ -134,7 +145,13 @@ func (w *WAL) Append(r Record) error {
 		return err
 	}
 
-	return w.ActiveSegment.Append(r)
+	err = w.ActiveSegment.Append(r, sequenceID)
+	if err != nil {
+		return err
+	}
+
+	w.NextSequenceID++
+	return nil
 }
 
 func (w *WAL) Put(key []byte, value []byte, timestamp uint64) error {
@@ -393,4 +410,25 @@ func ListFiles(dir string) ([]os.DirEntry, error) {
 		return nil, err
 	}
 	return entries, err
+}
+
+func (w *WAL) InitNextSequenceID() error {
+	frags, err := w.ReadAllFragments()
+	if err != nil {
+		return err
+	}
+
+	var maxSeq uint64 = 0
+	for _, frag := range frags {
+		if frag.SequenceID > maxSeq {
+			maxSeq = frag.SequenceID
+		}
+	}
+
+	w.NextSequenceID = maxSeq + 1
+	if w.NextSequenceID == 0 {
+		w.NextSequenceID = 1
+	}
+
+	return nil
 }
