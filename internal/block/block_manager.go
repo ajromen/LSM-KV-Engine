@@ -242,3 +242,7 @@ func (bm *BlockManager) InvalidateFile(filePath string) {
 func DeleteDirectory(directory string) error {
 	return os.RemoveAll(directory)
 }
+
+func CreateHardLink(src, dst string) error {
+	return os.Link(src, dst)
+}

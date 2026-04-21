@@ -68,4 +68,5 @@ type BackupType byte
 const (
 	IncrementalBackup BackupType = 0
 	FullBackup        BackupType = 1
+	Checkpoint                   = 2
 )

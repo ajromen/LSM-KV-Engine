@@ -44,6 +44,8 @@ func (bm *BackupManager) restoreManagerFromManifest() error {
 			backup = NewFullBackup(&entry.BackupDirectory)
 		case enums.IncrementalBackup:
 			backup = NewIncrementalBackup(&entry.BackupDirectory, nil)
+		case enums.Checkpoint:
+			backup = NewCheckpoint(&entry.BackupDirectory)
 		}
 		b := backup
 		bm.Backups[b.GetId()] = &b
@@ -88,7 +90,11 @@ func (bm *BackupManager) CreateBackup(manifest sstable.Manifest, backupType enum
 func (bm *BackupManager) addBackup(backup IBackup) error {
 	b := backup
 	bm.Backups[b.GetId()] = &b
-	bm.LastBackup = &b
+
+	if backup.GetInfo().Type != enums.Checkpoint {
+		bm.LastBackup = &b
+	}
+
 	return bm.Manifest.AddBackup(b.GetInfo())
 }
 
