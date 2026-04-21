@@ -18,7 +18,7 @@ type BackupManifestEntry struct {
 
 type BackupManifest struct {
 	Backups []BackupManifestEntry `json:"backups"`
-	FileDir string                `json:"file_path"`
+	FileDir string                `json:"file_dir"`
 }
 
 func NewBackupManifest(fileDir string) (*BackupManifest, error) {
@@ -90,6 +90,16 @@ func (bm *BackupManifest) load() error {
 	return nil
 }
 
-func (bm *BackupManifest) AddBackup(info BackupInfo) {
-	bm.Backups = append(bm.Backups, BackupManifestEntry{FileName: info.})
+func (bm *BackupManifest) AddBackup(info *BackupInfo) error {
+	bm.Backups = append(bm.Backups, BackupManifestEntry{FileName: info.SaveDirectory})
+	return bm.Save()
+}
+
+func (bm *BackupManifest) RemoveBackup(saveDirectory string) error {
+	for i, entry := range bm.Backups {
+		if entry.FileName == saveDirectory {
+			bm.Backups = append(bm.Backups[:i], bm.Backups[i+1:]...)
+		}
+	}
+	return bm.Save()
 }

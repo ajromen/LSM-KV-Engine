@@ -240,3 +240,7 @@ func (bm *BlockManager) ClearCache() {
 func (bm *BlockManager) InvalidateFile(filePath string) {
 	bm.cache.InvalidateFile(filePath)
 }
+
+func DeleteDirectory(directory string) error {
+	return os.RemoveAll(directory)
+}

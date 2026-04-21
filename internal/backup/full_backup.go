@@ -1,6 +1,7 @@
 package backup
 
 import (
+	"fmt"
 	"path"
 	"path/filepath"
 	"strconv"
@@ -13,8 +14,7 @@ import (
 )
 
 type FullBackup struct {
-	info          BackupInfo
-	saveDirectory string
+	info BackupInfo
 }
 
 // leave saveDirectory as nil if directory doesnt exist yet
@@ -24,26 +24,27 @@ func NewFullBackup(saveDirectory *string) *FullBackup {
 
 	if saveDirectory == nil {
 		timestamp := time.Now().Unix()
-		info = BackupInfo{
-			Id:        strconv.FormatInt(timestamp, 10),
-			BaseId:    "",
-			Type:      enums.FullBackup,
-			Timestamp: timestamp,
-			Files:     nil,
-		}
-		savePath := path.Join(settings.SavePath, settings.Backup.SaveDirectory, info.Id+BackupFileExtension)
+		savePath := path.Join(settings.SavePath, settings.Backup.SaveDirectory, info.Id)
 		saveDirectory = &savePath
+		info = BackupInfo{
+			Id:            strconv.FormatInt(timestamp, 10),
+			BaseId:        "",
+			Type:          enums.FullBackup,
+			Timestamp:     timestamp,
+			Files:         nil,
+			SaveDirectory: *saveDirectory,
+		}
 	} else {
 		info = BackupInfo{}
 		err := info.LoadFromFile(*saveDirectory)
+		info.SaveDirectory = *saveDirectory
 		if err != nil {
 			panic(err)
 		}
 	}
 
 	return &FullBackup{
-		info:          info,
-		saveDirectory: *saveDirectory,
+		info: info,
 	}
 }
 
@@ -52,7 +53,7 @@ func NewFullBackup(saveDirectory *string) *FullBackup {
 // 2. save backupMetadata
 // 3. save manifest for restore
 func (f FullBackup) Backup(manifest sstable.Manifest) error {
-	err := block.EnsureDir(f.saveDirectory)
+	err := block.EnsureDir(f.info.SaveDirectory)
 	if err != nil {
 		return err
 	}
@@ -63,7 +64,7 @@ func (f FullBackup) Backup(manifest sstable.Manifest) error {
 		for _, sstableManifest := range layer {
 			file := sstableManifest.BaseFileName
 			files = append(files, file)
-			newFile := path.Join(f.saveDirectory, filepath.Base(file))
+			newFile := path.Join(f.info.SaveDirectory, filepath.Base(file))
 			newFileNames = append(newFileNames, newFile)
 			err := block.CopyFile(file, newFile)
 			if err != nil {
@@ -74,20 +75,33 @@ func (f FullBackup) Backup(manifest sstable.Manifest) error {
 
 	f.info.Files = newFileNames
 
-	err = f.info.SaveToFile(path.Join(f.saveDirectory, InfoFileName))
+	err = f.info.SaveToFile(path.Join(f.info.SaveDirectory, InfoFileName))
 	if err != nil {
 		return err
 	}
 
-	err = manifest.SaveTo(f.saveDirectory)
+	err = manifest.SaveTo(f.info.SaveDirectory)
 	return err
 }
 
-func (f FullBackup) Restore() error {
-	//TODO
+func (f FullBackup) Restore(directory string) error {
+	for _, file := range f.info.Files {
+		err := block.CopyFile(file, directory)
+		if err != nil {
+			return err
+		}
+	}
+	err := block.CopyFile(path.Join(f.info.SaveDirectory, sstable.ManifestFileName), directory)
+	if err != nil {
+		return fmt.Errorf("failed to save manifest: %w", err)
+	}
 	return nil
 }
 
-func (f FullBackup) GetInfo() BackupInfo {
-	return f.info
+func (f FullBackup) GetInfo() *BackupInfo {
+	return &f.info
+}
+
+func (f FullBackup) GetId() string {
+	return f.info.Id
 }

@@ -6,6 +6,7 @@ const BackupFileExtension = ".backup"
 
 type IBackup interface {
 	Backup(manifest sstable.Manifest) error
-	Restore() error
-	GetInfo() BackupInfo
+	GetInfo() *BackupInfo
+	GetId() string
+	Restore(directory string) error
 }

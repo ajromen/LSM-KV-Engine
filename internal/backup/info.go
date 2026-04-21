@@ -13,6 +13,10 @@ type BackupInfo struct {
 	Type      enums.BackupType `json:"type"`
 	Timestamp int64            `json:"timestamp"`
 	Files     []string         `json:"files"`
+	NewFiles  []string         `json:"new_files"` // za incremental
+
+	Base          *IBackup `json:"-"` // runtime
+	SaveDirectory string   `json:"-"` // runtime
 }
 
 func (bi *BackupInfo) SaveToFile(filename string) error {
