@@ -34,6 +34,7 @@ func handleCreateBackup(engine *core.Engine, parts []string) {
 			PrintError(fmt.Sprint("Create backup failed: ", err.Error()))
 		}
 		PrintSuccess(fmt.Sprintf("Created backup %s", id))
+		return
 	}
 
 	var backupType enums.BackupType

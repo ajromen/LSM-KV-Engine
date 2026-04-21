@@ -49,7 +49,7 @@ func NewIncrementalBackup(saveDirectory *string, baseBackup *IBackup) *Increment
 	}
 }
 
-func (i IncrementalBackup) Backup(manifest sstable.Manifest) error {
+func (i *IncrementalBackup) Backup(manifest sstable.Manifest) error {
 	err := block.EnsureDir(i.info.SaveDirectory)
 	if err != nil {
 		return err
@@ -86,20 +86,20 @@ func (i IncrementalBackup) Backup(manifest sstable.Manifest) error {
 	return nil
 }
 
-func (i IncrementalBackup) Restore(directory string) error {
+func (i *IncrementalBackup) Restore(directory string) error {
 	//TODO implement me
 	panic("implement me")
 }
 
-func (i IncrementalBackup) GetInfo() *BackupInfo {
+func (i *IncrementalBackup) GetInfo() *BackupInfo {
 	return &i.info
 }
 
-func (i IncrementalBackup) GetId() string {
+func (i *IncrementalBackup) GetId() string {
 	return i.info.Id
 }
 
-func (i IncrementalBackup) ContainsFile(fileName string) bool {
+func (i *IncrementalBackup) ContainsFile(fileName string) bool {
 	for _, file := range i.info.NewFiles {
 		if file == fileName {
 			return true

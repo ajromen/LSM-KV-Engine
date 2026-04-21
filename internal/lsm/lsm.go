@@ -84,6 +84,10 @@ func (l *LSM) Get(key []byte) ([]byte, bool, error) {
 		return entry.Value, true, nil
 	}
 
+	if config.GetSettings().Debug {
+		fmt.Printf("Key not found in memtable checking cache\n")
+	}
+
 	// 2. check cache
 	if val, ok := l.readCache.Get(string(key)); ok {
 		if val == nil {
@@ -93,7 +97,7 @@ func (l *LSM) Get(key []byte) ([]byte, bool, error) {
 	}
 
 	if config.GetSettings().Debug {
-		fmt.Printf("Key not found in memtable checking sstable\n")
+		fmt.Printf("Key not found in cache checking sstable\n")
 	}
 
 	// 3. check SSTable

@@ -53,7 +53,7 @@ func NewFullBackup(saveDirectory *string) *FullBackup {
 // 1. copy all sstables to saveDirectory
 // 2. save backupMetadata
 // 3. save manifest for restore
-func (f FullBackup) Backup(manifest sstable.Manifest) error {
+func (f *FullBackup) Backup(manifest sstable.Manifest) error {
 	err := block.EnsureDir(f.info.SaveDirectory)
 	if err != nil {
 		return err
@@ -83,30 +83,32 @@ func (f FullBackup) Backup(manifest sstable.Manifest) error {
 	return err
 }
 
-func (f FullBackup) Restore(directory string) error {
+func (f *FullBackup) Restore(directory string) error {
 	for _, file := range f.info.Files {
 		filePath := path.Join(f.info.SaveDirectory, file)
-		err := block.CopyFile(filePath, directory)
+		destPath := path.Join(directory, filepath.Base(file))
+		err := block.CopyFile(filePath, destPath)
 		if err != nil {
 			return err
 		}
 	}
-	err := block.CopyFile(path.Join(f.info.SaveDirectory, sstable.ManifestFileName), directory)
+	destManifest := path.Join(directory, sstable.ManifestFileName)
+	err := block.CopyFile(path.Join(f.info.SaveDirectory, sstable.ManifestFileName), destManifest)
 	if err != nil {
 		return fmt.Errorf("failed to save manifest: %w", err)
 	}
 	return nil
 }
 
-func (f FullBackup) GetInfo() *BackupInfo {
+func (f *FullBackup) GetInfo() *BackupInfo {
 	return &f.info
 }
 
-func (f FullBackup) GetId() string {
+func (f *FullBackup) GetId() string {
 	return f.info.Id
 }
 
-func (f FullBackup) ContainsFile(filename string) bool {
+func (f *FullBackup) ContainsFile(filename string) bool {
 	for _, file := range f.info.Files {
 		if file == filename {
 			return true

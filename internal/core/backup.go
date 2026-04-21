@@ -39,6 +39,7 @@ func (engine *Engine) GetAllBackups() []string {
 // 2. delete everything
 // 3. try restore - if restore fails restore from full backup
 // 4. remove full backup
+// 5. reload lsm
 func (engine *Engine) RestoreFromBackup(backupId string) error {
 	backup := engine.backupManager.GetById(backupId)
 	if backup == nil {
@@ -52,11 +53,7 @@ func (engine *Engine) RestoreFromBackup(backupId string) error {
 	}
 
 	// step 2
-	err = engine.lsm.Finish()
-	if err != nil {
-		return err
-	}
-
+	// wal
 	err = engine.ClearAll()
 	if err != nil {
 		_ = engine.backupManager.DeleteBackup(newBackupId)
@@ -72,9 +69,12 @@ func (engine *Engine) RestoreFromBackup(backupId string) error {
 		return fmt.Errorf("unable to restore backup %s: %w \n restored to previous state ", backupId, err)
 	}
 
-	//step 4
-	_ = engine.backupManager.DeleteBackup(newBackupId)
+	// step 4
+	if err := engine.reinitialize(); err != nil {
+		return fmt.Errorf("restore ok but failed to reinitialize: %w", err)
+	}
 
+	_ = engine.backupManager.DeleteBackup(newBackupId)
 	return nil
 }
 
