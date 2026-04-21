@@ -80,3 +80,17 @@ func handleCascadeDeleteBackup(engine *core.Engine, parts []string) {
 	}
 	PrintSuccess(fmt.Sprintf("Cascade deleted backup successful %s", parts[1]))
 }
+
+func handleRestoreBackup(engine *core.Engine, parts []string) {
+	if len(parts) != 2 {
+		PrintError(fmt.Sprint("Usage: restore-backup <id>"))
+		return
+	}
+
+	err := engine.RestoreFromBackup(parts[1])
+	if err != nil {
+		PrintError(fmt.Sprintf("Restore unsuccessful: ", err))
+		return
+	}
+	PrintSuccess("Restore successful")
+}

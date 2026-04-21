@@ -38,6 +38,7 @@ Commands:
     list-backups                 List all backups (includes checkpoints)
     create-backup [type]         Create backup of type: full, incremental, checkpoint (if none is provided uses default)
     delete-backup <id>           Delete backup by id
+    restore-backup <id>          Delete everything and restore to backup (create-backup recomended)
     cascade-delete-backup <id>   Delete backup and all backups that are dependent on it
 Notes:
   ttl: time-to-live in seconds,
