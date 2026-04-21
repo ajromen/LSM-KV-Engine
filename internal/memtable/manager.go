@@ -177,7 +177,18 @@ func (mm *MemtableManager) Iterator() iterator.Iterator[MemtableEntry] {
 	}
 
 	rawMerge := NewRawIterator(rawIters, mm.mergeStructure)
-	return NewMergedMemtableIterator(rawMerge)
+	checker := func(key []byte, seqId uint64) bool {
+		if mm.active.IsCoveredByRangeDel(key, seqId) {
+			return true
+		}
+		for i := len(mm.immutable) - 1; i >= 0; i-- {
+			if mm.immutable[i].IsCoveredByRangeDel(key, seqId) {
+				return true
+			}
+		}
+		return false
+	}
+	return NewMergedMemtableIterator(rawMerge, checker)
 }
 
 func (mm *MemtableManager) ResetAll() {
