@@ -11,13 +11,7 @@ import (
 	"github.com/ajromen/LSM-KV-Engine/internal/block"
 )
 
-// to do : Recovery, Batch/transactions, Sync policy, Low WaterMark
-// 1.1 Write-Ahead Log (WAL)
-// WAL treba implementirati kao segmentirani log.
-// Svaki segment ima fiksan broj zapisa koje korisnik specificira.
-// ????
-// ne sece rekord po segmentima kako treba, memtable salje neki svoj id na osnovu kog wal mora da zna dokle smije da brise
-// wal salje na disk poslije svakog zapisa, ali moze i na nivou bloka, znaci ne postoji sync policy???
+// da li sece rekord po segmentima kako treba
 // config.GetSettings().SavePath
 
 const (
@@ -33,6 +27,7 @@ type WAL struct {
 	NextSegmentID  uint64
 	NextSequenceID uint64
 	NextTxnID      uint64
+	LowWatermark   uint64
 	BM             *block.BlockManager
 }
 
@@ -66,6 +61,7 @@ func OpenWAL(dir string, blockSize int, maxBlocks int) (*WAL, error) {
 		NextSegmentID:  1,
 		NextSequenceID: 1,
 		NextTxnID:      1,
+		LowWatermark:   0,
 		BM:             bm,
 	}
 
@@ -187,19 +183,23 @@ func (w *WAL) AppendWALRecord(wr WALRecord) error {
 	}
 
 	err := w.ActiveSegment.AppendWALRecord(wr)
-	if err == nil {
-		return nil
-	}
-	if !w.ActiveSegment.IsFull() {
-		return err
-	}
-
-	err = w.RotateSegment()
 	if err != nil {
-		return err
+		if !w.ActiveSegment.IsFull() {
+			return err
+		}
+
+		err = w.RotateSegment()
+		if err != nil {
+			return err
+		}
+
+		err = w.ActiveSegment.AppendWALRecord(wr)
+		if err != nil {
+			return err
+		}
 	}
 
-	return w.ActiveSegment.AppendWALRecord(wr)
+	return w.Sync()
 }
 
 func (w *WAL) BatchWrite(ops []TxnOp) error {
@@ -506,6 +506,27 @@ func ApplyTransactions(records []WALRecord) ([]Record, error) {
 	return result, nil
 }
 
+func (w *WAL) SetLowWatermark(segmentID uint64) error {
+	if w == nil {
+		return fmt.Errorf("wal is nil")
+	}
+
+	if segmentID == 0 {
+		return nil
+	}
+
+	if segmentID < w.LowWatermark {
+		return fmt.Errorf("low watermark cannot move backwards")
+	}
+
+	if w.ActiveSegment != nil && segmentID >= w.ActiveSegment.ID {
+		return fmt.Errorf("cannot set low watermark to active or future segment")
+	}
+
+	w.LowWatermark = segmentID
+	return w.DeleteOldSegments()
+}
+
 func (w *WAL) RotateSegment() error {
 	if w == nil {
 		return fmt.Errorf("wal is nil")
@@ -629,6 +650,54 @@ func (w *WAL) InitNextTxnID() error {
 	w.NextTxnID = maxTxn + 1
 	if w.NextTxnID == 0 {
 		w.NextTxnID = 1
+	}
+
+	return nil
+}
+
+func (w *WAL) DeleteOldSegments() error {
+	if w == nil {
+		return fmt.Errorf("wal is nil")
+	}
+
+	entries, err := ListFiles(w.Dir)
+	if err != nil {
+		return err
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+
+		name := entry.Name()
+		if !strings.HasPrefix(name, FilePrefix) || !strings.HasSuffix(name, FileSuffix) {
+			continue
+		}
+
+		id, err := ParseSegmentID(name)
+		if err != nil {
+			return err
+		}
+
+		if id > w.LowWatermark {
+			continue
+		}
+
+		if w.ActiveSegment != nil && id == w.ActiveSegment.ID {
+			continue
+		}
+
+		path := filepath.Join(w.Dir, name)
+
+		if w.BM != nil {
+			w.BM.InvalidateFile(path)
+		}
+
+		err = os.Remove(path)
+		if err != nil {
+			return err
+		}
 	}
 
 	return nil
