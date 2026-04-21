@@ -1,7 +1,9 @@
 package core
 
 import (
+	"github.com/ajromen/LSM-KV-Engine/internal/backup"
 	"github.com/ajromen/LSM-KV-Engine/internal/config"
+	"github.com/ajromen/LSM-KV-Engine/internal/enums"
 	"github.com/ajromen/LSM-KV-Engine/internal/lsm"
 	"github.com/ajromen/LSM-KV-Engine/internal/notifier"
 	"github.com/ajromen/LSM-KV-Engine/internal/sequence"
@@ -10,13 +12,14 @@ import (
 )
 
 type Engine struct {
-	config      *config.Config
-	lsm         *lsm.LSM
-	seqGen      *sequence.SequenceGenerator
-	ttlJanitor  *ttl.Janitor
-	inMemoryTTL bool
-	notifier    *notifier.Notifier
-	tokenBucket *token_bucket.TokenBucket
+	config        *config.Config
+	lsm           *lsm.LSM
+	seqGen        *sequence.SequenceGenerator
+	ttlJanitor    *ttl.Janitor
+	inMemoryTTL   bool
+	notifier      *notifier.Notifier
+	tokenBucket   *token_bucket.TokenBucket
+	backupManager *backup.BackupManager
 	//wal
 }
 
@@ -37,6 +40,14 @@ type EngineInterface interface {
 	PrefixScan(prefix string, pageNumber, pageSize int) ([]ScanResult, error)
 	RangeIterate(lower, upper string) (*ActiveIterator, error)
 	PrefixIterate(prefix string) (*ActiveIterator, error)
+
+	GetAllBackups() []string
+	RestoreFromBackup(backupId string) error
+	CreateBackup(backupType enums.BackupType) error
+	DeleteBackup(backupId string) error
+
+	CreateSnapshot() error
+	CheckoutSnapshot() error
 
 	DataRaw(index int)
 }

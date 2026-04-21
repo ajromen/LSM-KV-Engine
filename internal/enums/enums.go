@@ -62,3 +62,10 @@ const (
 	Heap  MergeStructureType = 0
 	WTree MergeStructureType = 1
 )
+
+type BackupType byte
+
+const (
+	IncrementalBackup BackupType = 0
+	FullBackup        BackupType = 1
+)

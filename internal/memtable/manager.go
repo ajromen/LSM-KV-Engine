@@ -81,7 +81,6 @@ func (mm *MemtableManager) rotate() {
 // flushWorker runs in a separate goroutine, and it takes immutable memtables and flushes them to disk
 func (mm *MemtableManager) flushWorker(flushHandler func([]MemtableEntry, []MemtableEntry)) {
 	for mem := range mm.flushChannel {
-
 		mm.mu.Lock()
 		shouldFlush := mm.containsImmutable(mem)
 		mm.removeImmutable(mem)
@@ -95,10 +94,6 @@ func (mm *MemtableManager) flushWorker(flushHandler func([]MemtableEntry, []Memt
 			}
 		}
 
-		entries, rangeDelEntries := mem.Flush()
-		if flushHandler != nil {
-			flushHandler(entries, rangeDelEntries)
-		}
 		mm.wg.Done()
 	}
 }
@@ -190,18 +185,16 @@ func (mm *MemtableManager) ResetAll() {
 
 func (mm *MemtableManager) Close() {
 	mm.mu.Lock()
-
 	if mm.active != nil && mm.active.ShouldFlush() {
 		immutable := mm.active
 		mm.immutable = append(mm.immutable, immutable)
 		mm.active = mm.factory()
-
 		mm.wg.Add(1)
+		mm.mu.Unlock()
 		mm.flushChannel <- immutable
+	} else {
+		mm.mu.Unlock()
 	}
-
-	mm.closing = true
-	mm.mu.Unlock()
 
 	close(mm.flushChannel)
 	mm.wg.Wait()

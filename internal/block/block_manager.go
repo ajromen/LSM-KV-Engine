@@ -40,7 +40,6 @@ func (bm *BlockManager) Read(key BlockKey) ([]byte, error) {
 	}
 
 	bm.cache.Put(key, data)
-	fmt.Printf("READ BLOCK @%d: %x\n", key.Offset, data)
 
 	return data, nil
 }
@@ -78,7 +77,6 @@ func (bm *BlockManager) Write(key BlockKey, value []byte) error {
 	cpy := make([]byte, len(value))
 	copy(cpy, value)
 	bm.cache.Put(key, cpy)
-	fmt.Printf("WRITE BLOCK @%d: %x\n", key.Offset, value)
 	return nil
 }
 
@@ -205,6 +203,23 @@ func EnsureDir(path string) error {
 	return nil
 }
 
+func CopyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+
+	_, err = io.Copy(out, in)
+	return err
+}
+
 func DeleteFile(path string) error {
 	err := os.Remove(path)
 	if err != nil {
@@ -222,4 +237,8 @@ func (bm *BlockManager) ClearCache() {
 
 func (bm *BlockManager) InvalidateFile(filePath string) {
 	bm.cache.InvalidateFile(filePath)
+}
+
+func DeleteDirectory(directory string) error {
+	return os.RemoveAll(directory)
 }

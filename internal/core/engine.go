@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/ajromen/LSM-KV-Engine/internal/backup"
 	"github.com/ajromen/LSM-KV-Engine/internal/config"
 	"github.com/ajromen/LSM-KV-Engine/internal/enums"
 	"github.com/ajromen/LSM-KV-Engine/internal/lsm"
@@ -21,24 +22,45 @@ func NewEngine() (*Engine, error) {
 	if err := os.MkdirAll(dataDir, 0755); err != nil {
 		return nil, err
 	}
-	lsmTree, err := lsm.NewLSM(dataDir)
+
+	backupManager, err := backup.NewBackupManager()
 	if err != nil {
 		return nil, err
 	}
-	engine := Engine{lsm: lsmTree, inMemoryTTL: config.GetSettings().TTL.InMemoryTTL, notifier: notifier.NewNotifier()}
 
+	engine := &Engine{
+		inMemoryTTL:   config.GetSettings().TTL.InMemoryTTL,
+		notifier:      notifier.NewNotifier(),
+		backupManager: backupManager,
+	}
+
+	if err := engine.initializeComponents(); err != nil {
+		return nil, err
+	}
+
+	return engine, nil
+}
+
+func (engine *Engine) initializeComponents() error {
+	dataDir := config.GetSettings().SavePath
+
+	newLsm, err := lsm.NewLSM(dataDir)
+	if err != nil {
+		return err
+	}
+	engine.lsm = newLsm
 	engine.recover()
 
 	cfg := config.GetSettings().TokenBucket
 	if cfg.MaxTokens > 0 {
-		existing, found, err := lsmTree.Get([]byte(token_bucket.InternalKey))
+		engine.tokenBucket = nil
+		existing, found, err := engine.lsm.Get([]byte(token_bucket.InternalKey))
 		if err == nil && found {
 			tb := token_bucket.Deserialize(existing)
 			if tb != nil {
 				engine.tokenBucket = tb
 			}
 		}
-
 		if engine.tokenBucket == nil {
 			engine.tokenBucket = token_bucket.New(cfg.MaxTokens, cfg.ResetIntervalMs)
 			engine.persistTokenBucket()
@@ -49,15 +71,20 @@ func NewEngine() (*Engine, error) {
 		engine.ttlJanitor = ttl.NewTTLJanitor(engine.notifier)
 		heap, index, err := engine.lsm.GetAllTTLFomSST()
 		if err != nil {
-			return nil, err
+			return err
 		}
 		engine.ttlJanitor.Init(heap, index)
 		go engine.ttlJanitor.Run()
 	}
-	if config.GetSettings().Debug {
-		print("Engine created\n")
+
+	return nil
+}
+
+func (engine *Engine) reinitialize() error {
+	if engine.inMemoryTTL {
+		engine.ttlJanitor.Stop()
 	}
-	return &engine, nil
+	return engine.initializeComponents()
 }
 
 func (engine *Engine) persistTokenBucket() {
@@ -177,16 +204,31 @@ func (engine *Engine) ClearAll() error {
 		return fmt.Errorf("clear-all: lsm clear failed: %w", err)
 	}
 
-	dataDir := config.GetSettings().SavePath
-	manifestPath := filepath.Join(dataDir, "MANIFEST")
-
-	if err := os.Remove(manifestPath); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("clear-all: failed to remove manifest: %w", err)
+	err := clearDataDir(config.GetSettings().SavePath)
+	if err != nil {
+		return err
 	}
+
 	if engine.inMemoryTTL {
 		engine.ttlJanitor.ClearAll()
 	}
 
+	return nil
+}
+
+func clearDataDir(dataDir string) error {
+	entries, err := os.ReadDir(dataDir)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		if err := os.Remove(filepath.Join(dataDir, entry.Name())); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
