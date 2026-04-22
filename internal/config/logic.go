@@ -26,8 +26,8 @@ func LoadConfig(flags *flags.FLags) error {
 		return err
 	}
 
-	err = cfg.validateFields()
-	if err != nil {
+	// validate final config
+	if err := cfg.validateFields(); err != nil {
 		return err
 	}
 	createSettings(cfg)
@@ -80,6 +80,8 @@ func (c *Config) applyFlags(flags *flags.FLags) error {
 			return fmt.Errorf("invalid sstable format: %s", format)
 		}
 	}
+
+	// Block cache
 	if flags.BlockCacheMaxBlocks != nil {
 		c.BlockManager.BlockCacheMaxBlocks = *flags.BlockCacheMaxBlocks
 	}
@@ -128,12 +130,17 @@ func (c *Config) validateFields() error {
 		return fmt.Errorf("invalid sstable format")
 	}
 
+	// BlockManager validation
+	if c.BlockManager.BlockSize <= 0 {
+		return fmt.Errorf("blockmanager.block_size must be positive")
+	}
+	// multiple of 4KB
 	if c.BlockManager.BlockSize%(4*1024) != 0 {
 		return fmt.Errorf("invalid block size, must be multiple of 4kb")
 	}
 
 	if c.BlockManager.BlockCacheMaxBlocks < 1 {
-		return fmt.Errorf("invalid block cacheMaxBlocks must be positive")
+		return fmt.Errorf("invalid blockcache_max_blocks must be positive")
 	}
 
 	if !fileExists(c.SavePath) {

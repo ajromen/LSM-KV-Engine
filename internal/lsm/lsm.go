@@ -84,6 +84,10 @@ func (l *LSM) Get(key []byte) ([]byte, bool, error) {
 		return entry.Value, true, nil
 	}
 
+	if config.GetSettings().Debug {
+		fmt.Printf("Key not found in memtable checking cache\n")
+	}
+
 	// 2. check cache
 	if val, ok := l.readCache.Get(string(key)); ok {
 		if val == nil {
@@ -93,7 +97,7 @@ func (l *LSM) Get(key []byte) ([]byte, bool, error) {
 	}
 
 	if config.GetSettings().Debug {
-		fmt.Printf("Key not found in memtable checking sstable\n")
+		fmt.Printf("Key not found in cache checking sstable\n")
 	}
 
 	// 3. check SSTable
@@ -132,9 +136,10 @@ func (l *LSM) GetTTL(key []byte) (int64, bool, error) {
 	return 0, false, nil
 }
 
+// flushes memtable
 func (l *LSM) Finish() error {
 	l.memtableeManager.Close()
-	return l.sstableManager.Manifest.Save()
+	return nil
 }
 
 func (l *LSM) ClearAll() error {
@@ -222,4 +227,8 @@ func (l *LSM) GetVersions(key []byte, maxVersions int) ([][]byte, error) {
 		}
 	}
 	return values, nil
+}  
+  
+func (l *LSM) GetManifest() sstable.Manifest {
+	return *l.sstableManager.Manifest
 }

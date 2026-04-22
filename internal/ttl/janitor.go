@@ -83,7 +83,6 @@ func (j *Janitor) evict() {
 }
 
 func (j *Janitor) ClearAll() {
-	// TODO clear janitor
 	j.mu.Lock()
 	j.heap = NewExpiryHeap()
 	j.index = make(map[string]int64)

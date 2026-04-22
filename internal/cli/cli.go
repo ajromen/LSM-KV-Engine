@@ -55,6 +55,16 @@ func RunCli(engine *core.Engine) {
 			handleGetVersions(engine, parts)
 		case "get-version":
 			handleGetVersion(engine, parts)
+		case "delete-backup":
+			handleDeleteBackup(engine, parts)
+		case "create-backup":
+			handleCreateBackup(engine, parts)
+		case "list-backups":
+			handleListBackups(engine, parts)
+		case "cascade-delete-backup":
+			handleCascadeDeleteBackup(engine, parts)
+		case "restore-backup":
+			handleRestoreBackup(engine, parts)
 		case "exit", "quit", "q":
 			print(blue + "Exiting...")
 			err := engine.Close()

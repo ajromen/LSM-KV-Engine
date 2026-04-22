@@ -31,7 +31,7 @@ func handleTTL(engine *core.Engine, parts []string) {
 		PrintError(fmt.Sprint("TTL: key '" + key + "' expired"))
 		return
 	}
-	PrintSuccess(fmt.Sprintf("Key: '%s', TTL: %dms, Expires At: %s\n", key, t.UnixMilli()-time.Now().UnixMilli(), t.Format("15:04:05 02 Jan 2006 ")))
+	PrintSuccess(fmt.Sprintf("Key: '%s', TTL: %dms, Expires At: %s", key, t.UnixMilli()-time.Now().UnixMilli(), t.Format("15:04:05 02 Jan 2006 ")))
 }
 
 func parseTTL(s string) (int64, error) {

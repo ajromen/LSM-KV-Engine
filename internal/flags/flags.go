@@ -5,7 +5,6 @@ import (
 	"strconv"
 )
 
-// FLags should be pointers to allow nil value when flag is not explicitly provided
 type FLags struct {
 	ConfigPath                 *string
 	Debug                      *bool
@@ -39,6 +38,7 @@ func ParseFlags() *FLags {
 
 	flagString(&configPathOpt, "config", "Path to config file")
 	flagString(&configPathOpt, "c", "Path to config file")
+
 	flagBool(&debugOpt, "debug", "Debug mode")
 	flagBool(&debugOpt, "d", "Debug mode")
 	flagInt(&mtMaxSizeOpt, "memtable-max-size", "Max memtable size in number of entries")

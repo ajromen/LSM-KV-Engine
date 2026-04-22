@@ -58,7 +58,10 @@ func NewDefaultConfig() *Config {
 		SavePath: getDefaultSavePath(),
 		Debug:    defaultDebug,
 		WAL: WALConfig{
-			WALSegmentSize: defaultWalSegmentSize,
+			SegmentSize:  defaultWalSegmentSize,
+			BlockSize:    defaultBlockSize, // MUST match BlockManager.BlockSize
+			SyncInterval: 0,                // ms; 0 => only on Flush/Commit
+			MaxSegments:  0,                // 0 => unlimited
 		},
 		Memtable: MemtableConfig{
 			MemtableType:         memtableType,
@@ -114,6 +117,10 @@ func NewDefaultConfig() *Config {
 		TokenBucket: TokenBucketConfig{
 			MaxTokens:       defaultTokenBucketMaxTokens,
 			ResetIntervalMs: defaultTokenBucketResetIntervalMs,
+		},
+		Backup: BackupConfig{
+			Type:          enums.FullBackup,
+			SaveDirectory: "backups",
 		},
 	}
 }
