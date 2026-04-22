@@ -44,6 +44,8 @@ func (bm *BackupManager) restoreManagerFromManifest() error {
 			backup = NewFullBackup(&entry.BackupDirectory)
 		case enums.IncrementalBackup:
 			backup = NewIncrementalBackup(&entry.BackupDirectory, nil)
+		case enums.Checkpoint:
+			backup = NewCheckpoint(&entry.BackupDirectory)
 		}
 		b := backup
 		bm.Backups[b.GetId()] = &b
@@ -88,7 +90,11 @@ func (bm *BackupManager) CreateBackup(manifest sstable.Manifest, backupType enum
 func (bm *BackupManager) addBackup(backup IBackup) error {
 	b := backup
 	bm.Backups[b.GetId()] = &b
-	bm.LastBackup = &b
+
+	if backup.GetInfo().Type != enums.Checkpoint {
+		bm.LastBackup = &b
+	}
+
 	return bm.Manifest.AddBackup(b.GetInfo())
 }
 
@@ -141,12 +147,19 @@ func (bm *BackupManager) CascadeDelete(id string) error {
 	if !ok {
 		return fmt.Errorf("cannot delete: backup %s doesnt exist", id)
 	}
+
+	var childIds []string
 	for _, b := range bm.Backups {
 		if (*b).GetInfo().BaseId == id {
-			err := bm.CascadeDelete((*b).GetInfo().Id)
-			if err != nil {
-				return err
-			}
+			childIds = append(childIds, (*b).GetInfo().Id)
+		}
+	}
+
+	delete(bm.Backups, id)
+
+	for _, childId := range childIds {
+		if err := bm.CascadeDelete(childId); err != nil {
+			return err
 		}
 	}
 
@@ -154,6 +167,5 @@ func (bm *BackupManager) CascadeDelete(id string) error {
 	if err != nil {
 		return err
 	}
-	delete(bm.Backups, id)
 	return bm.Manifest.RemoveBackup((*backup).GetInfo().SaveDirectory)
 }
