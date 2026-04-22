@@ -75,6 +75,10 @@ func (bm *BackupManager) CreateBackup(manifest sstable.Manifest, backupType enum
 		backup = NewIncrementalBackup(nil, bm.LastBackup)
 	case enums.FullBackup:
 		backup = NewFullBackup(nil)
+	case enums.Checkpoint:
+		backup = NewCheckpoint(nil)
+	default:
+		return "", fmt.Errorf("unknown backup type: %d", backupType)
 	}
 	err := backup.Backup(manifest)
 	if err != nil {

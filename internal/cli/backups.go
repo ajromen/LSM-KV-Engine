@@ -43,6 +43,8 @@ func handleCreateBackup(engine *core.Engine, parts []string) {
 		backupType = enums.FullBackup
 	case "incremental":
 		backupType = enums.IncrementalBackup
+	case "checkpoint":
+		backupType = enums.Checkpoint
 	}
 
 	id, err := engine.CreateBackup(backupType)

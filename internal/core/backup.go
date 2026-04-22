@@ -20,6 +20,8 @@ func (engine *Engine) GetAllBackups() []string {
 			backupType = "full"
 		case enums.IncrementalBackup:
 			backupType = "incr"
+		case enums.Checkpoint:
+			backupType = "chck"
 		default:
 			backupType = "unknown"
 		}
