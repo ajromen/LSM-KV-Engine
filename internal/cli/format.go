@@ -34,6 +34,10 @@ Commands:
     range-scan <lower> <upper> <pageSize>   Interactive paginated scan in [lower, upper]
     prefix-scan <prefix> <pageSize>         Interactive paginated scan with prefix
     Scan commands: next/n, prev/p, stop/s
+  Snapshots:
+    snapshot <key>                    Retain all future versions of a key
+    get-versions <key>                List all versions (newest first)
+    get-version <key> <version>       Get specific version (0=current, 1=previous, ...)
 Notes:
   ttl: time-to-live in seconds,
   unit suffixes: ms, s (default), min, h, D, M, Y`

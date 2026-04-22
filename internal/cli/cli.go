@@ -51,6 +51,10 @@ func RunCli(engine *core.Engine) {
 			handlePrefixIterate(engine, parts, reader)
 		case "snapshot":
 			handleSnapshot(engine, parts)
+		case "get-versions":
+			handleGetVersions(engine, parts)
+		case "get-version":
+			handleGetVersion(engine, parts)
 		case "exit", "quit", "q":
 			print(blue + "Exiting...")
 			err := engine.Close()

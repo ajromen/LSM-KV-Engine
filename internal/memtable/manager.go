@@ -1,6 +1,9 @@
 package memtable
 
 import (
+	"bytes"
+	"math"
+	"sort"
 	"sync"
 	"time"
 
@@ -274,4 +277,48 @@ func (mm *MemtableManager) IsCoveredByRangeDel(key []byte, keySeqId uint64) bool
 		}
 	}
 	return false
+}
+
+// GetVersions returns all stored versions of key from all memtable instances, newest first.
+func (mm *MemtableManager) GetVersions(key []byte, maxVersions int) []MemtableEntry {
+	mm.mu.Lock()
+	defer mm.mu.Unlock()
+
+	seen := make(map[uint64]struct{})
+	var versions []MemtableEntry
+
+	collect := func(mem Memtable) {
+		it := mem.RawIterator()
+		target := MemtableEntry{Key: key, SeqId: math.MaxUint64}
+		it.Seek(target)
+		for it.Valid() {
+			entry := it.Key()
+			if !bytes.Equal(entry.Key, key) {
+				break
+			}
+			if entry.OpType != enums.OpTypeDel {
+				if _, dup := seen[entry.SeqId]; !dup {
+					seen[entry.SeqId] = struct{}{}
+					versions = append(versions, entry)
+				}
+			}
+			it.Next()
+			if maxVersions > 0 && len(versions) >= maxVersions {
+				return
+			}
+		}
+	}
+
+	collect(mm.active)
+	for i := len(mm.immutable) - 1; i >= 0; i-- {
+		collect(mm.immutable[i])
+		if maxVersions > 0 && len(versions) >= maxVersions {
+			break
+		}
+	}
+
+	sort.Slice(versions, func(i, j int) bool {
+		return versions[i].SeqId > versions[j].SeqId
+	})
+	return versions
 }
