@@ -26,9 +26,15 @@ func NewIncrementalBackup(saveDirectory *string, baseBackup *IBackup) *Increment
 		id := strconv.FormatInt(timestamp, 10)
 		savePath := path.Join(settings.SavePath, settings.Backup.SaveDirectory, id)
 		saveDirectory = &savePath
+
+		baseId := ""
+		if baseBackup != nil {
+			baseId = (*baseBackup).GetId()
+		}
+
 		info = BackupInfo{
 			Id:            id,
-			BaseId:        (*baseBackup).GetId(),
+			BaseId:        baseId,
 			Base:          baseBackup,
 			Type:          enums.IncrementalBackup,
 			Timestamp:     timestamp,
@@ -36,7 +42,6 @@ func NewIncrementalBackup(saveDirectory *string, baseBackup *IBackup) *Increment
 			NewFiles:      nil,
 			SaveDirectory: *saveDirectory,
 		}
-
 	} else {
 		info = BackupInfo{}
 		err := info.LoadFromFile(path.Join(*saveDirectory, InfoFileName))

@@ -147,12 +147,19 @@ func (bm *BackupManager) CascadeDelete(id string) error {
 	if !ok {
 		return fmt.Errorf("cannot delete: backup %s doesnt exist", id)
 	}
+
+	var childIds []string
 	for _, b := range bm.Backups {
 		if (*b).GetInfo().BaseId == id {
-			err := bm.CascadeDelete((*b).GetInfo().Id)
-			if err != nil {
-				return err
-			}
+			childIds = append(childIds, (*b).GetInfo().Id)
+		}
+	}
+
+	delete(bm.Backups, id)
+
+	for _, childId := range childIds {
+		if err := bm.CascadeDelete(childId); err != nil {
+			return err
 		}
 	}
 
@@ -160,6 +167,5 @@ func (bm *BackupManager) CascadeDelete(id string) error {
 	if err != nil {
 		return err
 	}
-	delete(bm.Backups, id)
 	return bm.Manifest.RemoveBackup((*backup).GetInfo().SaveDirectory)
 }
