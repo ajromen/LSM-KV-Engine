@@ -49,6 +49,12 @@ func RunCli(engine *core.Engine) {
 			handleRangeIterate(engine, parts, reader)
 		case "prefix-iterate":
 			handlePrefixIterate(engine, parts, reader)
+		case "snapshot":
+			handleSnapshot(engine, parts)
+		case "get-versions":
+			handleGetVersions(engine, parts)
+		case "get-version":
+			handleGetVersion(engine, parts)
 		case "delete-backup":
 			handleDeleteBackup(engine, parts)
 		case "create-backup":

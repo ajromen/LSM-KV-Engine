@@ -67,6 +67,7 @@ type SSTableManager struct {
 	cachedFragments []shared.RangeDelEntry
 	fragmentsDirty  bool
 	mu              sync.Mutex
+	snapshotKeys    map[string]struct{}
 }
 
 func NewSSTableManager(dataDir string) *SSTableManager {
@@ -82,6 +83,7 @@ func NewSSTableManager(dataDir string) *SSTableManager {
 	}
 	manager.Manifest = manifest
 	manager.blockManager = block.NewBlockManager(blockSize)
+	manager.snapshotKeys = make(map[string]struct{})
 	num, err := manager.LoadExistingSSTables()
 	if err != nil {
 		panic(fmt.Errorf("failed to load existing sstables: %v", err))
@@ -336,6 +338,17 @@ func (sm *SSTableManager) ClearAll() error {
 	return sm.Manifest.Save()
 }
 
+func (sm *SSTableManager) AddSnapshotKey(key []byte) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	sm.snapshotKeys[string(key)] = struct{}{}
+}
+
+func (sm *SSTableManager) isSnapshotted(key []byte) bool {
+	_, ok := sm.snapshotKeys[string(key)]
+	return ok
+}
+
 // MergeSSTables pass in sstables to merge them into a single sstable and delete old ones
 // skipTombstones if it's the last layer
 // 1. create new sstable
@@ -362,25 +375,72 @@ func (sm *SSTableManager) MergeSSTables(readers []*SSTableReader, toLayer int, s
 	mergedRangeDels := MergeAndFragment(readers)
 
 	// 2. iterate through all elems and add to new sstable
-	iterator, err := NewSSTableMergeIterator(readers, byte(enums.Heap))
+	rawIter, err := NewSSTableMergeIteratorRaw(readers, byte(enums.Heap))
 	if err != nil {
 		return err
 	}
+
+	type versionState uint8
+	const (
+		stateUnseen     versionState = 0
+		stateWritten    versionState = 1
+		stateTombstoned versionState = 2
+	)
+	keyStates := make(map[string]versionState)
 	count := 0
 	t := time.Now().UnixMilli()
-	for iterator.Valid() {
-		rec := iterator.Value()
-		if skipTombstones && rec.OpType == enums.OpTypeDel || rec.ExpiresAt < t && rec.ExpiresAt != 0 {
-			iterator.Next()
+
+	for rawIter.Valid() {
+		rec := rawIter.Value()
+		keyStr := string(rec.Key)
+		state := keyStates[keyStr]
+		isSnap := sm.isSnapshotted(rec.Key)
+
+		// key was tombstoned — all older versions are dead
+		if state == stateTombstoned {
+			rawIter.Next()
 			continue
 		}
-		err := writer.AddRecord(rec)
-		if err != nil {
+
+		// non-snapshotted key already written — skip older version
+		if state == stateWritten && !isSnap {
+			rawIter.Next()
+			continue
+		}
+
+		// skip expired
+		if rec.ExpiresAt != 0 && rec.ExpiresAt < t {
+			rawIter.Next()
+			continue
+		}
+
+		// skip range-deleted
+		if utils.IsCoveredByRangeTombstone(mergedRangeDels, rec.Key, rec.SeqId) {
+			rawIter.Next()
+			continue
+		}
+
+		// tombstone record
+		if rec.OpType == enums.OpTypeDel {
+			keyStates[keyStr] = stateTombstoned
+			if !skipTombstones {
+				if err := writer.AddRecord(rec); err != nil {
+					return err
+				}
+				count++
+			}
+			rawIter.Next()
+			continue
+		}
+
+		if err := writer.AddRecord(rec); err != nil {
 			return err
 		}
-		iterator.Next()
+		keyStates[keyStr] = stateWritten
 		count++
+		rawIter.Next()
 	}
+
 	// write surviving range tombstones
 	// at the bottommost level (skipTombstones=true) drop them: nothing below to cover
 	// at any other level keep them: they must cover keys in layers below
@@ -494,6 +554,57 @@ func (sm *SSTableManager) getFragments() []shared.RangeDelEntry {
 	sm.cachedFragments = utils.FragmentRangeTombstones(all)
 	sm.fragmentsDirty = false
 	return sm.cachedFragments
+}
+
+// GetVersions returns all stored versions of a key from SSTables, newest first.
+// If maxVersions <= 0 all versions are returned.
+func (sm *SSTableManager) GetVersions(key []byte, maxVersions int) ([]*Record, error) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	t := time.Now().UnixMilli()
+	seen := make(map[uint64]struct{})
+	var versions []*Record
+
+	for _, layer := range sm.Layers {
+		for i := len(layer.SSTables) - 1; i >= 0; i-- {
+			r := layer.SSTables[i]
+			minKey := r.Metadata.GetBytes(FieldMinKey)
+			maxKey := r.Metadata.GetBytes(FieldMaxKey)
+			if bytes.Compare(minKey, key) > 0 || bytes.Compare(maxKey, key) < 0 {
+				continue
+			}
+			it, err := NewSSTableIteratorRaw(r)
+			if err != nil {
+				continue
+			}
+			it.Seek(Record{Key: key})
+			for it.Valid() {
+				rec := it.Key()
+				if !bytes.Equal(rec.Key, key) {
+					break
+				}
+				if rec.OpType != enums.OpTypeDel {
+					if _, dup := seen[rec.SeqId]; !dup {
+						if rec.ExpiresAt == 0 || rec.ExpiresAt >= t {
+							cp := rec
+							versions = append(versions, &cp)
+							seen[rec.SeqId] = struct{}{}
+						}
+					}
+				}
+				it.Next()
+				if maxVersions > 0 && len(versions) >= maxVersions {
+					goto done
+				}
+			}
+		}
+	}
+done:
+	sort.Slice(versions, func(i, j int) bool {
+		return versions[i].SeqId > versions[j].SeqId
+	})
+	return versions, nil
 }
 
 func sstableOverlapsRange(reader *SSTableReader, start, end []byte) bool {

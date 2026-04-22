@@ -91,9 +91,9 @@ func (l *LSM) Get(key []byte) ([]byte, bool, error) {
 	// 2. check cache
 	if val, ok := l.readCache.Get(string(key)); ok {
 		if val == nil {
-			return nil, false, nil
+			found = false
 		}
-		return val, true, nil
+		found = true
 	}
 
 	if config.GetSettings().Debug {
@@ -186,6 +186,49 @@ func (l *LSM) GetAllTTLFomSST() (*ttl.ExpiryHeap, map[string]int64, error) {
 	return l.sstableManager.GetAllTTL()
 }
 
+func (l *LSM) Snapshot(key []byte) {
+	l.memtableeManager.Snapshot(key)
+	l.sstableManager.AddSnapshotKey(key)
+}
+
+// GetVersions returns all versions of key, newest first
+func (l *LSM) GetVersions(key []byte, maxVersions int) ([][]byte, error) {
+	seen := make(map[uint64]struct{})
+	var values [][]byte
+	for _, e := range l.memtableeManager.GetVersions(key, maxVersions) {
+		if _, dup := seen[e.SeqId]; !dup {
+			seen[e.SeqId] = struct{}{}
+			values = append(values, e.Value)
+		}
+		if maxVersions > 0 && len(values) >= maxVersions {
+			return values, nil
+		}
+	}
+
+	remaining := 0
+	if maxVersions > 0 {
+		remaining = maxVersions - len(values)
+		if remaining <= 0 {
+			return values, nil
+		}
+	}
+
+	sstVersions, err := l.sstableManager.GetVersions(key, remaining)
+	if err != nil {
+		return nil, err
+	}
+	for _, r := range sstVersions {
+		if _, dup := seen[r.SeqId]; !dup {
+			seen[r.SeqId] = struct{}{}
+			values = append(values, r.Value)
+		}
+		if maxVersions > 0 && len(values) >= maxVersions {
+			break
+		}
+	}
+	return values, nil
+}  
+  
 func (l *LSM) GetManifest() sstable.Manifest {
 	return *l.sstableManager.Manifest
 }

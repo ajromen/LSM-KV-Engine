@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/core"
@@ -89,4 +90,60 @@ func handleClear(engine *core.Engine, parts []string) {
 		return
 	}
 	PrintSuccess(fmt.Sprint("ClearAll: OK"))
+}
+
+func handleSnapshot(engine *core.Engine, parts []string) {
+	if len(parts) != 2 {
+		PrintError("Usage: snapshot <key>")
+		return
+	}
+	engine.Snapshot([]byte(parts[1]))
+	PrintSuccess(fmt.Sprintf("Snapshot: key '%s' will now retain all versions", parts[1]))
+}
+
+func handleGetVersions(engine *core.Engine, parts []string) {
+	if len(parts) != 2 {
+		PrintError("Usage: get-versions <key>")
+		return
+	}
+	key := parts[1]
+	versions, err := engine.GetVersions([]byte(key))
+	if err != nil {
+		PrintError(fmt.Sprint("GetVersions:", err))
+		return
+	}
+	if len(versions) == 0 {
+		PrintError(fmt.Sprintf("No versions found for key '%s'", key))
+		return
+	}
+	for i, v := range versions {
+		label := "current"
+		if i > 0 {
+			label = fmt.Sprintf("v-%d", i)
+		}
+		PrintSuccess(fmt.Sprintf("[%s] %s", label, v))
+	}
+}
+
+func handleGetVersion(engine *core.Engine, parts []string) {
+	if len(parts) != 3 {
+		PrintError("Usage: get-version <key> <version>")
+		return
+	}
+	key := parts[1]
+	n, err := strconv.Atoi(parts[2])
+	if err != nil || n < 0 {
+		PrintError("Version must be a non-negative integer (0 = current)")
+		return
+	}
+	value, found, err := engine.GetVersion([]byte(key), n)
+	if err != nil {
+		PrintError(fmt.Sprint("GetVersion:", err))
+		return
+	}
+	if !found {
+		PrintError(fmt.Sprintf("Version %d not found for key '%s'", n, key))
+		return
+	}
+	PrintSuccess(value)
 }

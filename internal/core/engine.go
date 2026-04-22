@@ -181,6 +181,10 @@ func (engine *Engine) Delete(key []byte) {
 	engine.notifier.NotifyDelete(key)
 }
 
+func (engine *Engine) Snapshot(key []byte) {
+	engine.lsm.Snapshot(key)
+}
+
 func (engine *Engine) RangeDelete(startKey []byte, endKey []byte) {
 	seqId := engine.seqGen.Next()
 	engine.lsm.Put(startKey, endKey, seqId, enums.OpTypeRangeDel)
@@ -238,4 +242,30 @@ func (engine *Engine) Subscribe(lower, upper string, bufferSize int) *notifier.L
 
 func (engine *Engine) Unsubscribe(l *notifier.Listener) {
 	engine.notifier.Unsubscribe(l)
+}
+
+// GetVersions returns all versions of key, newest first.
+// Only meaningful for keys that have been snapshotted.
+func (engine *Engine) GetVersions(key []byte) ([]string, error) {
+	values, err := engine.lsm.GetVersions(key, 0)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]string, len(values))
+	for i, v := range values {
+		result[i] = string(v)
+	}
+	return result, nil
+}
+
+// GetVersion returns the nth version of key (0 = current/newest).
+func (engine *Engine) GetVersion(key []byte, version int) (string, bool, error) {
+	values, err := engine.lsm.GetVersions(key, version+1)
+	if err != nil {
+		return "", false, err
+	}
+	if version >= len(values) {
+		return "", false, nil
+	}
+	return string(values[version]), true, nil
 }

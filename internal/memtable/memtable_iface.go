@@ -31,6 +31,7 @@ func (m MemtableEntry) HashKey() string {
 // MemtableStore defines the interface for underlying in-memory data structures
 type MemtableStore interface {
 	Insert(entry MemtableEntry)
+	Upsert(entry MemtableEntry) bool
 	Search(entry MemtableEntry) *MemtableEntry
 	EntriesInOrder() []MemtableEntry
 	Reset()
@@ -44,6 +45,8 @@ type MemtableStore interface {
 type Memtable interface {
 	Put(key []byte, value []byte, seqId uint64, opType enums.OpType)
 	PutWithTTL(key []byte, value []byte, seqId uint64, opType enums.OpType, ttl int64)
+	Upsert(key []byte, value []byte, seqId uint64, opType enums.OpType)
+	UpsertWithTTL(key []byte, value []byte, seqId uint64, opType enums.OpType, ttl int64)
 	Get(key []byte) (*MemtableEntry, bool)
 	ShouldFlush() bool
 	Reset()

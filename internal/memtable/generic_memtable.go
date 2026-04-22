@@ -51,6 +51,21 @@ func (m *GenericMemtable) Put(key []byte, value []byte, seqId uint64, opType enu
 	m.sizeBytes += uint64(sizeEntry)
 }
 
+// Upsert inserts or replaces the entry for this key (no versioning).
+// numEntries only grows when a new key is written, not on overwrite.
+func (m *GenericMemtable) Upsert(key []byte, value []byte, seqId uint64, opType enums.OpType) {
+	entry := MemtableEntry{Key: key,
+		Value:  value,
+		SeqId:  seqId,
+		OpType: opType,
+	}
+	replaced := m.store.Upsert(entry)
+	if !replaced {
+		m.numEntries++
+		m.sizeBytes += uint64(len(key) + len(value) + 8 + 8 + 1)
+	}
+}
+
 func (m *GenericMemtable) PutWithTTL(key []byte, value []byte, seqId uint64, opType enums.OpType, ttl int64) {
 	expiresAt := time.Now().UnixMilli() + ttl
 	sizeEntry := len(key) + len(value) + 8 + 8 + 1
@@ -63,6 +78,21 @@ func (m *GenericMemtable) PutWithTTL(key []byte, value []byte, seqId uint64, opT
 	})
 	m.numEntries++
 	m.sizeBytes += uint64(sizeEntry)
+}
+
+func (m *GenericMemtable) UpsertWithTTL(key []byte, value []byte, seqId uint64, opType enums.OpType, ttl int64) {
+	expiresAt := time.Now().UnixMilli() + ttl
+	entry := MemtableEntry{
+		Key: key, Value: value,
+		SeqId:     seqId,
+		ExpiresAt: expiresAt,
+		OpType:    opType,
+	}
+	replaced := m.store.Upsert(entry)
+	if !replaced {
+		m.numEntries++
+		m.sizeBytes += uint64(len(key) + len(value) + 8 + 8 + 1)
+	}
 }
 
 // Get retrieves the value for a given key
