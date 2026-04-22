@@ -2,9 +2,11 @@ package backup
 
 import (
 	"fmt"
+	"os"
 	"path"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/block"
@@ -54,29 +56,52 @@ func (c *Checkpoint) Backup(manifest sstable.Manifest) error {
 		return err
 	}
 
-	var fileNames []string
+	baseNames := make(map[string]struct{})
 	for _, layer := range manifest.Layers {
-		for _, sstableManifest := range layer {
-			file := sstableManifest.BaseFileName
-			fileNames = append(fileNames, filepath.Base(file))
-			newFile := path.Join(c.info.SaveDirectory, filepath.Base(file))
-			err := block.CreateHardLink(file, newFile)
-			if err != nil {
-				return err
-			}
+		for _, sst := range layer {
+			baseNames[filepath.Base(sst.BaseFileName)] = struct{}{}
 		}
 	}
 
-	c.info.Files = fileNames
-
-	err = c.info.SaveToFile(path.Join(c.info.SaveDirectory, InfoFileName))
+	dir := manifest.FileDir
+	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to read data dir: %w", err)
 	}
 
-	err = manifest.SaveTo(c.info.SaveDirectory)
-	return err
+	var fileNames []string
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if name == sstable.ManifestFileName {
+			continue
+		}
+		matched := false
+		for base := range baseNames {
+			if name == base || strings.HasPrefix(name, base+".") {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			continue
+		}
 
+		src := filepath.Join(dir, name)
+		dst := filepath.Join(c.info.SaveDirectory, name)
+		if err := block.CreateHardLink(src, dst); err != nil {
+			return fmt.Errorf("failed to hardlink %s: %w", name, err)
+		}
+		fileNames = append(fileNames, name)
+	}
+
+	c.info.Files = fileNames
+	if err := c.info.SaveToFile(filepath.Join(c.info.SaveDirectory, InfoFileName)); err != nil {
+		return err
+	}
+	return manifest.SaveTo(c.info.SaveDirectory)
 }
 
 func (c *Checkpoint) GetInfo() *BackupInfo {

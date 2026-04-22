@@ -43,6 +43,8 @@ func handleCreateBackup(engine *core.Engine, parts []string) {
 		backupType = enums.FullBackup
 	case "incremental":
 		backupType = enums.IncrementalBackup
+	case "checkpoint":
+		backupType = enums.Checkpoint
 	}
 
 	id, err := engine.CreateBackup(backupType)
@@ -94,4 +96,18 @@ func handleRestoreBackup(engine *core.Engine, parts []string) {
 		return
 	}
 	PrintSuccess("Restore successful")
+}
+
+func handleDeleteAllBackups(engine *core.Engine, parts []string) {
+	if len(parts) != 1 {
+		PrintError(fmt.Sprint("Usage: delete-all-backups"))
+		return
+	}
+
+	err := engine.DeleteAllBackups()
+	if err != nil {
+		PrintError(fmt.Sprintf("Delete all backups failed : ", err))
+		return
+	}
+	PrintSuccess("Delete all backups successful")
 }

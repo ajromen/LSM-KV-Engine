@@ -44,6 +44,7 @@ Commands:
     delete-backup <id>           Delete backup by id
     restore-backup <id>          Delete everything and restore to backup (create-backup recomended)
     cascade-delete-backup <id>   Delete backup and all backups that are dependent on it
+    delete-all-backups           Deletes all backups
 Notes:
   ttl: time-to-live in seconds,
   unit suffixes: ms, s (default), min, h, D, M, Y`

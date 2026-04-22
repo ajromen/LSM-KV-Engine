@@ -45,9 +45,7 @@ type EngineInterface interface {
 	RestoreFromBackup(backupId string) error
 	CreateBackup(backupType enums.BackupType) error
 	DeleteBackup(backupId string) error
-
-	CreateSnapshot() error
-	CheckoutSnapshot() error
+	DeleteAllBackups() error
 
 	DataRaw(index int)
 }

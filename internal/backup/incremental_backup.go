@@ -2,9 +2,11 @@ package backup
 
 import (
 	"fmt"
+	"os"
 	"path"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/block"
@@ -61,35 +63,59 @@ func (i *IncrementalBackup) Backup(manifest sstable.Manifest) error {
 		return err
 	}
 
+	baseNames := make(map[string]struct{})
+	for _, layer := range manifest.Layers {
+		for _, sst := range layer {
+			baseNames[filepath.Base(sst.BaseFileName)] = struct{}{}
+		}
+	}
+
+	dir := manifest.FileDir
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return fmt.Errorf("failed to read data dir: %w", err)
+	}
+
 	var fileNames []string
 	var unsavedFiles []string
-	for _, layer := range manifest.Layers {
-		for _, sstableManifest := range layer {
-			file := sstableManifest.BaseFileName
-			fileNames = append(fileNames, filepath.Base(file))
-			newFile := path.Join(i.info.SaveDirectory, filepath.Base(file))
-
-			if i.ContainsFile(filepath.Base(file)) {
-				continue
-			}
-			err := block.CopyFile(file, newFile)
-			if err != nil {
-				return err
-			}
-			unsavedFiles = append(unsavedFiles, filepath.Base(file))
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
 		}
+		name := entry.Name()
+		if name == sstable.ManifestFileName {
+			continue
+		}
+		matched := false
+		for base := range baseNames {
+			if name == base || strings.HasPrefix(name, base+".") {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			continue
+		}
+
+		fileNames = append(fileNames, name)
+		if i.ContainsFile(name) {
+			continue
+		}
+
+		src := filepath.Join(dir, name)
+		dst := filepath.Join(i.info.SaveDirectory, name)
+		if err := block.CopyFile(src, dst); err != nil {
+			return fmt.Errorf("failed to copy %s: %w", name, err)
+		}
+		unsavedFiles = append(unsavedFiles, name)
 	}
 
 	i.info.Files = fileNames
 	i.info.NewFiles = unsavedFiles
-
-	err = i.info.SaveToFile(path.Join(i.info.SaveDirectory, InfoFileName))
-	if err != nil {
+	if err := i.info.SaveToFile(filepath.Join(i.info.SaveDirectory, InfoFileName)); err != nil {
 		return err
 	}
-
-	err = manifest.SaveTo(i.info.SaveDirectory)
-	return nil
+	return manifest.SaveTo(i.info.SaveDirectory)
 }
 
 func (i *IncrementalBackup) Restore(directory string) error {

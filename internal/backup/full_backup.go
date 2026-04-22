@@ -2,9 +2,11 @@ package backup
 
 import (
 	"fmt"
+	"os"
 	"path"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/block"
@@ -49,38 +51,58 @@ func NewFullBackup(saveDirectory *string) *FullBackup {
 	}
 }
 
-// steps:
-// 1. copy all sstables to saveDirectory
-// 2. save backupMetadata
-// 3. save manifest for restore
 func (f *FullBackup) Backup(manifest sstable.Manifest) error {
 	err := block.EnsureDir(f.info.SaveDirectory)
 	if err != nil {
 		return err
 	}
 
-	var fileNames []string
+	baseNames := make(map[string]struct{})
 	for _, layer := range manifest.Layers {
-		for _, sstableManifest := range layer {
-			file := sstableManifest.BaseFileName
-			fileNames = append(fileNames, filepath.Base(file))
-			newFile := path.Join(f.info.SaveDirectory, filepath.Base(file))
-			err := block.CopyFile(file, newFile)
-			if err != nil {
-				return err
-			}
+		for _, sst := range layer {
+			baseNames[filepath.Base(sst.BaseFileName)] = struct{}{}
 		}
 	}
 
-	f.info.Files = fileNames
-
-	err = f.info.SaveToFile(path.Join(f.info.SaveDirectory, InfoFileName))
+	dir := manifest.FileDir
+	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to read data dir: %w", err)
 	}
 
-	err = manifest.SaveTo(f.info.SaveDirectory)
-	return err
+	var fileNames []string
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if name == sstable.ManifestFileName {
+			continue
+		}
+		matched := false
+		for base := range baseNames {
+			if name == base || strings.HasPrefix(name, base+".") {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			continue
+		}
+
+		src := filepath.Join(dir, name)
+		dst := filepath.Join(f.info.SaveDirectory, name)
+		if err := block.CopyFile(src, dst); err != nil {
+			return fmt.Errorf("failed to copy %s: %w", name, err)
+		}
+		fileNames = append(fileNames, name)
+	}
+
+	f.info.Files = fileNames
+	if err := f.info.SaveToFile(filepath.Join(f.info.SaveDirectory, InfoFileName)); err != nil {
+		return err
+	}
+	return manifest.SaveTo(f.info.SaveDirectory)
 }
 
 func (f *FullBackup) Restore(directory string) error {

@@ -75,6 +75,10 @@ func (bm *BackupManager) CreateBackup(manifest sstable.Manifest, backupType enum
 		backup = NewIncrementalBackup(nil, bm.LastBackup)
 	case enums.FullBackup:
 		backup = NewFullBackup(nil)
+	case enums.Checkpoint:
+		backup = NewCheckpoint(nil)
+	default:
+		return "", fmt.Errorf("unknown backup type: %d", backupType)
 	}
 	err := backup.Backup(manifest)
 	if err != nil {
@@ -168,4 +172,24 @@ func (bm *BackupManager) CascadeDelete(id string) error {
 		return err
 	}
 	return bm.Manifest.RemoveBackup((*backup).GetInfo().SaveDirectory)
+}
+
+func (bm *BackupManager) DeleteAllBackups() error {
+	settings := config.GetSettings()
+	mainDir := path.Join(settings.SavePath, settings.Backup.SaveDirectory)
+
+	err := block.DeleteDirectory(mainDir)
+	if err != nil {
+		return err
+	}
+
+	manifest, err := NewBackupManifest(mainDir)
+	if err != nil {
+		return err
+	}
+
+	bm.Backups = make(map[string]*IBackup)
+	bm.Manifest = manifest
+	bm.LastBackup = nil
+	return nil
 }
