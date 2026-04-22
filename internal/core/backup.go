@@ -96,10 +96,6 @@ func (engine *Engine) CascadeDeleteBackup(backupId string) error {
 	return engine.backupManager.CascadeDelete(backupId)
 }
 
-func (engine *Engine) CreateSnapshot() error {
-	return nil
-}
-
-func (engine *Engine) CheckoutSnapshot() error {
-	return nil
+func (engine *Engine) DeleteAllBackups() error {
+	return engine.backupManager.DeleteAllBackups()
 }

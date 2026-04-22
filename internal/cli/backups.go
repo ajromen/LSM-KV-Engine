@@ -97,3 +97,17 @@ func handleRestoreBackup(engine *core.Engine, parts []string) {
 	}
 	PrintSuccess("Restore successful")
 }
+
+func handleDeleteAllBackups(engine *core.Engine, parts []string) {
+	if len(parts) != 1 {
+		PrintError(fmt.Sprint("Usage: delete-all-backups"))
+		return
+	}
+
+	err := engine.DeleteAllBackups()
+	if err != nil {
+		PrintError(fmt.Sprintf("Delete all backups failed : ", err))
+		return
+	}
+	PrintSuccess("Delete all backups successful")
+}
