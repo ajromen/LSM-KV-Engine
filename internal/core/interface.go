@@ -24,28 +24,33 @@ type Engine struct {
 }
 
 type EngineInterface interface {
-	Put(key []byte, value []byte)
-	PutWithTTL(key []byte, value []byte, ttl int64)
+	Put(key []byte, value []byte, seqId uint64, opType enums.OpType) error
+	PutWithTTL(key []byte, value []byte, seqId uint64, opType enums.OpType, ttl int64) error
 	Get(key []byte) ([]byte, bool, error)
 	GetTTL(key []byte) (int64, bool, error)
-	Delete(key []byte)
-	RangeDelete(startKey []byte, endKey []byte)
-	Close() error
-	ClearAll() error
-
-	Subscribe(lower, upper string, bufferSize int) *notifier.Listener
-	Unsubscribe(l *notifier.Listener)
 
 	RangeScan(lower, upper string, pageNumber, pageSize int) ([]ScanResult, error)
 	PrefixScan(prefix string, pageNumber, pageSize int) ([]ScanResult, error)
 	RangeIterate(lower, upper string) (*ActiveIterator, error)
 	PrefixIterate(prefix string) (*ActiveIterator, error)
+	NewPagedRangeScan(lower, upper string, pageSize int) (*PagedRangeScan, error)
+	NewPagedPrefixScan(prefix string, pageSize int) (*PagedPrefixScan, error)
+
+	Subscribe(lower, upper string, bufferSize int) *notifier.Listener
+	Unsubscribe(l *notifier.Listener)
 
 	GetAllBackups() []string
+	CreateBackup(backupType enums.BackupType) (string, error)
 	RestoreFromBackup(backupId string) error
-	CreateBackup(backupType enums.BackupType) error
 	DeleteBackup(backupId string) error
+	CascadeDeleteBackup(backupId string) error
 	DeleteAllBackups() error
+
+	GetVersions(key []byte) ([]string, error)
+	GetVersion(key []byte, version int) (string, bool, error)
+
+	ClearAll() error
+	Close() error
 
 	DataRaw(index int)
 }

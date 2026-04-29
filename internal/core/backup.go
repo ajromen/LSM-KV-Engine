@@ -99,3 +99,33 @@ func (engine *Engine) CascadeDeleteBackup(backupId string) error {
 func (engine *Engine) DeleteAllBackups() error {
 	return engine.backupManager.DeleteAllBackups()
 }
+
+func (engine *Engine) Snapshot(key []byte) {
+	engine.lsm.Snapshot(key)
+}
+
+// GetVersions returns all versions of key, newest first.
+// Only meaningful for keys that have been snapshotted.
+func (engine *Engine) GetVersions(key []byte) ([]string, error) {
+	values, err := engine.lsm.GetVersions(key, 0)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]string, len(values))
+	for i, v := range values {
+		result[i] = string(v)
+	}
+	return result, nil
+}
+
+// GetVersion returns the nth version of key (0 = current/newest).
+func (engine *Engine) GetVersion(key []byte, version int) (string, bool, error) {
+	values, err := engine.lsm.GetVersions(key, version+1)
+	if err != nil {
+		return "", false, err
+	}
+	if version >= len(values) {
+		return "", false, nil
+	}
+	return string(values[version]), true, nil
+}

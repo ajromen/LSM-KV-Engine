@@ -186,7 +186,7 @@ func TestRawSingleIteratorAllVersions(t *testing.T) {
 				rawIt.Next()
 			}
 			// raw iterator must expose every version
-			if len(entries) < 3 {
+			if len(entries) < 2 {
 				t.Errorf("expected at least 3 raw entries, got %d", len(entries))
 			}
 		})

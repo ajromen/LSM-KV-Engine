@@ -182,7 +182,7 @@ func (l *LSM) NewPrefixIterator(prefix []byte) (*iterator.PrefixIterator, error)
 	return iterator.NewPrefixIterator(dbIt, prefix), nil
 }
 
-func (l *LSM) GetAllTTLFomSST() (*ttl.ExpiryHeap, map[string]int64, error) {
+func (l *LSM) GetAllTTLFomSST() (*ttl.ExpiryHeap, error) {
 	return l.sstableManager.GetAllTTL()
 }
 
@@ -227,8 +227,8 @@ func (l *LSM) GetVersions(key []byte, maxVersions int) ([][]byte, error) {
 		}
 	}
 	return values, nil
-}  
-  
+}
+
 func (l *LSM) GetManifest() sstable.Manifest {
 	return *l.sstableManager.Manifest
 }
