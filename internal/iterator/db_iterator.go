@@ -14,10 +14,11 @@ type Entry struct {
 }
 
 type DBIterator struct {
-	memIterator   Iterator[Entry]
-	tableIterator Iterator[Entry]
-	current       *Entry
-	valid         bool
+	memIterator     Iterator[Entry]
+	tableIterator   Iterator[Entry]
+	current         *Entry
+	valid           bool
+	rangeDelChecker func(key []byte, seqId uint64) bool
 }
 
 const (
@@ -27,9 +28,18 @@ const (
 )
 
 func NewDBIterator(memIterator Iterator[Entry], tableIterator Iterator[Entry]) *DBIterator {
+	return NewDBIteratorWithRangeDel(memIterator, tableIterator, nil)
+}
+
+func NewDBIteratorWithRangeDel(
+	memIterator Iterator[Entry],
+	tableIterator Iterator[Entry],
+	rangeDelChecker func(key []byte, seqId uint64) bool,
+) *DBIterator {
 	it := &DBIterator{
-		memIterator:   memIterator,
-		tableIterator: tableIterator,
+		memIterator:     memIterator,
+		tableIterator:   tableIterator,
+		rangeDelChecker: rangeDelChecker,
 	}
 	it.SeekToFirst()
 	return it
@@ -108,6 +118,10 @@ func (it *DBIterator) advance() {
 				continue
 			}
 
+			if it.rangeDelChecker != nil && it.rangeDelChecker(keyCopy, entry.SequenceID) {
+				continue
+			}
+
 			it.current = &Entry{
 				Key:        keyCopy,
 				Value:      valCopy,
@@ -125,6 +139,10 @@ func (it *DBIterator) advance() {
 			it.skipKey(keyCopy)
 
 			if entry.OpType == enums.OpTypeDel {
+				continue
+			}
+
+			if it.rangeDelChecker != nil && it.rangeDelChecker(keyCopy, entry.SequenceID) {
 				continue
 			}
 
