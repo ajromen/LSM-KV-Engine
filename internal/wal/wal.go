@@ -8,10 +8,8 @@ import (
 	"strings"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/block"
+	"github.com/ajromen/LSM-KV-Engine/internal/enums"
 )
-
-// da li sece rekord po segmentima kako treba
-// config.GetSettings().SavePath
 
 const (
 	FilePrefix = "wal_"
@@ -19,20 +17,20 @@ const (
 )
 
 type WAL struct {
-	Dir            string
-	ActiveSegment  *Segment
-	BlockSize      int
-	MaxBlocks      int
-	NextSegmentID  uint64
-	NextSequenceID uint64
-	NextTxnID      uint64
-	LowWatermark   uint64
-	BM             *block.BlockManager
+	Dir           string
+	ActiveSegment *Segment
+	BlockSize     int
+	MaxBlocks     int
+	NextSegmentID uint64
+	NextTxnID     uint64
+	LowWatermark  uint64
+	BM            *block.BlockManager
 }
 
 type TxnOp struct {
-	Timestamp uint64
-	Tombstone bool
+	SeqId     uint64
+	ExpiresAt int64
+	OpType    enums.OpType
 	Key       []byte
 	Value     []byte
 }
@@ -54,14 +52,13 @@ func OpenWAL(dir string, blockSize int, maxBlocks int) (*WAL, error) {
 	bm := block.NewBlockManager(blockSize)
 
 	w := &WAL{
-		Dir:            dir,
-		BlockSize:      blockSize,
-		MaxBlocks:      maxBlocks,
-		NextSegmentID:  1,
-		NextSequenceID: 1,
-		NextTxnID:      1,
-		LowWatermark:   0,
-		BM:             bm,
+		Dir:           dir,
+		BlockSize:     blockSize,
+		MaxBlocks:     maxBlocks,
+		NextSegmentID: 1,
+		NextTxnID:     1,
+		LowWatermark:  0,
+		BM:            bm,
 	}
 
 	entries, err := ListFiles(dir)
@@ -109,7 +106,6 @@ func OpenWAL(dir string, blockSize int, maxBlocks int) (*WAL, error) {
 	w.ActiveSegment = seg
 	w.NextSegmentID = maxID + 1
 
-	err = w.InitNextSequenceID()
 	if err != nil {
 		return nil, err
 	}
@@ -138,39 +134,38 @@ func (w *WAL) Append(r Record) error {
 		return fmt.Errorf("active segment is nil")
 	}
 
-	sequenceID := w.NextSequenceID
-
 	wr := WALRecord{
-		FragType:   FULL,
-		RecType:    SINGLE,
-		TxnID:      0,
-		SequenceID: sequenceID,
-		KeySize:    uint64(len(r.Key)),
-		ValueSize:  uint64(len(r.Value)),
-		Record:     r,
+		FragType:  FULL,
+		RecType:   SINGLE,
+		TxnID:     0,
+		KeySize:   uint64(len(r.Key)),
+		ValueSize: uint64(len(r.Value)),
+		Record:    r,
 	}
 
-	err := w.AppendWALRecord(wr)
-	if err != nil {
-		return err
-	}
-
-	w.NextSequenceID++
-	return nil
+	return w.AppendWALRecord(wr)
 }
 
-func (w *WAL) Put(key []byte, value []byte, timestamp uint64) error {
+func (w *WAL) Put(key []byte, value []byte, seqId uint64, opType enums.OpType) error {
 	r := Record{
-		Timestamp: timestamp,
-		Tombstone: false,
+		ExpiresAt: 0,
+		OpType:    opType,
+		SeqId:     seqId,
 		Key:       key,
 		Value:     value,
 	}
-	err := w.Append(r)
-	if err != nil {
-		return err
+	return w.Append(r)
+}
+
+func (w *WAL) PutWithTTL(key []byte, value []byte, seqId uint64, opType enums.OpType, ttl int64) error {
+	r := Record{
+		ExpiresAt: ttl,
+		OpType:    opType,
+		SeqId:     seqId,
+		Key:       key,
+		Value:     value,
 	}
-	return nil
+	return w.Append(r)
 }
 
 func (w *WAL) AppendWALRecord(wr WALRecord) error {
@@ -215,18 +210,16 @@ func (w *WAL) BatchWrite(ops []TxnOp) error {
 	txnID := w.NextTxnID
 	w.NextTxnID++
 
-	startSeq := w.NextSequenceID
-
 	startRecord := WALRecord{
-		FragType:   FULL,
-		RecType:    START,
-		TxnID:      txnID,
-		SequenceID: startSeq,
-		KeySize:    0,
-		ValueSize:  0,
+		FragType:  FULL,
+		RecType:   START,
+		TxnID:     txnID,
+		KeySize:   0,
+		ValueSize: 0,
 		Record: Record{
-			Timestamp: ops[0].Timestamp,
-			Tombstone: false,
+			SeqId:     ops[0].SeqId,
+			ExpiresAt: ops[0].ExpiresAt,
+			OpType:    enums.OpTypePut,
 			Key:       nil,
 			Value:     nil,
 		},
@@ -236,21 +229,19 @@ func (w *WAL) BatchWrite(ops []TxnOp) error {
 	if err != nil {
 		return err
 	}
-	w.NextSequenceID++
 
 	for _, op := range ops {
-		seq := w.NextSequenceID
 
 		txRecord := WALRecord{
-			FragType:   FULL,
-			RecType:    TRANSACTION,
-			TxnID:      txnID,
-			SequenceID: seq,
-			KeySize:    uint64(len(op.Key)),
-			ValueSize:  uint64(len(op.Value)),
+			FragType:  FULL,
+			RecType:   TRANSACTION,
+			TxnID:     txnID,
+			KeySize:   uint64(len(op.Key)),
+			ValueSize: uint64(len(op.Value)),
 			Record: Record{
-				Timestamp: op.Timestamp,
-				Tombstone: op.Tombstone,
+				SeqId:     op.SeqId,
+				ExpiresAt: op.ExpiresAt,
+				OpType:    op.OpType,
 				Key:       op.Key,
 				Value:     op.Value,
 			},
@@ -260,22 +251,18 @@ func (w *WAL) BatchWrite(ops []TxnOp) error {
 		if err != nil {
 			return err
 		}
-
-		w.NextSequenceID++
 	}
 
-	commitSeq := w.NextSequenceID
-
 	commitRecord := WALRecord{
-		FragType:   FULL,
-		RecType:    COMMIT,
-		TxnID:      txnID,
-		SequenceID: commitSeq,
-		KeySize:    0,
-		ValueSize:  0,
+		FragType:  FULL,
+		RecType:   COMMIT,
+		TxnID:     txnID,
+		KeySize:   0,
+		ValueSize: 0,
 		Record: Record{
-			Timestamp: ops[len(ops)-1].Timestamp,
-			Tombstone: false,
+			SeqId:     ops[len(ops)-1].SeqId,
+			ExpiresAt: ops[len(ops)-1].ExpiresAt,
+			OpType:    enums.OpTypePut,
 			Key:       nil,
 			Value:     nil,
 		},
@@ -286,38 +273,10 @@ func (w *WAL) BatchWrite(ops []TxnOp) error {
 		return err
 	}
 
-	w.NextSequenceID++
 	return nil
 }
 
-func (w *WAL) DeleteRange(keys [][]byte, timestamp uint64) error {
-	ops := make([]TxnOp, 0, len(keys))
-	for _, key := range keys {
-		ops = append(ops, TxnOp{
-			Timestamp: timestamp,
-			Tombstone: true,
-			Key:       key,
-			Value:     nil,
-		})
-	}
-	return w.BatchWrite(ops)
-}
-
-func (w *WAL) Delete(key []byte, timestamp uint64) error {
-	r := Record{
-		Timestamp: timestamp,
-		Tombstone: true,
-		Key:       key,
-		Value:     nil,
-	}
-	err := w.Append(r)
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-func (w *WAL) Recover() ([]Record, error) { // doesnt call memtable just return list of records
+func (w *WAL) Recover() ([]Record, error) { // doesn't call memtable just return list of records
 	frags, err := w.ReadAllFragments()
 	if err != nil {
 		return nil, err
@@ -422,15 +381,15 @@ func JoinFragments(frags []WALRecord) ([]WALRecord, error) {
 			}
 
 			rec := WALRecord{
-				FragType:   FULL,
-				RecType:    frag.RecType,
-				TxnID:      frag.TxnID,
-				SequenceID: frag.SequenceID,
-				KeySize:    frag.KeySize,
-				ValueSize:  frag.ValueSize,
+				FragType:  FULL,
+				RecType:   frag.RecType,
+				TxnID:     frag.TxnID,
+				KeySize:   frag.KeySize,
+				ValueSize: frag.ValueSize,
 				Record: Record{
-					Timestamp: frag.Record.Timestamp,
-					Tombstone: frag.Record.Tombstone,
+					SeqId:     frag.Record.SeqId,
+					ExpiresAt: frag.Record.ExpiresAt,
+					OpType:    frag.Record.OpType,
 					Key:       append([]byte(nil), frag.Record.Key...),
 					Value:     append([]byte(nil), frag.Record.Value...),
 				},
@@ -649,27 +608,6 @@ func ListFiles(dir string) ([]os.DirEntry, error) {
 		return nil, err
 	}
 	return entries, err
-}
-
-func (w *WAL) InitNextSequenceID() error {
-	frags, err := w.ReadAllFragments()
-	if err != nil {
-		return err
-	}
-
-	var maxSeq uint64 = 0
-	for _, frag := range frags {
-		if frag.SequenceID > maxSeq {
-			maxSeq = frag.SequenceID
-		}
-	}
-
-	w.NextSequenceID = maxSeq + 1
-	if w.NextSequenceID == 0 {
-		w.NextSequenceID = 1
-	}
-
-	return nil
 }
 
 func (w *WAL) InitNextTxnID() error {
