@@ -68,15 +68,17 @@ func (r *RawSingleMemtableIterator) Value() MemtableEntry {
 // SingleMemtableIterator adds lsm semantics on top of a raw single memtable iterator
 // lsm semantics -> filtering keys -> removing duplicates and skipping tombstones
 type SingleMemtableIterator struct {
-	rawIt   *RawSingleMemtableIterator
-	current *MemtableEntry
-	valid   bool
+	rawIt           *RawSingleMemtableIterator
+	current         *MemtableEntry
+	valid           bool
+	rangeDelChecker func(key []byte, seqId uint64) bool
 }
 
 // NewSingleMemtableIterator creates a cleaned iterator over a single memtable
-func NewSingleMemtableIterator(rawIt *RawSingleMemtableIterator) iterator.Iterator[MemtableEntry] {
+func NewSingleMemtableIterator(rawIt *RawSingleMemtableIterator, rangeDelChecker func(key []byte, seqId uint64) bool) iterator.Iterator[MemtableEntry] {
 	it := &SingleMemtableIterator{
-		rawIt: rawIt,
+		rawIt:           rawIt,
+		rangeDelChecker: rangeDelChecker, // NOVO
 	}
 	it.SeekToFirst()
 	return it
@@ -142,6 +144,11 @@ func (s *SingleMemtableIterator) advanceToNextUnique(prevKey []byte) {
 		}
 		// 2. skip tombstones
 		if entry.OpType == enums.OpTypeDel {
+			prevKey = entry.Key
+			s.rawIt.Next()
+			continue
+		}
+		if s.rangeDelChecker != nil && s.rangeDelChecker(entry.Key, entry.SeqId) {
 			prevKey = entry.Key
 			s.rawIt.Next()
 			continue
@@ -342,15 +349,17 @@ func (i *RawIterator) Value() MemtableEntry {
 // when we want all entries without duplicates and deleted versions we just iterate over memtables using this iterator
 // one of the most important parts of the system
 type MergedMemtableIterator struct {
-	rawIterator *RawIterator
-	current     *MemtableEntry
-	prevKey     []byte
-	valid       bool
+	rawIterator     *RawIterator
+	current         *MemtableEntry
+	prevKey         []byte
+	valid           bool
+	rangeDelChecker func(key []byte, seqId uint64) bool
 }
 
-func NewMergedMemtableIterator(rawIterator *RawIterator) iterator.Iterator[MemtableEntry] {
+func NewMergedMemtableIterator(rawIterator *RawIterator, rangeDelChecker func(key []byte, seqId uint64) bool) iterator.Iterator[MemtableEntry] {
 	it := &MergedMemtableIterator{
-		rawIterator: rawIterator,
+		rawIterator:     rawIterator,
+		rangeDelChecker: rangeDelChecker,
 	}
 	it.SeekToFirst()
 	return it
@@ -418,6 +427,11 @@ func (m *MergedMemtableIterator) advance() {
 			continue
 		}
 		if m.prevKey != nil && bytes.Equal(entry.Key, m.prevKey) {
+			m.rawIterator.Next()
+			continue
+		}
+		if m.rangeDelChecker != nil && m.rangeDelChecker(entry.Key, entry.SeqId) {
+			m.prevKey = append([]byte(nil), entry.Key...)
 			m.rawIterator.Next()
 			continue
 		}

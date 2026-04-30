@@ -8,6 +8,7 @@ import (
 type FLags struct {
 	ConfigPath                 *string
 	Debug                      *bool
+	CreateDefaultConfig        *bool
 	MemtableMaxSize            *int
 	MemtableMaxSizeB           *uint64
 	MemtableType               *string
@@ -25,6 +26,7 @@ type FLags struct {
 func ParseFlags() *FLags {
 	var configPathOpt OptionalString
 	var debugOpt OptionalBool
+	var createDefaultConfigOpt OptionalBool
 	var mtMaxSizeOpt OptionalInt
 	var mtMaxSizeBOpt OptionalUInt64
 	var instancesOpt OptionalInt
@@ -43,6 +45,7 @@ func ParseFlags() *FLags {
 
 	flagBool(&debugOpt, "debug", "Debug mode")
 	flagBool(&debugOpt, "d", "Debug mode")
+	flagBool(&createDefaultConfigOpt, "create-default-config", "Creates default config")
 	flagInt(&mtMaxSizeOpt, "memtable-max-size", "Max memtable size in number of entries")
 	flagUint64(&mtMaxSizeBOpt, "memtable-max-size-b", "Max memtable size in bytes")
 	flagInt(&instancesOpt, "instances", "Number of memtable instances")
@@ -61,6 +64,7 @@ func ParseFlags() *FLags {
 	return &FLags{
 		ConfigPath:                 configPathOpt.Get(),
 		Debug:                      debugOpt.Get(),
+		CreateDefaultConfig:        createDefaultConfigOpt.Get(),
 		MemtableMaxSize:            mtMaxSizeOpt.Get(),
 		MemtableMaxSizeB:           mtMaxSizeBOpt.Get(),
 		MemtableType:               mtTypeOpt.Get(),

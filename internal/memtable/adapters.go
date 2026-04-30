@@ -57,7 +57,7 @@ func (s *BTreeStore) RawIterator() iterator.Iterator[MemtableEntry] {
 
 func (s *BTreeStore) Iterator() iterator.Iterator[MemtableEntry] {
 	rawIt := s.RawIterator().(*RawSingleMemtableIterator)
-	return NewSingleMemtableIterator(rawIt)
+	return NewSingleMemtableIterator(rawIt, nil)
 }
 
 func (s *BTreeStore) Upsert(entry MemtableEntry) bool {
@@ -115,7 +115,7 @@ func (s *SkipListStore) RawIterator() iterator.Iterator[MemtableEntry] {
 
 func (s *SkipListStore) Iterator() iterator.Iterator[MemtableEntry] {
 	rawIt := s.RawIterator().(*RawSingleMemtableIterator)
-	return NewSingleMemtableIterator(rawIt)
+	return NewSingleMemtableIterator(rawIt, nil)
 }
 
 func (s *SkipListStore) Upsert(entry MemtableEntry) bool {
@@ -183,7 +183,7 @@ func (s *HashMapStore) RawIterator() iterator.Iterator[MemtableEntry] {
 
 func (s *HashMapStore) Iterator() iterator.Iterator[MemtableEntry] {
 	rawIt := s.RawIterator().(*RawSingleMemtableIterator)
-	return NewSingleMemtableIterator(rawIt)
+	return NewSingleMemtableIterator(rawIt, nil)
 }
 
 func (s *HashMapStore) Upsert(entry MemtableEntry) bool {
@@ -241,7 +241,7 @@ func (s *RBTreeStore) RawIterator() iterator.Iterator[MemtableEntry] {
 
 func (s *RBTreeStore) Iterator() iterator.Iterator[MemtableEntry] {
 	rawIt := s.RawIterator().(*RawSingleMemtableIterator)
-	return NewSingleMemtableIterator(rawIt)
+	return NewSingleMemtableIterator(rawIt, nil)
 }
 
 func (s *RBTreeStore) Upsert(entry MemtableEntry) bool {
@@ -305,7 +305,7 @@ func (s *AVLTreeStore) RawIterator() iterator.Iterator[MemtableEntry] {
 
 func (s *AVLTreeStore) Iterator() iterator.Iterator[MemtableEntry] {
 	rawIt := s.RawIterator().(*RawSingleMemtableIterator)
-	return NewSingleMemtableIterator(rawIt)
+	return NewSingleMemtableIterator(rawIt, nil)
 }
 
 func (s *AVLTreeStore) Upsert(entry MemtableEntry) bool {

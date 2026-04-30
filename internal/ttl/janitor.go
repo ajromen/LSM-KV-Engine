@@ -13,7 +13,6 @@ import (
 type Janitor struct {
 	heap     *ExpiryHeap
 	notifier *notifier.Notifier
-	index    map[string]int64 // dva puta se drze svi ttl ako neko zna bolje nek uradi
 	stopCh   chan struct{}
 	mu       sync.Mutex
 }
@@ -26,26 +25,17 @@ func NewTTLJanitor(notifier *notifier.Notifier) *Janitor {
 	return j
 }
 
-func (j *Janitor) Init(heap *ExpiryHeap, index map[string]int64) {
+func (j *Janitor) Init(heap *ExpiryHeap) {
 	j.heap = heap
-	j.index = index
 	if config.GetSettings().Debug {
-		fmt.Printf("Janitor loaded %d ttls \n", len(j.index))
+		fmt.Printf("Janitor loaded %d ttls \n", j.heap.Len())
 	}
 }
 
 func (j *Janitor) AddTTL(entry shared.TTLEntry) {
 	j.mu.Lock()
 	j.heap.Push(entry)
-	j.index[string(entry.Key)] = entry.ExpiresAt
 	j.mu.Unlock()
-}
-
-func (j *Janitor) GetTTL(key string) (int64, bool) {
-	j.mu.Lock()
-	defer j.mu.Unlock()
-	expiresAt, ok := j.index[key]
-	return expiresAt, ok
 }
 
 func (j *Janitor) Run() {
@@ -72,7 +62,6 @@ func (j *Janitor) evict() {
 		if len(entry.Key) == 0 {
 			continue
 		}
-		delete(j.index, string(entry.Key))
 		expired = append(expired, entry.Key)
 	}
 	j.mu.Unlock()
@@ -85,7 +74,6 @@ func (j *Janitor) evict() {
 func (j *Janitor) ClearAll() {
 	j.mu.Lock()
 	j.heap = NewExpiryHeap()
-	j.index = make(map[string]int64)
 	j.mu.Unlock()
 }
 

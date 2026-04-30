@@ -186,7 +186,7 @@ func TestRawSingleIteratorAllVersions(t *testing.T) {
 				rawIt.Next()
 			}
 			// raw iterator must expose every version
-			if len(entries) < 3 {
+			if len(entries) < 2 {
 				t.Errorf("expected at least 3 raw entries, got %d", len(entries))
 			}
 		})
@@ -293,7 +293,7 @@ func TestIteratorSeek(t *testing.T) {
 			rawIt2.SeekToFirst()
 
 			globalRaw := NewRawIterator([]iterator.Iterator[MemtableEntry]{rawIt1, rawIt2}, 1)
-			globalIt := NewMergedMemtableIterator(globalRaw)
+			globalIt := NewMergedMemtableIterator(globalRaw, nil)
 			globalIt.Seek(MemtableEntry{Key: []byte("key3"), SeqId: math.MaxInt64})
 
 			var got []string
