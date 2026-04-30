@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path"
 	"strings"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/enums"
@@ -19,6 +20,15 @@ func LoadConfig(flags *flags.FLags) error {
 		err := cfg.loadFromFile(*flags.ConfigPath)
 		if err != nil {
 			return err
+		}
+	} else {
+		conFile := path.Join(getDefaultConfigPath(), configFileName)
+		_, err := os.Stat(conFile)
+		if err == nil {
+			err := cfg.loadFromFile(conFile)
+			if err != nil {
+				return err
+			}
 		}
 	}
 	err := cfg.applyFlags(flags)
