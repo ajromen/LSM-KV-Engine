@@ -42,10 +42,10 @@ func OpenWAL() (*WAL, error) {
 	dir := path.Join(settings.SavePath, settings.WAL.SaveDirectory)
 	blockSize := settings.WAL.BlockSize
 
-	err := block.EnsureDir(dir)
-	if err != nil {
+	if err := block.EnsureDir(dir); err != nil {
 		return nil, err
 	}
+
 	bm := block.NewBlockManager(blockSize)
 
 	w := &WAL{
@@ -63,69 +63,44 @@ func OpenWAL() (*WAL, error) {
 	}
 	w.Manifest = manifest
 
-	entries, err := ListFiles(dir)
-	if err != nil {
-		return nil, err
-	}
-	maxID := uint64(0)
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		name := entry.Name()
-		if !strings.HasPrefix(name, FilePrefix) || !strings.HasSuffix(name, FileSuffix) {
-			continue
-		}
-		id, err := ParseSegmentID(name)
-		if err != nil {
-			return nil, err
-		}
-		if id > maxID {
-			maxID = id
-		}
-
-	}
-
-	if maxID == 0 { // id no log files
-		firstPath := w.SegmentPath(w.NextSegmentID)
-		seg, err := OpenSegment(w.NextSegmentID, firstPath, w.MaxBlocks, w.BM)
+	if len(w.Manifest.Segments) == 0 {
+		firstPath := w.SegmentPath(1)
+		seg, err := OpenSegment(1, firstPath, w.MaxBlocks, w.BM)
 		if err != nil {
 			return nil, err
 		}
 		w.ActiveSegment = seg
-		w.NextSegmentID++
+		w.NextSegmentID = 2
 
+		if err := w.Manifest.AddSegment(1); err != nil {
+			return nil, err
+		}
 		return w, nil
 	}
 
-	// load last log file by id
-	lastPath := w.SegmentPath(maxID)
-	seg, err := OpenSegment(maxID, lastPath, w.MaxBlocks, w.BM)
+	segs := w.Manifest.SortedSegments()
+	last := segs[len(segs)-1]
+
+	lastPath := w.SegmentPath(last.SegmentID)
+	seg, err := OpenSegment(last.SegmentID, lastPath, w.MaxBlocks, w.BM)
 	if err != nil {
 		return nil, err
 	}
 
 	w.ActiveSegment = seg
-	w.NextSegmentID = maxID + 1
+	w.NextSegmentID = last.SegmentID + 1
 
-	if err != nil {
-		return nil, err
-	}
-
-	err = w.InitNextTxnID()
-	if err != nil {
+	if err := w.InitNextTxnID(); err != nil {
 		return nil, err
 	}
 
 	if w.ActiveSegment.IsFull() {
-		err = w.RotateSegment()
-		if err != nil {
+		if err := w.RotateSegment(); err != nil {
 			return nil, err
 		}
 	}
 
 	return w, nil
-
 }
 
 func (w *WAL) Append(r Record) error {
@@ -284,7 +259,8 @@ func (w *WAL) BatchWrite(ops []TxnOp) error {
 	return nil
 }
 
-func (w *WAL) Recover() ([]Record, error) { // doesn't call memtable just return list of records
+// doesn't call memtable just return list of records
+func (w *WAL) Recover() ([]Record, error) {
 	frags, err := w.ReadAllFragments()
 	if err != nil {
 		return nil, err
@@ -307,63 +283,40 @@ func (w *WAL) ReadAllFragments() ([]WALRecord, error) {
 	if w == nil {
 		return nil, fmt.Errorf("wal is nil")
 	}
-
-	entries, err := ListFiles(w.Dir)
-	if err != nil {
-		return nil, err
+	if w.Manifest == nil {
+		return nil, fmt.Errorf("manifest is nil")
 	}
 
-	type segInfo struct {
-		id   uint64
-		path string
-	}
-
-	segments := make([]segInfo, 0)
-
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		name := entry.Name()
-		if !strings.HasPrefix(name, FilePrefix) || !strings.HasSuffix(name, FileSuffix) {
-			continue
-		}
-
-		id, err := ParseSegmentID(name)
-		if err != nil {
-			return nil, err
-		}
-
-		segments = append(segments, segInfo{
-			id:   id,
-			path: filepath.Join(w.Dir, name),
-		})
-	}
-
-	for i := 0; i < len(segments); i++ {
-		for j := i + 1; j < len(segments); j++ {
-			if segments[j].id < segments[i].id {
-				temp := segments[j]
-				segments[j] = segments[i]
-				segments[i] = temp
-			}
-		}
-	}
-
+	segments := w.Manifest.SortedSegments()
 	all := make([]WALRecord, 0)
 
-	for _, segInfo := range segments {
-		seg, err := OpenSegment(segInfo.id, segInfo.path, w.MaxBlocks, w.BM)
+	for _, meta := range segments {
+		if meta.ValidFromBlock >= uint64(w.MaxBlocks) {
+			continue
+		}
+
+		seg, err := OpenSegment(
+			meta.SegmentID,
+			w.SegmentPath(meta.SegmentID),
+			w.MaxBlocks,
+			w.BM,
+		)
 		if err != nil {
 			return nil, err
 		}
 
-		recs, err := seg.ReadAllRecords()
+		recs, err := seg.ReadAllRecordsFromBlock(uint32(meta.ValidFromBlock))
 		if err != nil {
 			return nil, err
 		}
 
-		all = append(all, recs...)
+		for _, rec := range recs {
+			if rec.Record.SeqId <= meta.FlushedUpToSeqID {
+				continue
+			}
+
+			all = append(all, rec)
+		}
 	}
 
 	return all, nil
@@ -472,6 +425,109 @@ func ApplyTransactions(records []WALRecord) ([]Record, error) {
 	return result, nil
 }
 
+func (w *WAL) MemtableFlushed(sequenceId uint64) error {
+	if w == nil {
+		return fmt.Errorf("wal is nil")
+	}
+	if w.Manifest == nil {
+		return fmt.Errorf("manifest is nil")
+	}
+	if sequenceId < 0 {
+		return fmt.Errorf("sequenceId must be non-negative")
+	}
+
+	target := uint64(sequenceId)
+	segments := w.Manifest.SortedSegments()
+
+	var foundSegmentID uint64
+	var foundBlockID uint64
+	found := false
+
+	for _, meta := range segments {
+		if meta.ValidFromBlock >= uint64(w.MaxBlocks) {
+			continue
+		}
+
+		if meta.FlushedUpToSeqID >= target {
+			continue
+		}
+
+		seg, err := OpenSegment(
+			meta.SegmentID,
+			w.SegmentPath(meta.SegmentID),
+			w.MaxBlocks,
+			w.BM,
+		)
+		if err != nil {
+			return err
+		}
+
+		for b := uint32(meta.ValidFromBlock); b < uint32(w.MaxBlocks); b++ {
+			blockData, err := seg.ReadBlock(b)
+			if err != nil {
+				return err
+			}
+
+			recs, err := ReadBlockRecords(blockData)
+			if err != nil {
+				return err
+			}
+
+			if len(recs) == 0 {
+				break
+			}
+
+			for _, rec := range recs {
+				if rec.Record.SeqId <= target {
+					foundSegmentID = meta.SegmentID
+					foundBlockID = uint64(b)
+					found = true
+				}
+			}
+		}
+	}
+
+	if !found {
+		return fmt.Errorf("sequenceId %d not found in WAL", sequenceId)
+	}
+
+	if err := w.Manifest.SetValidFromBlock(foundSegmentID, foundBlockID); err != nil {
+		return err
+	}
+
+	if err := w.Manifest.SetFlushedUpToSeqID(foundSegmentID, target); err != nil {
+		return err
+	}
+
+	for _, meta := range segments {
+		if meta.SegmentID >= foundSegmentID {
+			continue
+		}
+
+		if err := w.Manifest.SetValidFromBlock(
+			meta.SegmentID,
+			uint64(w.MaxBlocks),
+		); err != nil {
+			return err
+		}
+
+		if err := w.Manifest.SetFlushedUpToSeqID(
+			meta.SegmentID,
+			target,
+		); err != nil {
+			return err
+		}
+	}
+
+	if foundSegmentID > 1 {
+		if err := w.SetLowWatermark(foundSegmentID - 1); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 func (w *WAL) SetLowWatermark(segmentID uint64) error {
 	if w == nil {
 		return fmt.Errorf("wal is nil")
@@ -516,62 +572,32 @@ func (w *WAL) PrintAll() error { // func for debugging
 	if w == nil {
 		return fmt.Errorf("wal is nil")
 	}
-
-	entries, err := ListFiles(w.Dir)
-	if err != nil {
-		return err
+	if w.Manifest == nil {
+		return fmt.Errorf("manifest is nil")
 	}
 
-	type segInfo struct {
-		id   uint64
-		path string
-	}
+	segments := w.Manifest.SortedSegments()
 
-	segments := make([]segInfo, 0)
-
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-
-		name := entry.Name()
-		if !strings.HasPrefix(name, FilePrefix) || !strings.HasSuffix(name, FileSuffix) {
-			continue
-		}
-
-		id, err := ParseSegmentID(name)
+	for _, segMeta := range segments {
+		s, err := OpenSegment(segMeta.SegmentID, w.SegmentPath(segMeta.SegmentID), w.MaxBlocks, w.BM)
 		if err != nil {
 			return err
 		}
 
-		segments = append(segments, segInfo{
-			id:   id,
-			path: filepath.Join(w.Dir, name),
-		})
-	}
+		fmt.Printf(
+			"Segment %d (ValidFromBlock=%d, FlushedUpToSeqID=%d)\n",
+			segMeta.SegmentID,
+			segMeta.ValidFromBlock,
+			segMeta.FlushedUpToSeqID,
+		)
 
-	for i := 0; i < len(segments); i++ {
-		for j := i + 1; j < len(segments); j++ {
-			if segments[j].id < segments[i].id {
-				segments[i], segments[j] = segments[j], segments[i]
-			}
-		}
-	}
-
-	for _, segInfo := range segments {
-		s, err := OpenSegment(segInfo.id, segInfo.path, w.MaxBlocks, w.BM)
-		if err != nil {
-			return err
-		}
-
-		fmt.Println("Segment", segInfo.id)
-
-		for bindex := 0; bindex < w.MaxBlocks; bindex++ {
-			block, err := s.ReadBlock(uint32(bindex))
+		for bindex := uint32(0); bindex < uint32(w.MaxBlocks); bindex++ {
+			blockData, err := s.ReadBlock(bindex)
 			if err != nil {
 				return err
 			}
-			fmt.Println(block)
+
+			fmt.Printf("Block %d: %v\n", bindex, blockData)
 		}
 	}
 
@@ -595,15 +621,6 @@ func (w *WAL) SegmentPath(id uint64) string {
 	return filepath.Join(w.Dir, filename)
 }
 
-// helper function, should go to block manager
-func ListFiles(dir string) ([]os.DirEntry, error) {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return nil, err
-	}
-	return entries, err
-}
-
 func (w *WAL) InitNextTxnID() error {
 	frags, err := w.ReadAllFragments()
 	if err != nil {
@@ -624,37 +641,41 @@ func (w *WAL) InitNextTxnID() error {
 
 	return nil
 }
-
 func (w *WAL) DeleteOldSegments() error {
-	entries, err := ListFiles(w.Dir)
-	if err != nil {
-		return err
+	if w == nil {
+		return fmt.Errorf("wal is nil")
 	}
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		name := entry.Name()
-		id, err := ParseSegmentID(name)
-		if err != nil {
-			continue
-		}
+	if w.Manifest == nil {
+		return fmt.Errorf("manifest is nil")
+	}
+
+	segments := w.Manifest.SortedSegments()
+
+	for _, segMeta := range segments {
+		id := segMeta.SegmentID
+
 		if id > w.Manifest.LowWatermark {
 			continue
 		}
+
 		if w.ActiveSegment != nil && id == w.ActiveSegment.ID {
 			continue
 		}
-		p := filepath.Join(w.Dir, name)
+
+		p := w.SegmentPath(id)
+
 		if w.BM != nil {
 			w.BM.InvalidateFile(p)
 		}
-		if err := os.Remove(p); err != nil {
+
+		if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
 			return err
 		}
+
 		if err := w.Manifest.RemoveSegment(id); err != nil {
 			return err
 		}
 	}
+
 	return nil
 }

@@ -45,7 +45,7 @@ func NewEngine() (*Engine, error) {
 func (engine *Engine) initializeComponents() error {
 	dataDir := config.GetSettings().SavePath
 
-	newLsm, err := lsm.NewLSM(dataDir)
+	newLsm, err := lsm.NewLSM(dataDir, engine.MemtableFlushed)
 	if err != nil {
 		return err
 	}
@@ -210,6 +210,13 @@ func (engine *Engine) Close() error {
 		return err
 	}
 	return nil
+}
+
+func (engine *Engine) MemtableFlushed() {
+	err := engine.wal.MemtableFlushed(engine.seqGen.Current())
+	if err != nil {
+		panic(err)
+	}
 }
 
 func (engine *Engine) ClearAll() error {
