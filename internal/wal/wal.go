@@ -3,15 +3,22 @@ package wal
 import (
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/block"
+	"github.com/ajromen/LSM-KV-Engine/internal/config"
 )
 
 // da li sece rekord po segmentima kako treba
 // config.GetSettings().SavePath
+// op type, expires at, sequence id, ttl
+
+/*
+
+ */
 
 const (
 	FilePrefix = "wal_"
@@ -37,26 +44,22 @@ type TxnOp struct {
 	Value     []byte
 }
 
-func OpenWAL(dir string, blockSize int, maxBlocks int) (*WAL, error) {
-	if dir == "" {
-		return nil, fmt.Errorf("wal dir is empty")
-	}
-	if blockSize < KEY_START+1 {
-		return nil, fmt.Errorf("blockSize is smaller than minimum WAL fragment size")
-	}
-	if maxBlocks <= 0 {
-		return nil, fmt.Errorf("maxBlocks must be >0")
-	}
+func OpenWAL() (*WAL, error) {
+	settings := config.GetSettings()
+	dir := path.Join(settings.SavePath, settings.WAL.SaveDirectory)
+	blockSize := settings.WAL.BlockSize
+
 	err := block.EnsureDir(dir)
 	if err != nil {
 		return nil, err
 	}
 	bm := block.NewBlockManager(blockSize)
+	//print(dir)
 
 	w := &WAL{
 		Dir:            dir,
 		BlockSize:      blockSize,
-		MaxBlocks:      maxBlocks,
+		MaxBlocks:      settings.WAL.MaxBlocks,
 		NextSegmentID:  1,
 		NextSequenceID: 1,
 		NextTxnID:      1,
@@ -159,7 +162,22 @@ func (w *WAL) Append(r Record) error {
 	return nil
 }
 
-func (w *WAL) Put(key []byte, value []byte, timestamp uint64) error {
+// umjesto timestamp, nula, Op type
+func (w *WAL) Put(key []byte, value []byte) error {
+	r := Record{
+		Timestamp: 0, // TO DO
+		Tombstone: false,
+		Key:       key,
+		Value:     value,
+	}
+	err := w.Append(r)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (w *WAL) PutWithTTL(key []byte, value []byte, timestamp uint64) error {
 	r := Record{
 		Timestamp: timestamp,
 		Tombstone: false,

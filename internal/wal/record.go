@@ -25,6 +25,7 @@ import (
 */
 
 const (
+	// 47
 	CRC_SIZE        = 4
 	TIMESTAMP_SIZE  = 8
 	FRAGTYPE_SIZE   = 1
@@ -70,6 +71,7 @@ type Record struct {
 	Tombstone bool
 	Key       []byte
 	Value     []byte
+	//ttl 	   int64
 }
 
 type WALRecord struct {

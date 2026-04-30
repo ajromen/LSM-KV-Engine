@@ -15,6 +15,7 @@ import (
 	"github.com/ajromen/LSM-KV-Engine/internal/shared"
 	"github.com/ajromen/LSM-KV-Engine/internal/token_bucket"
 	"github.com/ajromen/LSM-KV-Engine/internal/ttl"
+	"github.com/ajromen/LSM-KV-Engine/internal/wal"
 )
 
 func NewEngine() (*Engine, error) {
@@ -49,7 +50,17 @@ func (engine *Engine) initializeComponents() error {
 		return err
 	}
 	engine.lsm = newLsm
-	engine.recover()
+
+	engine.wal, err = wal.OpenWAL()
+	if err != nil {
+		return err
+	}
+
+
+	err = engine.recover()
+	if err != nil {
+		return err
+	}
 
 	cfg := config.GetSettings().TokenBucket
 	if cfg.MaxTokens > 0 {
@@ -108,11 +119,19 @@ func (engine *Engine) checkRateLimit() error {
 
 // check manifest
 // check wal
-func (engine *Engine) recover() {
+func (engine *Engine) recover() error {
 	var maxSeq uint64
 	maxSeq = engine.lsm.GetMaxSeqId()
-	//wal
+	_, err := engine.wal.Recover()
+	//fmt.Println(records)
+	//for _, rec := range records {
+	//	fmt.Println(rec)
+	//}
+	if err != nil {
+		return err
+	}
 	engine.seqGen = sequence.NewSequenceGenerator(maxSeq)
+	return nil
 }
 
 func (engine *Engine) Put(key []byte, value []byte) {
@@ -126,7 +145,7 @@ func (engine *Engine) Put(key []byte, value []byte) {
 	}
 
 	seqId := engine.seqGen.Next()
-	//wal
+	engine.wal.Put(key, value)
 	engine.lsm.Put(key, value, seqId, enums.OpTypePut)
 	engine.notifier.NotifyPut(key, value)
 }

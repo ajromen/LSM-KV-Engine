@@ -12,7 +12,7 @@ import (
 const (
 	defaultDebug = false
 	//WAL
-	defaultWalSegmentSize = 1 * 1024 * 1024
+	defaultWalSaveDirectory = "wal"
 
 	//memtable
 	memtableType                = enums.HashMapMemTable
@@ -58,10 +58,11 @@ func NewDefaultConfig() *Config {
 		SavePath: getDefaultSavePath(),
 		Debug:    defaultDebug,
 		WAL: WALConfig{
-			SegmentSize:  defaultWalSegmentSize,
-			BlockSize:    defaultBlockSize, // MUST match BlockManager.BlockSize
-			SyncInterval: 0,                // ms; 0 => only on Flush/Commit
-			MaxSegments:  0,                // 0 => unlimited
+			BlockSize:     defaultBlockSize, // MUST match BlockManager.BlockSize
+			SyncInterval:  0,                // ms; 0 => only on Flush/Commit
+			MaxSegments:   0,                // 0 => unlimited
+			MaxBlocks:     2,
+			SaveDirectory: defaultWalSaveDirectory,
 		},
 		Memtable: MemtableConfig{
 			MemtableType:         memtableType,

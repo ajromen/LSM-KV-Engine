@@ -19,6 +19,7 @@ type FLags struct {
 	TTLRefreshRate             *uint64
 	TokenBucketMaxTokens       *int64
 	TokenBucketResetIntervalMs *int64
+	WalMaxBlocks               *int64
 }
 
 func ParseFlags() *FLags {
@@ -35,6 +36,7 @@ func ParseFlags() *FLags {
 	var TTLRefreshRateOpt OptionalUInt64
 	var tokenBucketMaxTokensOpt OptionalInt64
 	var tokenBucketResetIntervalMsOpt OptionalInt64
+	var walMaxBlocksOpt OptionalInt64
 
 	flagString(&configPathOpt, "config", "Path to config file")
 	flagString(&configPathOpt, "c", "Path to config file")
@@ -52,6 +54,7 @@ func ParseFlags() *FLags {
 	flagUint64(&TTLRefreshRateOpt, "ttl-refresh-rate", "Timer in ms for checking expiring keys (Works only if ttl-in-memory=true")
 	flagInt64(&tokenBucketMaxTokensOpt, "token-bucket-max-tokens", "Max tokens in token bucket (0 = disabled)")
 	flagInt64(&tokenBucketResetIntervalMsOpt, "token-bucket-reset-ms", "Token bucket reset interval in milliseconds")
+	flagInt64(&walMaxBlocksOpt, "wal-seg-max-blocks", "Max blocks in WAL segment")
 
 	flag.Parse()
 
@@ -68,6 +71,7 @@ func ParseFlags() *FLags {
 		TTLRefreshRate:             TTLRefreshRateOpt.Get(),
 		TokenBucketMaxTokens:       tokenBucketMaxTokensOpt.Get(),
 		TokenBucketResetIntervalMs: tokenBucketResetIntervalMsOpt.Get(),
+		WalMaxBlocks:               walMaxBlocksOpt.Get(),
 	}
 }
 

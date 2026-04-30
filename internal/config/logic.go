@@ -111,6 +111,9 @@ func (c *Config) applyFlags(flags *flags.FLags) error {
 	if flags.TokenBucketResetIntervalMs != nil {
 		c.TokenBucket.ResetIntervalMs = *flags.TokenBucketResetIntervalMs
 	}
+	if flags.WalMaxBlocks != nil {
+		c.WAL.MaxBlocks = int(*flags.WalMaxBlocks)
+	}
 	return nil
 }
 
@@ -145,6 +148,16 @@ func (c *Config) validateFields() error {
 
 	if !fileExists(c.SavePath) {
 		return fmt.Errorf("save path does not exist")
+	}
+
+	if c.WAL.SaveDirectory == "" {
+		return fmt.Errorf("wal dir is empty")
+	}
+	if c.WAL.BlockSize < 64 {
+		return fmt.Errorf("blockSize is smaller than minimum WAL fragment size")
+	}
+	if c.WAL.MaxBlocks <= 0 {
+		return fmt.Errorf("maxBlocks must be >0")
 	}
 
 	// TODO continue validation

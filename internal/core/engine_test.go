@@ -7,7 +7,7 @@ import (
 	"github.com/ajromen/LSM-KV-Engine/internal/config"
 )
 
-func newTestEngine(t *testing.T) EngineInterface {
+func newTestEngine(t *testing.T) *Engine {
 	cfg := config.NewDefaultConfig()
 	cfg.SavePath = t.TempDir()
 
