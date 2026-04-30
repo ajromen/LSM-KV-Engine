@@ -12,7 +12,9 @@ func (engine *Engine) persistTokenBucket() {
 		return
 	}
 	seqId := engine.seqGen.Next()
-	engine.lsm.Put([]byte(token_bucket.InternalKey), engine.tokenBucket.Serialize(), seqId, enums.OpTypePut)
+	serialized := engine.tokenBucket.Serialize()
+	engine.wal.Put([]byte(token_bucket.InternalKey), serialized, seqId, enums.OpTypePut)
+	engine.lsm.Put([]byte(token_bucket.InternalKey), serialized, seqId, enums.OpTypePut)
 }
 
 func (engine *Engine) checkRateLimit() error {

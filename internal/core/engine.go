@@ -56,7 +56,6 @@ func (engine *Engine) initializeComponents() error {
 		return err
 	}
 
-
 	err = engine.recover()
 	if err != nil {
 		return err
@@ -103,14 +102,31 @@ func (engine *Engine) reinitialize() error {
 func (engine *Engine) recover() error {
 	var maxSeq uint64
 	maxSeq = engine.lsm.GetMaxSeqId()
-	_, err := engine.wal.Recover()
-	//fmt.Println(records)
-	//for _, rec := range records {
-	//	fmt.Println(rec)
-	//}
+
+	records, err := engine.wal.Recover()
 	if err != nil {
 		return err
 	}
+
+	for _, r := range records {
+		switch r.OpType {
+		case enums.OpTypeDel:
+			engine.lsm.Put(r.Key, nil, r.SeqId, enums.OpTypeDel)
+		case enums.OpTypePut:
+			engine.lsm.Put(r.Key, r.Value, r.SeqId, enums.OpTypePut)
+		case enums.OpTypeRangeDel:
+			engine.lsm.Put(r.Key, r.Value, r.SeqId, enums.OpTypeRangeDel)
+		default:
+			return fmt.Errorf("unknown op type: %v", r.OpType)
+		}
+		if r.SeqId > maxSeq {
+			maxSeq = r.SeqId
+		}
+	}
+	if config.GetSettings().Debug {
+		fmt.Printf("Recovered %d records from WAL\n", len(records))
+	}
+
 	engine.seqGen = sequence.NewSequenceGenerator(maxSeq)
 	return nil
 }
@@ -126,14 +142,14 @@ func (engine *Engine) Put(key []byte, value []byte) {
 	}
 
 	seqId := engine.seqGen.Next()
-	engine.wal.Put(key, value)
+	engine.wal.Put(key, value, seqId, enums.OpTypePut)
 	engine.lsm.Put(key, value, seqId, enums.OpTypePut)
 	engine.notifier.NotifyPut(key, value)
 }
 
 func (engine *Engine) PutWithTTL(key []byte, value []byte, ttl int64) {
 	seqId := engine.seqGen.Next()
-	//wal
+	engine.wal.Put(key, value, seqId, enums.OpTypePut)
 	if engine.inMemoryTTL {
 		engine.ttlJanitor.AddTTL(shared.TTLEntry{ExpiresAt: time.Now().UnixMilli() + ttl, Key: key})
 	}
@@ -172,13 +188,14 @@ func (engine *Engine) Delete(key []byte) {
 		fmt.Printf("\nDeleting key %s\n", string(key))
 	}
 	seqId := engine.seqGen.Next()
-	// wal
+	engine.wal.Put(key, nil, seqId, enums.OpTypeDel)
 	engine.lsm.Put(key, nil, seqId, enums.OpTypeDel)
 	engine.notifier.NotifyDelete(key)
 }
 
 func (engine *Engine) RangeDelete(startKey []byte, endKey []byte) {
 	seqId := engine.seqGen.Next()
+	engine.wal.Put(startKey, endKey, seqId, enums.OpTypeRangeDel)
 	engine.lsm.Put(startKey, endKey, seqId, enums.OpTypeRangeDel)
 	engine.notifier.NotifyDeleteRange(startKey, endKey)
 }

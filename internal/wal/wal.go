@@ -9,8 +9,8 @@ import (
 	"strings"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/block"
-	"github.com/ajromen/LSM-KV-Engine/internal/enums"
 	"github.com/ajromen/LSM-KV-Engine/internal/config"
+	"github.com/ajromen/LSM-KV-Engine/internal/enums"
 )
 
 const (
@@ -143,7 +143,7 @@ func (w *WAL) Append(r Record) error {
 	return w.AppendWALRecord(wr)
 }
 
-func (w *WAL) Put(key []byte, value []byte, seqId uint64, opType enums.OpType) error {
+func (w *WAL) Put(key []byte, value []byte, seqId uint64, opType enums.OpType) {
 	r := Record{
 		ExpiresAt: 0,
 		OpType:    opType,
@@ -151,10 +151,13 @@ func (w *WAL) Put(key []byte, value []byte, seqId uint64, opType enums.OpType) e
 		Key:       key,
 		Value:     value,
 	}
-	return w.Append(r)
+	err := w.Append(r)
+	if err != nil {
+		panic(err)
+	}
 }
 
-func (w *WAL) PutWithTTL(key []byte, value []byte, seqId uint64, opType enums.OpType, ttl int64) error {
+func (w *WAL) PutWithTTL(key []byte, value []byte, seqId uint64, opType enums.OpType, ttl int64) {
 	r := Record{
 		ExpiresAt: ttl,
 		OpType:    opType,
@@ -162,7 +165,10 @@ func (w *WAL) PutWithTTL(key []byte, value []byte, seqId uint64, opType enums.Op
 		Key:       key,
 		Value:     value,
 	}
-	return w.Append(r)
+	err := w.Append(r)
+	if err != nil {
+		panic(err)
+	}
 }
 
 func (w *WAL) AppendWALRecord(wr WALRecord) error {
