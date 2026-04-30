@@ -11,7 +11,7 @@ import (
 	"github.com/ajromen/LSM-KV-Engine/internal/enums"
 )
 
-const ManifestFileName = "MANIFEST.json"
+const ManifestFileName = "BACKUP_MANIFEST.json"
 
 type BackupManifestEntry struct {
 	BackupDirectory string           `json:"backup_directory"`

@@ -25,8 +25,8 @@ type WAL struct {
 	MaxBlocks     int
 	NextSegmentID uint64
 	NextTxnID     uint64
-	LowWatermark  uint64
 	BM            *block.BlockManager
+	Manifest      *WALManifest
 }
 
 type TxnOp struct {
@@ -54,9 +54,14 @@ func OpenWAL() (*WAL, error) {
 		MaxBlocks:     settings.WAL.MaxBlocks,
 		NextSegmentID: 1,
 		NextTxnID:     1,
-		LowWatermark:  0,
 		BM:            bm,
 	}
+
+	manifest, err := NewWALManifest(dir)
+	if err != nil {
+		return nil, err
+	}
+	w.Manifest = manifest
 
 	entries, err := ListFiles(dir)
 	if err != nil {
@@ -471,38 +476,25 @@ func (w *WAL) SetLowWatermark(segmentID uint64) error {
 	if w == nil {
 		return fmt.Errorf("wal is nil")
 	}
-
-	if segmentID == 0 {
-		return nil
-	}
-
-	if segmentID < w.LowWatermark {
-		return fmt.Errorf("low watermark cannot move backwards")
-	}
-
 	if w.ActiveSegment != nil && segmentID >= w.ActiveSegment.ID {
 		return fmt.Errorf("cannot set low watermark to active or future segment")
 	}
-
-	w.LowWatermark = segmentID
+	if err := w.Manifest.SetLowWatermark(segmentID); err != nil {
+		return err
+	}
 	return w.DeleteOldSegments()
 }
 
 func (w *WAL) RotateSegment() error {
-	if w == nil {
-		return fmt.Errorf("wal is nil")
-	}
-	if w.ActiveSegment == nil {
-		return fmt.Errorf("active segment is nil")
-	}
-	err := w.ActiveSegment.Sync()
-	if err != nil {
+	if err := w.ActiveSegment.Sync(); err != nil {
 		return err
 	}
-
 	newPath := w.SegmentPath(w.NextSegmentID)
 	seg, err := OpenSegment(w.NextSegmentID, newPath, w.MaxBlocks, w.BM)
 	if err != nil {
+		return err
+	}
+	if err := w.Manifest.AddSegment(w.NextSegmentID); err != nil {
 		return err
 	}
 	w.ActiveSegment = seg
@@ -589,7 +581,6 @@ func (w *WAL) PrintAll() error { // func for debugging
 func ParseSegmentID(name string) (uint64, error) {
 	base := strings.TrimPrefix(name, FilePrefix)
 	base = strings.TrimSuffix(base, FileSuffix)
-	//fmt.Println(name, base)
 
 	id, err := strconv.ParseUint(base, 10, 64)
 	if err != nil {
@@ -635,49 +626,35 @@ func (w *WAL) InitNextTxnID() error {
 }
 
 func (w *WAL) DeleteOldSegments() error {
-	if w == nil {
-		return fmt.Errorf("wal is nil")
-	}
-
 	entries, err := ListFiles(w.Dir)
 	if err != nil {
 		return err
 	}
-
 	for _, entry := range entries {
 		if entry.IsDir() {
 			continue
 		}
-
 		name := entry.Name()
-		if !strings.HasPrefix(name, FilePrefix) || !strings.HasSuffix(name, FileSuffix) {
-			continue
-		}
-
 		id, err := ParseSegmentID(name)
 		if err != nil {
-			return err
-		}
-
-		if id > w.LowWatermark {
 			continue
 		}
-
+		if id > w.Manifest.LowWatermark {
+			continue
+		}
 		if w.ActiveSegment != nil && id == w.ActiveSegment.ID {
 			continue
 		}
-
-		path := filepath.Join(w.Dir, name)
-
+		p := filepath.Join(w.Dir, name)
 		if w.BM != nil {
-			w.BM.InvalidateFile(path)
+			w.BM.InvalidateFile(p)
 		}
-
-		err = os.Remove(path)
-		if err != nil {
+		if err := os.Remove(p); err != nil {
+			return err
+		}
+		if err := w.Manifest.RemoveSegment(id); err != nil {
 			return err
 		}
 	}
-
 	return nil
 }

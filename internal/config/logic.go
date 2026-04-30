@@ -13,10 +13,9 @@ import (
 
 func LoadConfig(flags *flags.FLags) error {
 	cfg := NewDefaultConfig()
-	if flags == nil {
-		return nil
-	}
+	debug := flags.Debug != nil && *flags.Debug
 	conFile := path.Join(getDefaultConfigPath(), configFileName)
+
 	if flags.CreateDefaultConfig != nil {
 		data, err := json.MarshalIndent(cfg, "", "	")
 		if err != nil {
@@ -29,14 +28,14 @@ func LoadConfig(flags *flags.FLags) error {
 	}
 
 	if flags.ConfigPath != nil {
-		err := cfg.loadFromFile(*flags.ConfigPath)
+		err := cfg.loadFromFile(*flags.ConfigPath, debug)
 		if err != nil {
 			return err
 		}
 	} else {
 		_, err := os.Stat(conFile)
 		if err == nil {
-			err := cfg.loadFromFile(conFile)
+			err := cfg.loadFromFile(conFile, debug)
 			if err != nil {
 				return err
 			}
@@ -185,7 +184,7 @@ func (c *Config) validateFields() error {
 	return nil
 }
 
-func (c *Config) loadFromFile(path string) error {
+func (c *Config) loadFromFile(path string, isDebug bool) error {
 	file, err := os.Open(path)
 	if err != nil {
 		return fmt.Errorf("cannot open config file: %w", err)
@@ -198,6 +197,11 @@ func (c *Config) loadFromFile(path string) error {
 	if err := decoder.Decode(c); err != nil {
 		return fmt.Errorf("invalid config format: %w", err)
 	}
+
+	if c.Debug || isDebug {
+		fmt.Println("Loaded config file:", path)
+	}
+
 	return nil
 }
 
