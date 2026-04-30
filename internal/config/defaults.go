@@ -10,7 +10,8 @@ import (
 
 // Engine defaults
 const (
-	defaultDebug = false
+	configFileName = "config.json"
+	defaultDebug   = false
 	//WAL
 	defaultWalSegmentSize = 1 * 1024 * 1024
 
@@ -146,6 +147,35 @@ func getDefaultSavePath() string {
 		}
 		home, _ := os.UserHomeDir()
 		path = filepath.Join(home, ".local", "share", "lsm-kv-engine")
+	}
+	err := os.MkdirAll(path, 0755)
+	if err != nil {
+		panic(err)
+	}
+	return path
+}
+
+func getDefaultConfigPath() string {
+	var path string
+	switch runtime.GOOS {
+	case "windows":
+		// C:\AppData\Roaming\lsm-kv-engine
+		base := os.Getenv("APPDATA")
+		if base == "" {
+			base = `C:\AppData\Roaming`
+		}
+		path = filepath.Join(base, "lsm-kv-engine")
+	case "darwin":
+		// ~/Library/Preferences/lsm-kv-engine
+		home, _ := os.UserHomeDir()
+		path = filepath.Join(home, "Library", "Preferences", "lsm-kv-engine")
+	default:
+		// ~/.config/lsm-kv-engine
+		if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
+			return filepath.Join(xdg, "lsm-kv-engine")
+		}
+		home, _ := os.UserHomeDir()
+		path = filepath.Join(home, ".config", "lsm-kv-engine")
 	}
 	err := os.MkdirAll(path, 0755)
 	if err != nil {
