@@ -16,13 +16,24 @@ func LoadConfig(flags *flags.FLags) error {
 	if flags == nil {
 		return nil
 	}
+	conFile := path.Join(getDefaultConfigPath(), configFileName)
+	if flags.CreateDefaultConfig != nil {
+		data, err := json.MarshalIndent(cfg, "", "	")
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(conFile, data, 0644); err != nil {
+			return err
+		}
+		println("Successfully created new default config at: ", conFile)
+	}
+
 	if flags.ConfigPath != nil {
 		err := cfg.loadFromFile(*flags.ConfigPath)
 		if err != nil {
 			return err
 		}
 	} else {
-		conFile := path.Join(getDefaultConfigPath(), configFileName)
 		_, err := os.Stat(conFile)
 		if err == nil {
 			err := cfg.loadFromFile(conFile)
