@@ -54,4 +54,5 @@ type EngineInterface interface {
 	Close() error
 
 	DataRaw(index int)
+	WalPrintAll() error
 }

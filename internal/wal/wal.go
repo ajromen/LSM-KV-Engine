@@ -680,7 +680,7 @@ func (w *WAL) DeleteOldSegments() error {
 	return nil
 }
 
-func (w *WAL) ClearAll() error {
+func (w *WAL) ClearAll(createNewActive bool) error {
 	if w == nil {
 		return fmt.Errorf("wal is nil")
 	}
@@ -705,6 +705,17 @@ func (w *WAL) ClearAll() error {
 	w.ActiveSegment = nil
 	w.NextSegmentID = 1
 	w.NextTxnID = 1
+
+	if createNewActive {
+		firstPath := w.SegmentPath(1)
+		seg, err := OpenSegment(1, firstPath, w.MaxBlocks, w.BM)
+		if err != nil {
+			return err
+		}
+		w.ActiveSegment = seg
+		w.NextSegmentID = 2
+		return w.Manifest.AddSegment(1)
+	}
 
 	return nil
 }

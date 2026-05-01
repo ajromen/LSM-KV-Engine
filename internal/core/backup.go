@@ -56,7 +56,7 @@ func (engine *Engine) RestoreFromBackup(backupId string) error {
 
 	// step 2
 	// wal
-	err = engine.ClearAll()
+	err = engine.ClearAll(true)
 	if err != nil {
 		_ = engine.backupManager.DeleteBackup(newBackupId)
 		return err

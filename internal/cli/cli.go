@@ -83,6 +83,12 @@ func RunCli(engine *core.Engine) {
 				continue
 			}
 			PrintError(fmt.Sprint("Unknown command: ", parts[0]))
+		case "print-wal":
+			if config.GetSettings().Debug {
+				handlePrintWal(engine)
+				continue
+			}
+			PrintError(fmt.Sprint("Unknown command: ", parts[0]))
 		default:
 			PrintError(fmt.Sprint("Unknown command: ", parts[0]))
 		}
