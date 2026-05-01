@@ -7,7 +7,7 @@ import (
 	"github.com/ajromen/LSM-KV-Engine/internal/config"
 )
 
-func newTestEngine(t *testing.T) EngineInterface {
+func newTestEngine(t *testing.T) *Engine {
 	cfg := config.NewDefaultConfig()
 	cfg.SavePath = t.TempDir()
 
@@ -139,7 +139,7 @@ func TestClearAll(t *testing.T) {
 	e.Put([]byte("k1"), []byte("v1"))
 	e.Put([]byte("k2"), []byte("v2"))
 
-	err := e.ClearAll()
+	err := e.ClearAll(false)
 	if err != nil {
 		t.Fatalf("ClearAll error: %v", err)
 	}

@@ -656,16 +656,15 @@ func (sm *SSTableManager) EntryIterator(start, end []byte) (iterator.Iterator[it
 	), nil
 }
 
-func (sm *SSTableManager) GetAllTTL() (*ttl.ExpiryHeap, map[string]int64, error) {
+func (sm *SSTableManager) GetAllTTL() (*ttl.ExpiryHeap, error) {
 	heap := ttl.NewExpiryHeap()
-	index := make(map[string]int64)
 	timeNow := time.Now().UnixMilli()
 
 	for _, layer := range sm.Layers {
 		for i := 0; i < len(layer.SSTables); i++ {
 			e, err := layer.SSTables[i].GetTTLEntries()
 			if err != nil {
-				return nil, nil, err
+				return nil, err
 			}
 
 			for _, entry := range e {
@@ -673,10 +672,9 @@ func (sm *SSTableManager) GetAllTTL() (*ttl.ExpiryHeap, map[string]int64, error)
 					continue
 				}
 				heap.Push(entry)
-				index[string(entry.Key)] = entry.ExpiresAt
 			}
 
 		}
 	}
-	return heap, index, nil
+	return heap, nil
 }

@@ -77,5 +77,6 @@ func printHelpMessage() {
 	PrintSuccess(helpText)
 	if config.GetSettings().Debug {
 		PrintSuccess("Debug:\n  dataraw <index>   Print decoded raw data for requested sstable")
+		PrintSuccess("  print-wal         Print decoded raw data for all wal segments")
 	}
 }

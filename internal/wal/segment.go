@@ -108,205 +108,15 @@ func OpenSegment(id uint64, path string, maxBlocks int, bm *block.BlockManager) 
 }
 
 func (s *Segment) Append(r Record, sequenceID uint64) error {
-	headerSize := KEY_START
-	totalSize := headerSize + len(r.Key) + len(r.Value)
-	if s.CurrentBlock.Remaining() >= totalSize { // if full record can fit
-		wr := WALRecord{
-			FragType:   FULL,
-			RecType:    SINGLE, // to be updated
-			TxnID:      0,      // to be updated
-			SequenceID: sequenceID,
-			KeySize:    uint64(len(r.Key)),
-			ValueSize:  uint64(len(r.Value)),
-			Record:     r,
-		}
-		buf := Encode(wr)
-
-		_, err := s.CurrentBlock.Write(buf)
-		if err != nil {
-			return err
-		}
-		return nil
-
-	} else if s.CurrentBlock.Remaining() >= headerSize+1 { // full header can fit and at least a byte of payload
-		wr := WALRecord{}
-		payloadSize := len(r.Key) + len(r.Value)
-		payload := make([]byte, payloadSize)
-
-		pValueStart := len(r.Key)
-		copy(payload[:pValueStart], r.Key)
-		copy(payload[pValueStart:], r.Value)
-
-		payloadSpace := s.CurrentBlock.Remaining() - headerSize
-
-		if payloadSpace < pValueStart { // part of key fits
-			wr = WALRecord{
-				FragType:   FIRST,
-				RecType:    SINGLE, // to be updated
-				TxnID:      0,      // to be updated
-				SequenceID: sequenceID,
-				KeySize:    uint64(payloadSpace),
-				ValueSize:  0,
-				Record: Record{
-					Timestamp: r.Timestamp,
-					Tombstone: r.Tombstone,
-					Key:       payload[:payloadSpace],
-					Value:     nil,
-				},
-			}
-			payload = payload[payloadSpace:]
-			pValueStart = pValueStart - payloadSpace
-		} else if payloadSpace == pValueStart { // exactly key fits
-			wr = WALRecord{
-				FragType:   FIRST,
-				RecType:    SINGLE, // to be updated
-				TxnID:      0,      // to be updated
-				SequenceID: sequenceID,
-				KeySize:    uint64(pValueStart),
-				ValueSize:  0,
-				Record: Record{
-					Timestamp: r.Timestamp,
-					Tombstone: r.Tombstone,
-					Key:       payload[:pValueStart],
-					Value:     nil,
-				},
-			}
-			payload = payload[pValueStart:]
-			pValueStart = 0
-		} else { // key and part of value fits
-			wr = WALRecord{
-				FragType:   FIRST,
-				RecType:    SINGLE, // to be updated
-				TxnID:      0,      // to be updated
-				SequenceID: sequenceID,
-				KeySize:    uint64(pValueStart),
-				ValueSize:  uint64(payloadSpace - pValueStart),
-				Record: Record{
-					Timestamp: r.Timestamp,
-					Tombstone: r.Tombstone,
-					Key:       payload[:pValueStart],
-					Value:     payload[pValueStart:payloadSpace],
-				},
-			}
-			payload = payload[payloadSpace:]
-			pValueStart = 0
-		}
-		buf := Encode(wr)
-		_, err := s.CurrentBlock.Write(buf)
-		if err != nil {
-			return err
-		}
-		//fmt.Println("Partial record", buf, payload)
-
-		// for loop seems unsafe, might have to refactor
-		// to do
-		for s.CurrentBlock.Remaining() < headerSize+len(payload) {
-			//fmt.Println(s.CurrentBlock.Data)
-			//fmt.Println(s.CurrentBlockIndex)
-			err = s.MoveToNextBlock()
-			if err != nil {
-				return err
-			}
-
-			if s.CurrentBlock.Remaining() >= headerSize+len(payload) {
-				break
-			}
-
-			payloadSpace = s.CurrentBlock.Remaining() - headerSize
-
-			if payloadSpace < pValueStart { // part of key fits
-				wr = WALRecord{
-					FragType:   MIDDLE,
-					RecType:    SINGLE, // to be updated
-					TxnID:      0,      // to be updated
-					SequenceID: sequenceID,
-					KeySize:    uint64(payloadSpace),
-					ValueSize:  0,
-					Record: Record{
-						Timestamp: r.Timestamp,
-						Tombstone: r.Tombstone,
-						Key:       payload[:payloadSpace],
-						Value:     nil,
-					},
-				}
-				payload = payload[payloadSpace:]
-				pValueStart = pValueStart - payloadSpace
-			} else if payloadSpace == pValueStart { // exactly key fits
-				wr = WALRecord{
-					FragType:   MIDDLE,
-					RecType:    SINGLE, // to be updated
-					TxnID:      0,      // to be updated
-					SequenceID: sequenceID,
-					KeySize:    uint64(pValueStart),
-					ValueSize:  0,
-					Record: Record{
-						Timestamp: r.Timestamp,
-						Tombstone: r.Tombstone,
-						Key:       payload[:pValueStart],
-						Value:     nil,
-					},
-				}
-				payload = payload[pValueStart:]
-				pValueStart = 0
-			} else { // part of value fits
-				wr = WALRecord{
-					FragType:   MIDDLE,
-					RecType:    SINGLE, // to be updated
-					TxnID:      0,      // to be updated
-					SequenceID: sequenceID,
-					KeySize:    uint64(pValueStart),
-					ValueSize:  uint64(payloadSpace - pValueStart),
-					Record: Record{
-						Timestamp: r.Timestamp,
-						Tombstone: r.Tombstone,
-						Key:       payload[:pValueStart],
-						Value:     payload[pValueStart:payloadSpace],
-					},
-				}
-				payload = payload[payloadSpace:]
-				pValueStart = 0
-			}
-			buf := Encode(wr)
-			_, err := s.CurrentBlock.Write(buf)
-			if err != nil {
-				return err
-			}
-
-		}
-		//fmt.Println(payload)
-		wr = WALRecord{
-			FragType:   LAST,
-			RecType:    SINGLE, // to be updated
-			TxnID:      0,      // to be updated
-			SequenceID: sequenceID,
-			KeySize:    uint64(pValueStart),
-			ValueSize:  uint64(len(payload) - pValueStart),
-			Record: Record{
-				Timestamp: r.Timestamp,
-				Tombstone: r.Tombstone,
-				Key:       payload[:pValueStart],
-				Value:     payload[pValueStart:],
-			},
-		}
-		buf = Encode(wr)
-		_, err = s.CurrentBlock.Write(buf)
-		if err != nil {
-			return err
-		}
-
-		return nil
-
-		// reminder for myself, when fragmenting the record, dont crc the encoded payload, crc each part separately
-	} else if s.CurrentBlock.Remaining() <= headerSize { // not a single byte of payload can fit, pad the block
-		err := s.MoveToNextBlock()
-		if err != nil {
-			return err
-		}
-
-		return s.Append(r, sequenceID) // crash if headersize > block size, but that should be checked way earlier
-	}
-
-	return fmt.Errorf("block remaining size error")
+	r.SeqId = sequenceID
+	return s.AppendWALRecord(WALRecord{
+		FragType:  FULL,
+		RecType:   SINGLE,
+		TxnID:     0,
+		KeySize:   uint64(len(r.Key)),
+		ValueSize: uint64(len(r.Value)),
+		Record:    r,
+	})
 }
 
 func (s *Segment) AppendWALRecord(wr WALRecord) error {
@@ -315,201 +125,108 @@ func (s *Segment) AppendWALRecord(wr WALRecord) error {
 	totalSize := headerSize + len(r.Key) + len(r.Value)
 
 	if s.CurrentBlock.Remaining() >= totalSize {
-		full := WALRecord{
-			FragType:   FULL,
-			RecType:    wr.RecType,
-			TxnID:      wr.TxnID,
-			SequenceID: wr.SequenceID,
-			KeySize:    uint64(len(r.Key)),
-			ValueSize:  uint64(len(r.Value)),
-			Record:     r,
-		}
-		buf := Encode(full)
+		buf := Encode(WALRecord{
+			FragType:  FULL,
+			RecType:   wr.RecType,
+			TxnID:     wr.TxnID,
+			KeySize:   uint64(len(r.Key)),
+			ValueSize: uint64(len(r.Value)),
+			Record:    r,
+		})
 		_, err := s.CurrentBlock.Write(buf)
-		return err
-	}
-
-	if s.CurrentBlock.Remaining() >= headerSize+1 {
-		payloadSize := len(r.Key) + len(r.Value)
-		payload := make([]byte, payloadSize)
-
-		pValueStart := len(r.Key)
-		copy(payload[:pValueStart], r.Key)
-		copy(payload[pValueStart:], r.Value)
-
-		payloadSpace := s.CurrentBlock.Remaining() - headerSize
-
-		var frag WALRecord
-
-		if payloadSpace < pValueStart {
-			frag = WALRecord{
-				FragType:   FIRST,
-				RecType:    wr.RecType,
-				TxnID:      wr.TxnID,
-				SequenceID: wr.SequenceID,
-				KeySize:    uint64(payloadSpace),
-				ValueSize:  0,
-				Record: Record{
-					Timestamp: r.Timestamp,
-					Tombstone: r.Tombstone,
-					Key:       payload[:payloadSpace],
-					Value:     nil,
-				},
-			}
-			payload = payload[payloadSpace:]
-			pValueStart -= payloadSpace
-		} else if payloadSpace == pValueStart {
-			frag = WALRecord{
-				FragType:   FIRST,
-				RecType:    wr.RecType,
-				TxnID:      wr.TxnID,
-				SequenceID: wr.SequenceID,
-				KeySize:    uint64(pValueStart),
-				ValueSize:  0,
-				Record: Record{
-					Timestamp: r.Timestamp,
-					Tombstone: r.Tombstone,
-					Key:       payload[:pValueStart],
-					Value:     nil,
-				},
-			}
-			payload = payload[pValueStart:]
-			pValueStart = 0
-		} else {
-			frag = WALRecord{
-				FragType:   FIRST,
-				RecType:    wr.RecType,
-				TxnID:      wr.TxnID,
-				SequenceID: wr.SequenceID,
-				KeySize:    uint64(pValueStart),
-				ValueSize:  uint64(payloadSpace - pValueStart),
-				Record: Record{
-					Timestamp: r.Timestamp,
-					Tombstone: r.Tombstone,
-					Key:       payload[:pValueStart],
-					Value:     payload[pValueStart:payloadSpace],
-				},
-			}
-			payload = payload[payloadSpace:]
-			pValueStart = 0
-		}
-
-		buf := Encode(frag)
-		_, err := s.CurrentBlock.Write(buf)
-		if err != nil {
-			return err
-		}
-
-		for s.CurrentBlock.Remaining() < headerSize+len(payload) {
-			err = s.MoveToNextBlock()
-			if err != nil {
-				return err
-			}
-
-			if s.CurrentBlock.Remaining() >= headerSize+len(payload) {
-				break
-			}
-
-			payloadSpace = s.CurrentBlock.Remaining() - headerSize
-
-			if payloadSpace < pValueStart {
-				frag = WALRecord{
-					FragType:   MIDDLE,
-					RecType:    wr.RecType,
-					TxnID:      wr.TxnID,
-					SequenceID: wr.SequenceID,
-					KeySize:    uint64(payloadSpace),
-					ValueSize:  0,
-					Record: Record{
-						Timestamp: r.Timestamp,
-						Tombstone: r.Tombstone,
-						Key:       payload[:payloadSpace],
-						Value:     nil,
-					},
-				}
-				payload = payload[payloadSpace:]
-				pValueStart -= payloadSpace
-			} else if payloadSpace == pValueStart {
-				frag = WALRecord{
-					FragType:   MIDDLE,
-					RecType:    wr.RecType,
-					TxnID:      wr.TxnID,
-					SequenceID: wr.SequenceID,
-					KeySize:    uint64(pValueStart),
-					ValueSize:  0,
-					Record: Record{
-						Timestamp: r.Timestamp,
-						Tombstone: r.Tombstone,
-						Key:       payload[:pValueStart],
-						Value:     nil,
-					},
-				}
-				payload = payload[pValueStart:]
-				pValueStart = 0
-			} else {
-				frag = WALRecord{
-					FragType:   MIDDLE,
-					RecType:    wr.RecType,
-					TxnID:      wr.TxnID,
-					SequenceID: wr.SequenceID,
-					KeySize:    uint64(pValueStart),
-					ValueSize:  uint64(payloadSpace - pValueStart),
-					Record: Record{
-						Timestamp: r.Timestamp,
-						Tombstone: r.Tombstone,
-						Key:       payload[:pValueStart],
-						Value:     payload[pValueStart:payloadSpace],
-					},
-				}
-				payload = payload[payloadSpace:]
-				pValueStart = 0
-			}
-
-			buf = Encode(frag)
-			_, err := s.CurrentBlock.Write(buf)
-			if err != nil {
-				return err
-			}
-		}
-
-		last := WALRecord{
-			FragType:   LAST,
-			RecType:    wr.RecType,
-			TxnID:      wr.TxnID,
-			SequenceID: wr.SequenceID,
-			KeySize:    uint64(pValueStart),
-			ValueSize:  uint64(len(payload) - pValueStart),
-			Record: Record{
-				Timestamp: r.Timestamp,
-				Tombstone: r.Tombstone,
-				Key:       payload[:pValueStart],
-				Value:     payload[pValueStart:],
-			},
-		}
-		buf = Encode(last)
-		_, err = s.CurrentBlock.Write(buf)
 		return err
 	}
 
 	if s.CurrentBlock.Remaining() <= headerSize {
-		err := s.MoveToNextBlock()
-		if err != nil {
+		if err := s.MoveToNextBlock(); err != nil {
 			return err
 		}
 		return s.AppendWALRecord(wr)
 	}
 
-	return fmt.Errorf("block remaining size error")
+	// fragmentacija
+	payload := make([]byte, len(r.Key)+len(r.Value))
+	pValueStart := len(r.Key)
+	copy(payload[:pValueStart], r.Key)
+	copy(payload[pValueStart:], r.Value)
+
+	// FIRST fragment
+	payloadSpace := s.CurrentBlock.Remaining() - headerSize
+	frag := makeFragment(FIRST, wr, payload, pValueStart, payloadSpace)
+	if payloadSpace < pValueStart {
+		pValueStart -= payloadSpace
+	} else {
+		pValueStart = 0
+	}
+	payload = payload[min(payloadSpace, len(payload)):]
+
+	buf := Encode(frag)
+	if _, err := s.CurrentBlock.Write(buf); err != nil {
+		return err
+	}
+
+	// MIDDLE fragmenti
+	for len(payload) > 0 {
+		if err := s.MoveToNextBlock(); err != nil {
+			return err
+		}
+
+		payloadSpace = s.CurrentBlock.Remaining() - headerSize
+
+		if s.CurrentBlock.Remaining() >= headerSize+len(payload) {
+			break // LAST ce stati u ovaj blok
+		}
+
+		frag = makeFragment(MIDDLE, wr, payload, pValueStart, payloadSpace)
+		if payloadSpace < pValueStart {
+			pValueStart -= payloadSpace
+		} else {
+			pValueStart = 0
+		}
+		payload = payload[min(payloadSpace, len(payload)):]
+
+		buf = Encode(frag)
+		if _, err := s.CurrentBlock.Write(buf); err != nil {
+			return err
+		}
+	}
+
+	// LAST fragment
+	last := WALRecord{
+		FragType:  LAST,
+		RecType:   wr.RecType,
+		TxnID:     wr.TxnID,
+		KeySize:   uint64(pValueStart),
+		ValueSize: uint64(len(payload) - pValueStart),
+		Record: Record{
+			SeqId:     r.SeqId,
+			ExpiresAt: r.ExpiresAt,
+			OpType:    r.OpType,
+			Key:       payload[:pValueStart],
+			Value:     payload[pValueStart:],
+		},
+	}
+	buf = Encode(last)
+	_, err := s.CurrentBlock.Write(buf)
+	return err
 }
 
-func (s *Segment) ReadAllRecords() ([]WALRecord, error) { //doesnt join fragments
+func (s *Segment) ReadAllRecords() ([]WALRecord, error) {
+	return s.ReadAllRecordsFromBlock(0)
+}
+
+func (s *Segment) ReadAllRecordsFromBlock(fromBlock uint32) ([]WALRecord, error) {
 	if s == nil {
 		return nil, fmt.Errorf("segment is nil")
 	}
+	if fromBlock >= uint32(s.MaxBlocks) {
+		return []WALRecord{}, nil
+	}
+
 	all := make([]WALRecord, 0)
 
-	for i := 0; i < s.MaxBlocks; i++ {
-		blockData, err := s.ReadBlock(uint32(i))
+	for i := fromBlock; i < uint32(s.MaxBlocks); i++ {
+		blockData, err := s.ReadBlock(i)
 		if err != nil {
 			return nil, err
 		}
@@ -518,12 +235,45 @@ func (s *Segment) ReadAllRecords() ([]WALRecord, error) { //doesnt join fragment
 		if err != nil {
 			return nil, err
 		}
+
 		if len(recs) == 0 {
 			break
 		}
+
 		all = append(all, recs...)
 	}
+
 	return all, nil
+}
+
+func (s *Segment) FindBlockBySeqID(sequenceID uint64) (uint32, bool, error) {
+	if s == nil {
+		return 0, false, fmt.Errorf("segment is nil")
+	}
+
+	for i := uint32(0); i < uint32(s.MaxBlocks); i++ {
+		blockData, err := s.ReadBlock(i)
+		if err != nil {
+			return 0, false, err
+		}
+
+		recs, err := ReadBlockRecords(blockData)
+		if err != nil {
+			return 0, false, err
+		}
+
+		if len(recs) == 0 {
+			break
+		}
+
+		for _, rec := range recs {
+			if rec.Record.SeqId == sequenceID {
+				return i, true, nil
+			}
+		}
+	}
+
+	return 0, false, nil
 }
 
 func ReadBlockRecords(data []byte) ([]WALRecord, error) {
@@ -664,4 +414,41 @@ func FileExists(path string) (bool, error) {
 		return false, nil
 	}
 	return false, err
+}
+
+func makeFragment(fragType FragmentType, wr WALRecord, payload []byte, pValueStart int, payloadSpace int) WALRecord {
+	var key, value []byte
+	var keySize, valueSize uint64
+
+	if payloadSpace < pValueStart {
+		key = payload[:payloadSpace]
+		value = nil
+		keySize = uint64(payloadSpace)
+		valueSize = 0
+	} else if payloadSpace == pValueStart {
+		key = payload[:pValueStart]
+		value = nil
+		keySize = uint64(pValueStart)
+		valueSize = 0
+	} else {
+		key = payload[:pValueStart]
+		value = payload[pValueStart:payloadSpace]
+		keySize = uint64(pValueStart)
+		valueSize = uint64(payloadSpace - pValueStart)
+	}
+
+	return WALRecord{
+		FragType:  fragType,
+		RecType:   wr.RecType,
+		TxnID:     wr.TxnID,
+		KeySize:   keySize,
+		ValueSize: valueSize,
+		Record: Record{
+			SeqId:     wr.Record.SeqId,
+			ExpiresAt: wr.Record.ExpiresAt,
+			OpType:    wr.Record.OpType,
+			Key:       key,
+			Value:     value,
+		},
+	}
 }

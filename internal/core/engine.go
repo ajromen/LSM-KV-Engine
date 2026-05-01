@@ -15,6 +15,7 @@ import (
 	"github.com/ajromen/LSM-KV-Engine/internal/shared"
 	"github.com/ajromen/LSM-KV-Engine/internal/token_bucket"
 	"github.com/ajromen/LSM-KV-Engine/internal/ttl"
+	"github.com/ajromen/LSM-KV-Engine/internal/wal"
 )
 
 func NewEngine() (*Engine, error) {
@@ -44,12 +45,21 @@ func NewEngine() (*Engine, error) {
 func (engine *Engine) initializeComponents() error {
 	dataDir := config.GetSettings().SavePath
 
-	newLsm, err := lsm.NewLSM(dataDir)
+	newLsm, err := lsm.NewLSM(dataDir, engine.MemtableFlushed)
 	if err != nil {
 		return err
 	}
 	engine.lsm = newLsm
-	engine.recover()
+
+	engine.wal, err = wal.OpenWAL()
+	if err != nil {
+		return err
+	}
+
+	err = engine.recover()
+	if err != nil {
+		return err
+	}
 
 	cfg := config.GetSettings().TokenBucket
 	if cfg.MaxTokens > 0 {
@@ -69,11 +79,11 @@ func (engine *Engine) initializeComponents() error {
 
 	if engine.inMemoryTTL {
 		engine.ttlJanitor = ttl.NewTTLJanitor(engine.notifier)
-		heap, index, err := engine.lsm.GetAllTTLFomSST()
+		heap, err := engine.lsm.GetAllTTLFomSST()
 		if err != nil {
 			return err
 		}
-		engine.ttlJanitor.Init(heap, index)
+		engine.ttlJanitor.Init(heap)
 		go engine.ttlJanitor.Run()
 	}
 
@@ -87,32 +97,38 @@ func (engine *Engine) reinitialize() error {
 	return engine.initializeComponents()
 }
 
-func (engine *Engine) persistTokenBucket() {
-	if engine.tokenBucket == nil {
-		return
-	}
-	seqId := engine.seqGen.Next()
-	engine.lsm.Put([]byte(token_bucket.InternalKey), engine.tokenBucket.Serialize(), seqId, enums.OpTypePut)
-}
-
-func (engine *Engine) checkRateLimit() error {
-	if engine.tokenBucket == nil || !engine.tokenBucket.IsEnabled() {
-		return nil
-	}
-	if !engine.tokenBucket.TryConsume() {
-		return fmt.Errorf("rate limit exceeded: too many requests")
-	}
-	engine.persistTokenBucket()
-	return nil
-}
-
 // check manifest
 // check wal
-func (engine *Engine) recover() {
+func (engine *Engine) recover() error {
 	var maxSeq uint64
 	maxSeq = engine.lsm.GetMaxSeqId()
-	//wal
+
+	records, err := engine.wal.Recover()
+	if err != nil {
+		return err
+	}
+
+	for _, r := range records {
+		switch r.OpType {
+		case enums.OpTypeDel:
+			engine.lsm.Put(r.Key, nil, r.SeqId, enums.OpTypeDel)
+		case enums.OpTypePut:
+			engine.lsm.Put(r.Key, r.Value, r.SeqId, enums.OpTypePut)
+		case enums.OpTypeRangeDel:
+			engine.lsm.Put(r.Key, r.Value, r.SeqId, enums.OpTypeRangeDel)
+		default:
+			return fmt.Errorf("unknown op type: %v", r.OpType)
+		}
+		if r.SeqId > maxSeq {
+			maxSeq = r.SeqId
+		}
+	}
+	if config.GetSettings().Debug {
+		fmt.Printf("Recovered %d records from WAL\n", len(records))
+	}
+
 	engine.seqGen = sequence.NewSequenceGenerator(maxSeq)
+	return nil
 }
 
 func (engine *Engine) Put(key []byte, value []byte) {
@@ -126,14 +142,14 @@ func (engine *Engine) Put(key []byte, value []byte) {
 	}
 
 	seqId := engine.seqGen.Next()
-	//wal
+	engine.wal.Put(key, value, seqId, enums.OpTypePut)
 	engine.lsm.Put(key, value, seqId, enums.OpTypePut)
 	engine.notifier.NotifyPut(key, value)
 }
 
 func (engine *Engine) PutWithTTL(key []byte, value []byte, ttl int64) {
 	seqId := engine.seqGen.Next()
-	//wal
+	engine.wal.Put(key, value, seqId, enums.OpTypePut)
 	if engine.inMemoryTTL {
 		engine.ttlJanitor.AddTTL(shared.TTLEntry{ExpiresAt: time.Now().UnixMilli() + ttl, Key: key})
 	}
@@ -155,12 +171,8 @@ func (engine *Engine) Get(key []byte) ([]byte, bool, error) {
 }
 
 func (engine *Engine) GetTTL(key []byte) (int64, bool, error) {
-	if !config.GetSettings().TTL.InMemoryTTL {
-		value, found, err := engine.lsm.GetTTL(key)
-		return value, found, err
-	}
-	t, found := engine.ttlJanitor.GetTTL(string(key))
-	return t, found, nil
+	value, found, err := engine.lsm.GetTTL(key)
+	return value, found, err
 }
 
 func (engine *Engine) Delete(key []byte) {
@@ -176,17 +188,14 @@ func (engine *Engine) Delete(key []byte) {
 		fmt.Printf("\nDeleting key %s\n", string(key))
 	}
 	seqId := engine.seqGen.Next()
-	// wal
+	engine.wal.Put(key, nil, seqId, enums.OpTypeDel)
 	engine.lsm.Put(key, nil, seqId, enums.OpTypeDel)
 	engine.notifier.NotifyDelete(key)
 }
 
-func (engine *Engine) Snapshot(key []byte) {
-	engine.lsm.Snapshot(key)
-}
-
 func (engine *Engine) RangeDelete(startKey []byte, endKey []byte) {
 	seqId := engine.seqGen.Next()
+	engine.wal.Put(startKey, endKey, seqId, enums.OpTypeRangeDel)
 	engine.lsm.Put(startKey, endKey, seqId, enums.OpTypeRangeDel)
 	engine.notifier.NotifyDeleteRange(startKey, endKey)
 }
@@ -203,13 +212,23 @@ func (engine *Engine) Close() error {
 	return nil
 }
 
-func (engine *Engine) ClearAll() error {
+func (engine *Engine) MemtableFlushed() {
+	err := engine.wal.MemtableFlushed(engine.seqGen.Current())
+	if err != nil {
+		panic(err)
+	}
+}
+
+func (engine *Engine) ClearAll(forBackup bool) error {
 	if err := engine.lsm.ClearAll(); err != nil {
 		return fmt.Errorf("clear-all: lsm clear failed: %w", err)
 	}
 
-	err := clearDataDir(config.GetSettings().SavePath)
-	if err != nil {
+	if err := engine.wal.ClearAll(!forBackup); err != nil {
+		return fmt.Errorf("clear-all: wal clear failed: %w", err)
+	}
+
+	if err := clearDataDir(config.GetSettings().SavePath); err != nil {
 		return err
 	}
 
@@ -242,30 +261,4 @@ func (engine *Engine) Subscribe(lower, upper string, bufferSize int) *notifier.L
 
 func (engine *Engine) Unsubscribe(l *notifier.Listener) {
 	engine.notifier.Unsubscribe(l)
-}
-
-// GetVersions returns all versions of key, newest first.
-// Only meaningful for keys that have been snapshotted.
-func (engine *Engine) GetVersions(key []byte) ([]string, error) {
-	values, err := engine.lsm.GetVersions(key, 0)
-	if err != nil {
-		return nil, err
-	}
-	result := make([]string, len(values))
-	for i, v := range values {
-		result[i] = string(v)
-	}
-	return result, nil
-}
-
-// GetVersion returns the nth version of key (0 = current/newest).
-func (engine *Engine) GetVersion(key []byte, version int) (string, bool, error) {
-	values, err := engine.lsm.GetVersions(key, version+1)
-	if err != nil {
-		return "", false, err
-	}
-	if version >= len(values) {
-		return "", false, nil
-	}
-	return string(values[version]), true, nil
 }

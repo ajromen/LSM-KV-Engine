@@ -9,6 +9,7 @@ import (
 	"github.com/ajromen/LSM-KV-Engine/internal/config"
 	"github.com/ajromen/LSM-KV-Engine/internal/enums"
 	"github.com/ajromen/LSM-KV-Engine/internal/sstable"
+	"github.com/ajromen/LSM-KV-Engine/internal/wal"
 )
 
 func setupTest(t *testing.T) (string, string) {
@@ -34,13 +35,23 @@ func fakeManifest(t *testing.T, dataDir string, files []string) sstable.Manifest
 	return sstable.Manifest{FileDir: dataDir, Layers: map[int][]sstable.SSTableManifest{0: entries}}
 }
 
+func fakeWALManifest(t *testing.T) wal.WALManifest {
+	t.Helper()
+	return wal.WALManifest{
+		FileDir:      t.TempDir(),
+		LowWatermark: 0,
+		Segments:     make([]wal.WALManifestEntry, 0),
+	}
+}
+
 func TestFullBackup(t *testing.T) {
 	dataDir, _ := setupTest(t)
 	manifest := fakeManifest(t, dataDir, []string{"L0_000000.sst"})
+	walManifest := fakeWALManifest(t)
 	restoreDir := t.TempDir()
 
 	fb := NewFullBackup(nil)
-	if err := fb.Backup(manifest); err != nil {
+	if err := fb.Backup(manifest, walManifest); err != nil {
 		t.Fatalf("Backup: %v", err)
 	}
 
@@ -66,16 +77,17 @@ func TestFullBackup(t *testing.T) {
 func TestIncrementalBackup(t *testing.T) {
 	dataDir, _ := setupTest(t)
 	restoreDir := t.TempDir()
+	walManifest := fakeWALManifest(t)
 
 	fb := NewFullBackup(nil)
-	if err := fb.Backup(fakeManifest(t, dataDir, []string{"L0_000000.sst"})); err != nil {
+	if err := fb.Backup(fakeManifest(t, dataDir, []string{"L0_000000.sst"}), walManifest); err != nil {
 		t.Fatalf("full Backup: %v", err)
 	}
-	var base IBackup = fb
 
+	var base IBackup = fb
 	ib := NewIncrementalBackup(nil, &base)
 	manifest2 := fakeManifest(t, dataDir, []string{"L0_000000.sst", "L0_000001.sst"})
-	if err := ib.Backup(manifest2); err != nil {
+	if err := ib.Backup(manifest2, walManifest); err != nil {
 		t.Fatalf("incremental Backup: %v", err)
 	}
 
@@ -109,9 +121,10 @@ func TestCheckpoint(t *testing.T) {
 	dataDir, _ := setupTest(t)
 	restoreDir := t.TempDir()
 	manifest := fakeManifest(t, dataDir, []string{"L0_000000.sst"})
+	walManifest := fakeWALManifest(t)
 
 	cp := NewCheckpoint(nil)
-	if err := cp.Backup(manifest); err != nil {
+	if err := cp.Backup(manifest, walManifest); err != nil {
 		t.Fatalf("Backup: %v", err)
 	}
 	if cp.GetInfo().Type != enums.Checkpoint {
@@ -124,7 +137,7 @@ func TestCheckpoint(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(restoreDir, "L0_000000.sst"), []byte("modified"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	// checkpoint original mora ostati nepromenjen
+
 	content, _ := os.ReadFile(filepath.Join(cp.GetInfo().SaveDirectory, "L0_000000.sst"))
 	if string(content) != "data" {
 		t.Error("checkpoint file was modified through restore")
@@ -134,20 +147,21 @@ func TestCheckpoint(t *testing.T) {
 func TestBackupManager(t *testing.T) {
 	dataDir, _ := setupTest(t)
 	manifest := fakeManifest(t, dataDir, []string{"L0_000000.sst"})
+	walManifest := fakeWALManifest(t)
 
 	bm, err := NewBackupManager()
 	if err != nil {
 		t.Fatalf("NewBackupManager: %v", err)
 	}
 
-	fullId, err := bm.CreateBackup(manifest, enums.FullBackup)
+	fullId, err := bm.CreateBackup(manifest, walManifest, enums.FullBackup)
 	if err != nil {
 		t.Fatalf("CreateBackup full: %v", err)
 	}
 
-	time.Sleep(time.Second) // osiguraj različit timestamp = različit Id
+	time.Sleep(time.Second)
 
-	incrId, err := bm.CreateBackup(manifest, enums.IncrementalBackup)
+	incrId, err := bm.CreateBackup(manifest, walManifest, enums.IncrementalBackup)
 	if err != nil {
 		t.Fatalf("CreateBackup incr: %v", err)
 	}
@@ -155,11 +169,9 @@ func TestBackupManager(t *testing.T) {
 	if (*bm.GetById(incrId)).GetInfo().BaseId != fullId {
 		t.Error("incremental BaseId mismatch")
 	}
-
 	if err := bm.DeleteBackup(fullId); err == nil {
 		t.Error("expected error deleting backup with dependents")
 	}
-
 	if err := bm.CascadeDelete(fullId); err != nil {
 		t.Fatalf("CascadeDelete: %v", err)
 	}
@@ -171,9 +183,10 @@ func TestBackupManager(t *testing.T) {
 func TestBackupManager_PersistsAcrossRestart(t *testing.T) {
 	dataDir, _ := setupTest(t)
 	manifest := fakeManifest(t, dataDir, []string{"L0_000000.sst"})
+	walManifest := fakeWALManifest(t)
 
 	bm, _ := NewBackupManager()
-	id, err := bm.CreateBackup(manifest, enums.FullBackup)
+	id, err := bm.CreateBackup(manifest, walManifest, enums.FullBackup)
 	if err != nil {
 		t.Fatalf("CreateBackup: %v", err)
 	}

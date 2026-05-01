@@ -3,15 +3,15 @@ package wal
 import (
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/block"
+	"github.com/ajromen/LSM-KV-Engine/internal/config"
+	"github.com/ajromen/LSM-KV-Engine/internal/enums"
 )
-
-// da li sece rekord po segmentima kako treba
-// config.GetSettings().SavePath
 
 const (
 	FilePrefix = "wal_"
@@ -19,115 +19,88 @@ const (
 )
 
 type WAL struct {
-	Dir            string
-	ActiveSegment  *Segment
-	BlockSize      int
-	MaxBlocks      int
-	NextSegmentID  uint64
-	NextSequenceID uint64
-	NextTxnID      uint64
-	LowWatermark   uint64
-	BM             *block.BlockManager
+	Dir           string
+	ActiveSegment *Segment
+	BlockSize     int
+	MaxBlocks     int
+	NextSegmentID uint64
+	NextTxnID     uint64
+	BM            *block.BlockManager
+	Manifest      *WALManifest
 }
 
 type TxnOp struct {
-	Timestamp uint64
-	Tombstone bool
+	SeqId     uint64
+	ExpiresAt int64
+	OpType    enums.OpType
 	Key       []byte
 	Value     []byte
 }
 
-func OpenWAL(dir string, blockSize int, maxBlocks int) (*WAL, error) {
-	if dir == "" {
-		return nil, fmt.Errorf("wal dir is empty")
-	}
-	if blockSize < KEY_START+1 {
-		return nil, fmt.Errorf("blockSize is smaller than minimum WAL fragment size")
-	}
-	if maxBlocks <= 0 {
-		return nil, fmt.Errorf("maxBlocks must be >0")
-	}
-	err := block.EnsureDir(dir)
-	if err != nil {
+func OpenWAL() (*WAL, error) {
+	settings := config.GetSettings()
+	dir := path.Join(settings.SavePath, settings.WAL.SaveDirectory)
+	blockSize := settings.WAL.BlockSize
+
+	if err := block.EnsureDir(dir); err != nil {
 		return nil, err
 	}
+
 	bm := block.NewBlockManager(blockSize)
 
 	w := &WAL{
-		Dir:            dir,
-		BlockSize:      blockSize,
-		MaxBlocks:      maxBlocks,
-		NextSegmentID:  1,
-		NextSequenceID: 1,
-		NextTxnID:      1,
-		LowWatermark:   0,
-		BM:             bm,
+		Dir:           dir,
+		BlockSize:     blockSize,
+		MaxBlocks:     settings.WAL.MaxBlocks,
+		NextSegmentID: 1,
+		NextTxnID:     1,
+		BM:            bm,
 	}
 
-	entries, err := ListFiles(dir)
+	manifest, err := NewWALManifest(dir)
 	if err != nil {
 		return nil, err
 	}
-	maxID := uint64(0)
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		name := entry.Name()
-		if !strings.HasPrefix(name, FilePrefix) || !strings.HasSuffix(name, FileSuffix) {
-			continue
-		}
-		id, err := ParseSegmentID(name)
-		if err != nil {
-			return nil, err
-		}
-		if id > maxID {
-			maxID = id
-		}
+	w.Manifest = manifest
 
-	}
-
-	if maxID == 0 { // id no log files
-		firstPath := w.SegmentPath(w.NextSegmentID)
-		seg, err := OpenSegment(w.NextSegmentID, firstPath, w.MaxBlocks, w.BM)
+	if len(w.Manifest.Segments) == 0 {
+		firstPath := w.SegmentPath(1)
+		seg, err := OpenSegment(1, firstPath, w.MaxBlocks, w.BM)
 		if err != nil {
 			return nil, err
 		}
 		w.ActiveSegment = seg
-		w.NextSegmentID++
+		w.NextSegmentID = 2
 
+		if err := w.Manifest.AddSegment(1); err != nil {
+			return nil, err
+		}
 		return w, nil
 	}
 
-	// load last log file by id
-	lastPath := w.SegmentPath(maxID)
-	seg, err := OpenSegment(maxID, lastPath, w.MaxBlocks, w.BM)
+	segs := w.Manifest.SortedSegments()
+	last := segs[len(segs)-1]
+
+	lastPath := w.SegmentPath(last.SegmentID)
+	seg, err := OpenSegment(last.SegmentID, lastPath, w.MaxBlocks, w.BM)
 	if err != nil {
 		return nil, err
 	}
 
 	w.ActiveSegment = seg
-	w.NextSegmentID = maxID + 1
+	w.NextSegmentID = last.SegmentID + 1
 
-	err = w.InitNextSequenceID()
-	if err != nil {
-		return nil, err
-	}
-
-	err = w.InitNextTxnID()
-	if err != nil {
+	if err := w.InitNextTxnID(); err != nil {
 		return nil, err
 	}
 
 	if w.ActiveSegment.IsFull() {
-		err = w.RotateSegment()
-		if err != nil {
+		if err := w.RotateSegment(); err != nil {
 			return nil, err
 		}
 	}
 
 	return w, nil
-
 }
 
 func (w *WAL) Append(r Record) error {
@@ -138,39 +111,44 @@ func (w *WAL) Append(r Record) error {
 		return fmt.Errorf("active segment is nil")
 	}
 
-	sequenceID := w.NextSequenceID
-
 	wr := WALRecord{
-		FragType:   FULL,
-		RecType:    SINGLE,
-		TxnID:      0,
-		SequenceID: sequenceID,
-		KeySize:    uint64(len(r.Key)),
-		ValueSize:  uint64(len(r.Value)),
-		Record:     r,
+		FragType:  FULL,
+		RecType:   SINGLE,
+		TxnID:     0,
+		KeySize:   uint64(len(r.Key)),
+		ValueSize: uint64(len(r.Value)),
+		Record:    r,
 	}
 
-	err := w.AppendWALRecord(wr)
-	if err != nil {
-		return err
-	}
-
-	w.NextSequenceID++
-	return nil
+	return w.AppendWALRecord(wr)
 }
 
-func (w *WAL) Put(key []byte, value []byte, timestamp uint64) error {
+func (w *WAL) Put(key []byte, value []byte, seqId uint64, opType enums.OpType) {
 	r := Record{
-		Timestamp: timestamp,
-		Tombstone: false,
+		ExpiresAt: 0,
+		OpType:    opType,
+		SeqId:     seqId,
 		Key:       key,
 		Value:     value,
 	}
 	err := w.Append(r)
 	if err != nil {
-		return err
+		panic(err)
 	}
-	return nil
+}
+
+func (w *WAL) PutWithTTL(key []byte, value []byte, seqId uint64, opType enums.OpType, ttl int64) {
+	r := Record{
+		ExpiresAt: ttl,
+		OpType:    opType,
+		SeqId:     seqId,
+		Key:       key,
+		Value:     value,
+	}
+	err := w.Append(r)
+	if err != nil {
+		panic(err)
+	}
 }
 
 func (w *WAL) AppendWALRecord(wr WALRecord) error {
@@ -215,18 +193,16 @@ func (w *WAL) BatchWrite(ops []TxnOp) error {
 	txnID := w.NextTxnID
 	w.NextTxnID++
 
-	startSeq := w.NextSequenceID
-
 	startRecord := WALRecord{
-		FragType:   FULL,
-		RecType:    START,
-		TxnID:      txnID,
-		SequenceID: startSeq,
-		KeySize:    0,
-		ValueSize:  0,
+		FragType:  FULL,
+		RecType:   START,
+		TxnID:     txnID,
+		KeySize:   0,
+		ValueSize: 0,
 		Record: Record{
-			Timestamp: ops[0].Timestamp,
-			Tombstone: false,
+			SeqId:     ops[0].SeqId,
+			ExpiresAt: ops[0].ExpiresAt,
+			OpType:    enums.OpTypePut,
 			Key:       nil,
 			Value:     nil,
 		},
@@ -236,21 +212,19 @@ func (w *WAL) BatchWrite(ops []TxnOp) error {
 	if err != nil {
 		return err
 	}
-	w.NextSequenceID++
 
 	for _, op := range ops {
-		seq := w.NextSequenceID
 
 		txRecord := WALRecord{
-			FragType:   FULL,
-			RecType:    TRANSACTION,
-			TxnID:      txnID,
-			SequenceID: seq,
-			KeySize:    uint64(len(op.Key)),
-			ValueSize:  uint64(len(op.Value)),
+			FragType:  FULL,
+			RecType:   TRANSACTION,
+			TxnID:     txnID,
+			KeySize:   uint64(len(op.Key)),
+			ValueSize: uint64(len(op.Value)),
 			Record: Record{
-				Timestamp: op.Timestamp,
-				Tombstone: op.Tombstone,
+				SeqId:     op.SeqId,
+				ExpiresAt: op.ExpiresAt,
+				OpType:    op.OpType,
 				Key:       op.Key,
 				Value:     op.Value,
 			},
@@ -260,22 +234,18 @@ func (w *WAL) BatchWrite(ops []TxnOp) error {
 		if err != nil {
 			return err
 		}
-
-		w.NextSequenceID++
 	}
 
-	commitSeq := w.NextSequenceID
-
 	commitRecord := WALRecord{
-		FragType:   FULL,
-		RecType:    COMMIT,
-		TxnID:      txnID,
-		SequenceID: commitSeq,
-		KeySize:    0,
-		ValueSize:  0,
+		FragType:  FULL,
+		RecType:   COMMIT,
+		TxnID:     txnID,
+		KeySize:   0,
+		ValueSize: 0,
 		Record: Record{
-			Timestamp: ops[len(ops)-1].Timestamp,
-			Tombstone: false,
+			SeqId:     ops[len(ops)-1].SeqId,
+			ExpiresAt: ops[len(ops)-1].ExpiresAt,
+			OpType:    enums.OpTypePut,
 			Key:       nil,
 			Value:     nil,
 		},
@@ -286,38 +256,11 @@ func (w *WAL) BatchWrite(ops []TxnOp) error {
 		return err
 	}
 
-	w.NextSequenceID++
 	return nil
 }
 
-func (w *WAL) DeleteRange(keys [][]byte, timestamp uint64) error {
-	ops := make([]TxnOp, 0, len(keys))
-	for _, key := range keys {
-		ops = append(ops, TxnOp{
-			Timestamp: timestamp,
-			Tombstone: true,
-			Key:       key,
-			Value:     nil,
-		})
-	}
-	return w.BatchWrite(ops)
-}
-
-func (w *WAL) Delete(key []byte, timestamp uint64) error {
-	r := Record{
-		Timestamp: timestamp,
-		Tombstone: true,
-		Key:       key,
-		Value:     nil,
-	}
-	err := w.Append(r)
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-func (w *WAL) Recover() ([]Record, error) { // doesnt call memtable just return list of records
+// doesn't call memtable just return list of records
+func (w *WAL) Recover() ([]Record, error) {
 	frags, err := w.ReadAllFragments()
 	if err != nil {
 		return nil, err
@@ -340,63 +283,40 @@ func (w *WAL) ReadAllFragments() ([]WALRecord, error) {
 	if w == nil {
 		return nil, fmt.Errorf("wal is nil")
 	}
-
-	entries, err := ListFiles(w.Dir)
-	if err != nil {
-		return nil, err
+	if w.Manifest == nil {
+		return nil, fmt.Errorf("manifest is nil")
 	}
 
-	type segInfo struct {
-		id   uint64
-		path string
-	}
-
-	segments := make([]segInfo, 0)
-
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		name := entry.Name()
-		if !strings.HasPrefix(name, FilePrefix) || !strings.HasSuffix(name, FileSuffix) {
-			continue
-		}
-
-		id, err := ParseSegmentID(name)
-		if err != nil {
-			return nil, err
-		}
-
-		segments = append(segments, segInfo{
-			id:   id,
-			path: filepath.Join(w.Dir, name),
-		})
-	}
-
-	for i := 0; i < len(segments); i++ {
-		for j := i + 1; j < len(segments); j++ {
-			if segments[j].id < segments[i].id {
-				temp := segments[j]
-				segments[j] = segments[i]
-				segments[i] = temp
-			}
-		}
-	}
-
+	segments := w.Manifest.SortedSegments()
 	all := make([]WALRecord, 0)
 
-	for _, segInfo := range segments {
-		seg, err := OpenSegment(segInfo.id, segInfo.path, w.MaxBlocks, w.BM)
+	for _, meta := range segments {
+		if meta.ValidFromBlock >= uint64(w.MaxBlocks) {
+			continue
+		}
+
+		seg, err := OpenSegment(
+			meta.SegmentID,
+			w.SegmentPath(meta.SegmentID),
+			w.MaxBlocks,
+			w.BM,
+		)
 		if err != nil {
 			return nil, err
 		}
 
-		recs, err := seg.ReadAllRecords()
+		recs, err := seg.ReadAllRecordsFromBlock(uint32(meta.ValidFromBlock))
 		if err != nil {
 			return nil, err
 		}
 
-		all = append(all, recs...)
+		for _, rec := range recs {
+			if rec.Record.SeqId <= meta.FlushedUpToSeqID {
+				continue
+			}
+
+			all = append(all, rec)
+		}
 	}
 
 	return all, nil
@@ -422,15 +342,15 @@ func JoinFragments(frags []WALRecord) ([]WALRecord, error) {
 			}
 
 			rec := WALRecord{
-				FragType:   FULL,
-				RecType:    frag.RecType,
-				TxnID:      frag.TxnID,
-				SequenceID: frag.SequenceID,
-				KeySize:    frag.KeySize,
-				ValueSize:  frag.ValueSize,
+				FragType:  FULL,
+				RecType:   frag.RecType,
+				TxnID:     frag.TxnID,
+				KeySize:   frag.KeySize,
+				ValueSize: frag.ValueSize,
 				Record: Record{
-					Timestamp: frag.Record.Timestamp,
-					Tombstone: frag.Record.Tombstone,
+					SeqId:     frag.Record.SeqId,
+					ExpiresAt: frag.Record.ExpiresAt,
+					OpType:    frag.Record.OpType,
 					Key:       append([]byte(nil), frag.Record.Key...),
 					Value:     append([]byte(nil), frag.Record.Value...),
 				},
@@ -505,42 +425,132 @@ func ApplyTransactions(records []WALRecord) ([]Record, error) {
 	return result, nil
 }
 
+func (w *WAL) MemtableFlushed(sequenceId uint64) error {
+	if w == nil {
+		return fmt.Errorf("wal is nil")
+	}
+	if w.Manifest == nil {
+		return fmt.Errorf("manifest is nil")
+	}
+	if sequenceId < 0 {
+		return fmt.Errorf("sequenceId must be non-negative")
+	}
+
+	target := uint64(sequenceId)
+	segments := w.Manifest.SortedSegments()
+
+	var foundSegmentID uint64
+	var foundBlockID uint64
+	found := false
+
+	for _, meta := range segments {
+		if meta.ValidFromBlock >= uint64(w.MaxBlocks) {
+			continue
+		}
+
+		if meta.FlushedUpToSeqID >= target {
+			continue
+		}
+
+		seg, err := OpenSegment(
+			meta.SegmentID,
+			w.SegmentPath(meta.SegmentID),
+			w.MaxBlocks,
+			w.BM,
+		)
+		if err != nil {
+			return err
+		}
+
+		for b := uint32(meta.ValidFromBlock); b < uint32(w.MaxBlocks); b++ {
+			blockData, err := seg.ReadBlock(b)
+			if err != nil {
+				return err
+			}
+
+			recs, err := ReadBlockRecords(blockData)
+			if err != nil {
+				return err
+			}
+
+			if len(recs) == 0 {
+				break
+			}
+
+			for _, rec := range recs {
+				if rec.Record.SeqId <= target {
+					foundSegmentID = meta.SegmentID
+					foundBlockID = uint64(b)
+					found = true
+				}
+			}
+		}
+	}
+
+	if !found {
+		return fmt.Errorf("sequenceId %d not found in WAL", sequenceId)
+	}
+
+	if err := w.Manifest.SetValidFromBlock(foundSegmentID, foundBlockID); err != nil {
+		return err
+	}
+
+	if err := w.Manifest.SetFlushedUpToSeqID(foundSegmentID, target); err != nil {
+		return err
+	}
+
+	for _, meta := range segments {
+		if meta.SegmentID >= foundSegmentID {
+			continue
+		}
+
+		if err := w.Manifest.SetValidFromBlock(
+			meta.SegmentID,
+			uint64(w.MaxBlocks),
+		); err != nil {
+			return err
+		}
+
+		if err := w.Manifest.SetFlushedUpToSeqID(
+			meta.SegmentID,
+			target,
+		); err != nil {
+			return err
+		}
+	}
+
+	if foundSegmentID > 1 {
+		if err := w.SetLowWatermark(foundSegmentID - 1); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 func (w *WAL) SetLowWatermark(segmentID uint64) error {
 	if w == nil {
 		return fmt.Errorf("wal is nil")
 	}
-
-	if segmentID == 0 {
-		return nil
-	}
-
-	if segmentID < w.LowWatermark {
-		return fmt.Errorf("low watermark cannot move backwards")
-	}
-
 	if w.ActiveSegment != nil && segmentID >= w.ActiveSegment.ID {
 		return fmt.Errorf("cannot set low watermark to active or future segment")
 	}
-
-	w.LowWatermark = segmentID
+	if err := w.Manifest.SetLowWatermark(segmentID); err != nil {
+		return err
+	}
 	return w.DeleteOldSegments()
 }
 
 func (w *WAL) RotateSegment() error {
-	if w == nil {
-		return fmt.Errorf("wal is nil")
-	}
-	if w.ActiveSegment == nil {
-		return fmt.Errorf("active segment is nil")
-	}
-	err := w.ActiveSegment.Sync()
-	if err != nil {
+	if err := w.ActiveSegment.Sync(); err != nil {
 		return err
 	}
-
 	newPath := w.SegmentPath(w.NextSegmentID)
 	seg, err := OpenSegment(w.NextSegmentID, newPath, w.MaxBlocks, w.BM)
 	if err != nil {
+		return err
+	}
+	if err := w.Manifest.AddSegment(w.NextSegmentID); err != nil {
 		return err
 	}
 	w.ActiveSegment = seg
@@ -562,62 +572,32 @@ func (w *WAL) PrintAll() error { // func for debugging
 	if w == nil {
 		return fmt.Errorf("wal is nil")
 	}
-
-	entries, err := ListFiles(w.Dir)
-	if err != nil {
-		return err
+	if w.Manifest == nil {
+		return fmt.Errorf("manifest is nil")
 	}
 
-	type segInfo struct {
-		id   uint64
-		path string
-	}
+	segments := w.Manifest.SortedSegments()
 
-	segments := make([]segInfo, 0)
-
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-
-		name := entry.Name()
-		if !strings.HasPrefix(name, FilePrefix) || !strings.HasSuffix(name, FileSuffix) {
-			continue
-		}
-
-		id, err := ParseSegmentID(name)
+	for _, segMeta := range segments {
+		s, err := OpenSegment(segMeta.SegmentID, w.SegmentPath(segMeta.SegmentID), w.MaxBlocks, w.BM)
 		if err != nil {
 			return err
 		}
 
-		segments = append(segments, segInfo{
-			id:   id,
-			path: filepath.Join(w.Dir, name),
-		})
-	}
+		fmt.Printf(
+			"Segment %d (ValidFromBlock=%d, FlushedUpToSeqID=%d)\n",
+			segMeta.SegmentID,
+			segMeta.ValidFromBlock,
+			segMeta.FlushedUpToSeqID,
+		)
 
-	for i := 0; i < len(segments); i++ {
-		for j := i + 1; j < len(segments); j++ {
-			if segments[j].id < segments[i].id {
-				segments[i], segments[j] = segments[j], segments[i]
-			}
-		}
-	}
-
-	for _, segInfo := range segments {
-		s, err := OpenSegment(segInfo.id, segInfo.path, w.MaxBlocks, w.BM)
-		if err != nil {
-			return err
-		}
-
-		fmt.Println("Segment", segInfo.id)
-
-		for bindex := 0; bindex < w.MaxBlocks; bindex++ {
-			block, err := s.ReadBlock(uint32(bindex))
+		for bindex := uint32(0); bindex < uint32(w.MaxBlocks); bindex++ {
+			blockData, err := s.ReadBlock(bindex)
 			if err != nil {
 				return err
 			}
-			fmt.Println(block)
+
+			fmt.Printf("Block %d: %v\n", bindex, blockData)
 		}
 	}
 
@@ -627,7 +607,6 @@ func (w *WAL) PrintAll() error { // func for debugging
 func ParseSegmentID(name string) (uint64, error) {
 	base := strings.TrimPrefix(name, FilePrefix)
 	base = strings.TrimSuffix(base, FileSuffix)
-	//fmt.Println(name, base)
 
 	id, err := strconv.ParseUint(base, 10, 64)
 	if err != nil {
@@ -640,36 +619,6 @@ func ParseSegmentID(name string) (uint64, error) {
 func (w *WAL) SegmentPath(id uint64) string {
 	filename := fmt.Sprintf("wal_%06d.log", id)
 	return filepath.Join(w.Dir, filename)
-}
-
-// helper function, should go to block manager
-func ListFiles(dir string) ([]os.DirEntry, error) {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return nil, err
-	}
-	return entries, err
-}
-
-func (w *WAL) InitNextSequenceID() error {
-	frags, err := w.ReadAllFragments()
-	if err != nil {
-		return err
-	}
-
-	var maxSeq uint64 = 0
-	for _, frag := range frags {
-		if frag.SequenceID > maxSeq {
-			maxSeq = frag.SequenceID
-		}
-	}
-
-	w.NextSequenceID = maxSeq + 1
-	if w.NextSequenceID == 0 {
-		w.NextSequenceID = 1
-	}
-
-	return nil
 }
 
 func (w *WAL) InitNextTxnID() error {
@@ -692,33 +641,20 @@ func (w *WAL) InitNextTxnID() error {
 
 	return nil
 }
-
 func (w *WAL) DeleteOldSegments() error {
 	if w == nil {
 		return fmt.Errorf("wal is nil")
 	}
-
-	entries, err := ListFiles(w.Dir)
-	if err != nil {
-		return err
+	if w.Manifest == nil {
+		return fmt.Errorf("manifest is nil")
 	}
 
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
+	segments := w.Manifest.SortedSegments()
 
-		name := entry.Name()
-		if !strings.HasPrefix(name, FilePrefix) || !strings.HasSuffix(name, FileSuffix) {
-			continue
-		}
+	for _, segMeta := range segments {
+		id := segMeta.SegmentID
 
-		id, err := ParseSegmentID(name)
-		if err != nil {
-			return err
-		}
-
-		if id > w.LowWatermark {
+		if id > w.Manifest.LowWatermark {
 			continue
 		}
 
@@ -726,16 +662,59 @@ func (w *WAL) DeleteOldSegments() error {
 			continue
 		}
 
-		path := filepath.Join(w.Dir, name)
+		p := w.SegmentPath(id)
 
 		if w.BM != nil {
-			w.BM.InvalidateFile(path)
+			w.BM.InvalidateFile(p)
 		}
 
-		err = os.Remove(path)
+		if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+
+		if err := w.Manifest.RemoveSegment(id); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (w *WAL) ClearAll(createNewActive bool) error {
+	if w == nil {
+		return fmt.Errorf("wal is nil")
+	}
+
+	segments := w.Manifest.SortedSegments()
+	for _, seg := range segments {
+		p := w.SegmentPath(seg.SegmentID)
+		if w.BM != nil {
+			w.BM.InvalidateFile(p)
+		}
+		if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	}
+
+	w.Manifest.Segments = make([]WALManifestEntry, 0)
+	w.Manifest.LowWatermark = 0
+	if err := w.Manifest.Save(); err != nil {
+		return err
+	}
+
+	w.ActiveSegment = nil
+	w.NextSegmentID = 1
+	w.NextTxnID = 1
+
+	if createNewActive {
+		firstPath := w.SegmentPath(1)
+		seg, err := OpenSegment(1, firstPath, w.MaxBlocks, w.BM)
 		if err != nil {
 			return err
 		}
+		w.ActiveSegment = seg
+		w.NextSegmentID = 2
+		return w.Manifest.AddSegment(1)
 	}
 
 	return nil

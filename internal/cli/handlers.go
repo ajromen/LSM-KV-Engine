@@ -85,7 +85,7 @@ func handleClear(engine *core.Engine, parts []string) {
 		PrintError(fmt.Sprint("Aborted."))
 		return
 	}
-	if err := engine.ClearAll(); err != nil {
+	if err := engine.ClearAll(false); err != nil {
 		PrintError(fmt.Sprint("ClearAll:", err))
 		return
 	}
