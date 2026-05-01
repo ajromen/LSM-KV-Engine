@@ -9,6 +9,7 @@ import (
 	"github.com/ajromen/LSM-KV-Engine/internal/sequence"
 	"github.com/ajromen/LSM-KV-Engine/internal/token_bucket"
 	"github.com/ajromen/LSM-KV-Engine/internal/ttl"
+	"github.com/ajromen/LSM-KV-Engine/internal/wal"
 )
 
 type Engine struct {
@@ -20,7 +21,7 @@ type Engine struct {
 	notifier      *notifier.Notifier
 	tokenBucket   *token_bucket.TokenBucket
 	backupManager *backup.BackupManager
-	//wal
+	wal           *wal.WAL
 }
 
 type EngineInterface interface {

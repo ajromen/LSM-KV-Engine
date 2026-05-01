@@ -14,7 +14,7 @@ import (
 	"github.com/ajromen/LSM-KV-Engine/internal/enums"
 )
 
-const ManifestFileName = "MANIFEST.json"
+const ManifestFileName = "SST_MANIFEST.json"
 
 type SSTableManifest struct {
 	Id           int                 `json:"id"`

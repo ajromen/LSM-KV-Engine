@@ -26,6 +26,7 @@ import (
 */
 
 const (
+	// 47
 	CRC_SIZE        = 4
 	EXPIRES_AT_SIZE = 8
 	FRAGTYPE_SIZE   = 1
@@ -72,6 +73,7 @@ type Record struct {
 	OpType    enums.OpType
 	Key       []byte
 	Value     []byte
+	//ttl 	   int64
 }
 
 type WALRecord struct {

@@ -211,14 +211,22 @@ func (s *Segment) AppendWALRecord(wr WALRecord) error {
 	return err
 }
 
-func (s *Segment) ReadAllRecords() ([]WALRecord, error) { //doesnt join fragments
+func (s *Segment) ReadAllRecords() ([]WALRecord, error) {
+	return s.ReadAllRecordsFromBlock(0)
+}
+
+func (s *Segment) ReadAllRecordsFromBlock(fromBlock uint32) ([]WALRecord, error) {
 	if s == nil {
 		return nil, fmt.Errorf("segment is nil")
 	}
+	if fromBlock >= uint32(s.MaxBlocks) {
+		return []WALRecord{}, nil
+	}
+
 	all := make([]WALRecord, 0)
 
-	for i := 0; i < s.MaxBlocks; i++ {
-		blockData, err := s.ReadBlock(uint32(i))
+	for i := fromBlock; i < uint32(s.MaxBlocks); i++ {
+		blockData, err := s.ReadBlock(i)
 		if err != nil {
 			return nil, err
 		}
@@ -227,12 +235,45 @@ func (s *Segment) ReadAllRecords() ([]WALRecord, error) { //doesnt join fragment
 		if err != nil {
 			return nil, err
 		}
+
 		if len(recs) == 0 {
 			break
 		}
+
 		all = append(all, recs...)
 	}
+
 	return all, nil
+}
+
+func (s *Segment) FindBlockBySeqID(sequenceID uint64) (uint32, bool, error) {
+	if s == nil {
+		return 0, false, fmt.Errorf("segment is nil")
+	}
+
+	for i := uint32(0); i < uint32(s.MaxBlocks); i++ {
+		blockData, err := s.ReadBlock(i)
+		if err != nil {
+			return 0, false, err
+		}
+
+		recs, err := ReadBlockRecords(blockData)
+		if err != nil {
+			return 0, false, err
+		}
+
+		if len(recs) == 0 {
+			break
+		}
+
+		for _, rec := range recs {
+			if rec.Record.SeqId == sequenceID {
+				return i, true, nil
+			}
+		}
+	}
+
+	return 0, false, nil
 }
 
 func ReadBlockRecords(data []byte) ([]WALRecord, error) {

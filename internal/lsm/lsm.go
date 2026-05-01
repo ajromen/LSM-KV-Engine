@@ -13,13 +13,14 @@ import (
 )
 
 type LSM struct {
-	memtableeManager *memtable.MemtableManager
-	sstableManager   *sstable.SSTableManager
-	strategy         CompactionStrategy
-	readCache        *cache.LRU[string, []byte]
+	memtableeManager    *memtable.MemtableManager
+	sstableManager      *sstable.SSTableManager
+	strategy            CompactionStrategy
+	readCache           *cache.LRU[string, []byte]
+	EngineFlushCallback func()
 }
 
-func NewLSM(dataDir string) (*LSM, error) {
+func NewLSM(dataDir string, engineFlushCallback func()) (*LSM, error) {
 	lsm := LSM{}
 	lsm.sstableManager = sstable.NewSSTableManager(dataDir)
 	stt := config.GetSettings()
@@ -37,6 +38,8 @@ func NewLSM(dataDir string) (*LSM, error) {
 		}
 	}
 
+	lsm.EngineFlushCallback = engineFlushCallback
+
 	factory := memtable.NewFactory(stt.Memtable)
 	memManager := memtable.NewMemtableManager(3, 0, factory, lsm.onFlush)
 	lsm.memtableeManager = memManager
@@ -50,6 +53,8 @@ func (l *LSM) onFlush(entries []memtable.MemtableEntry, rangeDelEntries []memtab
 		panic(fmt.Errorf("error flushing memtable entries: %v", err))
 	}
 
+	l.EngineFlushCallback()
+
 	// TODO set this in a goroutine
 	err = l.strategy.Compact(l.sstableManager)
 	if err != nil {
@@ -58,6 +63,9 @@ func (l *LSM) onFlush(entries []memtable.MemtableEntry, rangeDelEntries []memtab
 }
 
 func (l *LSM) Put(key []byte, value []byte, seqId uint64, opType enums.OpType) {
+	// copy array
+	value = append([]byte(nil), value...)
+	key = append([]byte(nil), key...)
 	l.memtableeManager.Put(key, value, seqId, opType)
 	if opType == enums.OpTypeDel {
 		l.readCache.Put(string(key), nil)
@@ -69,6 +77,8 @@ func (l *LSM) Put(key []byte, value []byte, seqId uint64, opType enums.OpType) {
 }
 
 func (l *LSM) PutWithTTL(key []byte, value []byte, seqId uint64, opType enums.OpType, ttl int64) {
+	value = append([]byte(nil), value...)
+	key = append([]byte(nil), key...)
 	l.memtableeManager.PutWithTTL(key, value, seqId, opType, ttl)
 }
 
