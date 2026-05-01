@@ -13,6 +13,7 @@ import (
 	"github.com/ajromen/LSM-KV-Engine/internal/config"
 	"github.com/ajromen/LSM-KV-Engine/internal/enums"
 	"github.com/ajromen/LSM-KV-Engine/internal/sstable"
+	"github.com/ajromen/LSM-KV-Engine/internal/wal"
 )
 
 type IncrementalBackup struct {
@@ -57,25 +58,24 @@ func NewIncrementalBackup(saveDirectory *string, baseBackup *IBackup) *Increment
 	}
 }
 
-func (i *IncrementalBackup) Backup(manifest sstable.Manifest) error {
+func (i *IncrementalBackup) Backup(manifest sstable.Manifest, walManifest wal.WALManifest) error {
 	err := block.EnsureDir(i.info.SaveDirectory)
 	if err != nil {
 		return err
 	}
 
+	// sstable
 	baseNames := make(map[string]struct{})
 	for _, layer := range manifest.Layers {
 		for _, sst := range layer {
 			baseNames[filepath.Base(sst.BaseFileName)] = struct{}{}
 		}
 	}
-
 	dir := manifest.FileDir
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return fmt.Errorf("failed to read data dir: %w", err)
 	}
-
 	var fileNames []string
 	var unsavedFiles []string
 	for _, entry := range entries {
@@ -96,18 +96,44 @@ func (i *IncrementalBackup) Backup(manifest sstable.Manifest) error {
 		if !matched {
 			continue
 		}
-
 		fileNames = append(fileNames, name)
 		if i.ContainsFile(name) {
 			continue
 		}
-
 		src := filepath.Join(dir, name)
 		dst := filepath.Join(i.info.SaveDirectory, name)
 		if err := block.CopyFile(src, dst); err != nil {
 			return fmt.Errorf("failed to copy %s: %w", name, err)
 		}
 		unsavedFiles = append(unsavedFiles, name)
+	}
+
+	// wal
+	walDstDir := filepath.Join(i.info.SaveDirectory, "wal")
+	if err := block.EnsureDir(walDstDir); err != nil {
+		return fmt.Errorf("failed to create wal backup dir: %w", err)
+	}
+
+	for _, seg := range walManifest.SortedSegments() {
+		if seg.ValidFromBlock >= uint64(walManifest.MaxBlocks()) {
+			continue
+		}
+		segName := fmt.Sprintf("wal_%06d.log", seg.SegmentID)
+		src := filepath.Join(walManifest.FileDir, segName)
+		dst := filepath.Join(walDstDir, segName)
+		if _, err := os.Stat(src); os.IsNotExist(err) {
+			continue
+		}
+		if err := block.CopyFile(src, dst); err != nil {
+			return fmt.Errorf("failed to copy wal segment %s: %w", segName, err)
+		}
+		fileNames = append(fileNames, filepath.Join("wal", segName))
+	}
+
+	walManifestSrc := filepath.Join(walManifest.FileDir, wal.ManifestFileName)
+	walManifestDst := filepath.Join(walDstDir, wal.ManifestFileName)
+	if err := block.CopyFile(walManifestSrc, walManifestDst); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to copy wal manifest: %w", err)
 	}
 
 	i.info.Files = fileNames
@@ -122,24 +148,49 @@ func (i *IncrementalBackup) Restore(directory string) error {
 	if i.info.Base == nil {
 		return fmt.Errorf("incremental backup %s has no base", i.info.Id)
 	}
-	err := (*i.info.Base).Restore(directory)
-	if err != nil {
+	if err := (*i.info.Base).Restore(directory); err != nil {
 		return fmt.Errorf("failed to restore base backup: %w", err)
 	}
 
+	// sstable
 	for _, file := range i.info.NewFiles {
+		if strings.HasPrefix(file, "wal"+string(os.PathSeparator)) {
+			continue
+		}
 		filePath := path.Join(i.info.SaveDirectory, file)
 		destPath := path.Join(directory, filepath.Base(file))
-		err := block.CopyFile(filePath, destPath)
-		if err != nil {
+		if err := block.CopyFile(filePath, destPath); err != nil {
 			return err
 		}
 	}
 
+	// sstable manifest
 	destManifest := path.Join(directory, sstable.ManifestFileName)
-	err = block.CopyFile(path.Join(i.info.SaveDirectory, sstable.ManifestFileName), destManifest)
-	if err != nil {
+	if err := block.CopyFile(path.Join(i.info.SaveDirectory, sstable.ManifestFileName), destManifest); err != nil {
 		return fmt.Errorf("failed to restore manifest: %w", err)
+	}
+
+	//wal
+	settings := config.GetSettings()
+	walDstDir := filepath.Join(directory, settings.WAL.SaveDirectory)
+	if err := block.EnsureDir(walDstDir); err != nil {
+		return fmt.Errorf("failed to create wal restore dir: %w", err)
+	}
+
+	walSrcDir := filepath.Join(i.info.SaveDirectory, "wal")
+	walEntries, err := os.ReadDir(walSrcDir)
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to read wal backup dir: %w", err)
+	}
+	for _, entry := range walEntries {
+		if entry.IsDir() {
+			continue
+		}
+		src := filepath.Join(walSrcDir, entry.Name())
+		dst := filepath.Join(walDstDir, entry.Name())
+		if err := block.CopyFile(src, dst); err != nil {
+			return fmt.Errorf("failed to restore wal file %s: %w", entry.Name(), err)
+		}
 	}
 
 	return nil

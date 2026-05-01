@@ -172,3 +172,7 @@ func (m *WALManifest) SetLowWatermark(segmentID uint64) error {
 	m.LowWatermark = segmentID
 	return m.Save()
 }
+
+func (m *WALManifest) MaxBlocks() int {
+	return config.GetSettings().WAL.MaxBlocks
+}

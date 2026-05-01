@@ -679,3 +679,32 @@ func (w *WAL) DeleteOldSegments() error {
 
 	return nil
 }
+
+func (w *WAL) ClearAll() error {
+	if w == nil {
+		return fmt.Errorf("wal is nil")
+	}
+
+	segments := w.Manifest.SortedSegments()
+	for _, seg := range segments {
+		p := w.SegmentPath(seg.SegmentID)
+		if w.BM != nil {
+			w.BM.InvalidateFile(p)
+		}
+		if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	}
+
+	w.Manifest.Segments = make([]WALManifestEntry, 0)
+	w.Manifest.LowWatermark = 0
+	if err := w.Manifest.Save(); err != nil {
+		return err
+	}
+
+	w.ActiveSegment = nil
+	w.NextSegmentID = 1
+	w.NextTxnID = 1
+
+	return nil
+}

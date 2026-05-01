@@ -224,8 +224,11 @@ func (engine *Engine) ClearAll() error {
 		return fmt.Errorf("clear-all: lsm clear failed: %w", err)
 	}
 
-	err := clearDataDir(config.GetSettings().SavePath)
-	if err != nil {
+	if err := engine.wal.ClearAll(); err != nil {
+		return fmt.Errorf("clear-all: wal clear failed: %w", err)
+	}
+
+	if err := clearDataDir(config.GetSettings().SavePath); err != nil {
 		return err
 	}
 

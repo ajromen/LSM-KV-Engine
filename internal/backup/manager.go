@@ -8,6 +8,7 @@ import (
 	"github.com/ajromen/LSM-KV-Engine/internal/config"
 	"github.com/ajromen/LSM-KV-Engine/internal/enums"
 	"github.com/ajromen/LSM-KV-Engine/internal/sstable"
+	"github.com/ajromen/LSM-KV-Engine/internal/wal"
 )
 
 type BackupManager struct {
@@ -64,7 +65,7 @@ func (bm *BackupManager) restoreManagerFromManifest() error {
 	return nil
 }
 
-func (bm *BackupManager) CreateBackup(manifest sstable.Manifest, backupType enums.BackupType) (string, error) {
+func (bm *BackupManager) CreateBackup(manifest sstable.Manifest, walManifest wal.WALManifest, backupType enums.BackupType) (string, error) {
 	var backup IBackup
 	switch backupType {
 	case enums.IncrementalBackup:
@@ -80,7 +81,7 @@ func (bm *BackupManager) CreateBackup(manifest sstable.Manifest, backupType enum
 	default:
 		return "", fmt.Errorf("unknown backup type: %d", backupType)
 	}
-	err := backup.Backup(manifest)
+	err := backup.Backup(manifest, walManifest)
 	if err != nil {
 		return "", err
 	}

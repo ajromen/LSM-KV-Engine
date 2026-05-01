@@ -81,7 +81,7 @@ func (engine *Engine) RestoreFromBackup(backupId string) error {
 }
 
 func (engine *Engine) CreateBackup(backupType enums.BackupType) (string, error) {
-	id, err := engine.backupManager.CreateBackup(engine.lsm.GetManifest(), backupType)
+	id, err := engine.backupManager.CreateBackup(engine.lsm.GetManifest(), *engine.wal.Manifest, backupType)
 	if err != nil {
 		return "", err
 	}
