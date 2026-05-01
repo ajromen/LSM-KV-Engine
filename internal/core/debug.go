@@ -66,3 +66,7 @@ func (engine *Engine) DataRaw(index int) {
 	fmt.Println("Data bytes:", buf)
 	fmt.Println("-----")
 }
+
+func (engine *Engine) WalPrintAll() error {
+	return engine.wal.PrintAll()
+}

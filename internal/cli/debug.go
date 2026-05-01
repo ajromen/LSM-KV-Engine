@@ -23,3 +23,11 @@ func handleDataRaw(engine *core.Engine, parts []string) {
 
 	engine.DataRaw(indx)
 }
+
+func handlePrintWal(engine *core.Engine) {
+	err := engine.WalPrintAll()
+	if err != nil {
+		PrintError(fmt.Sprint("error printing wal:", err))
+		return
+	}
+}
