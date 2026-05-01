@@ -432,9 +432,6 @@ func (w *WAL) MemtableFlushed(sequenceId uint64) error {
 	if w.Manifest == nil {
 		return fmt.Errorf("manifest is nil")
 	}
-	if sequenceId < 0 {
-		return fmt.Errorf("sequenceId must be non-negative")
-	}
 
 	target := uint64(sequenceId)
 	segments := w.Manifest.SortedSegments()
