@@ -2,7 +2,7 @@ package sstable
 
 import (
 	"bytes"
-	"errors"
+	"fmt"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/block"
 	"github.com/ajromen/LSM-KV-Engine/internal/config"
@@ -139,7 +139,69 @@ func (sw *SSTableWriter) AddRecord(record Record) error {
 			return err
 		}
 		if !sw.dataBlockBuilder.AddRecord(record) {
-			return errors.New("record too large for block")
+			sw.recordCount--
+			return sw.addRecordChunked(record)
+		}
+	}
+	return nil
+}
+
+// addRecordChunked splits a record whose value does not fit in a single block.
+// It writes a FIRST chunk, zero or more MIDDLE chunks, and a LAST chunk.
+func (sw *SSTableWriter) addRecordChunked(record Record) error {
+	blockSize := sw.blockManager.BlockSize()
+	headerOverhead := 1 + 10 + 8 + 1 + len(record.Key)*2 + 10 + 60
+	if len(sw.dataBlockBuilder.data)+headerOverhead >= blockSize {
+		if err := sw.flushDataBlock(); err != nil {
+			return err
+		}
+	}
+	available := blockSize - len(sw.dataBlockBuilder.data) - headerOverhead
+	if available <= 0 {
+		return fmt.Errorf("key too large for data block (key size: %d)", len(record.Key))
+	}
+	remaining := record.Value
+	var firstChunk []byte
+	if available >= len(remaining) {
+		if !sw.dataBlockBuilder.AddRecord(record) {
+			return fmt.Errorf("unexpected: record still doesn't fit")
+		}
+		return nil
+	}
+	firstChunk = remaining[:available]
+	remaining = remaining[available:]
+	if !sw.dataBlockBuilder.AddFirstChunk(record, firstChunk) {
+		return fmt.Errorf("cannot write first chunk")
+	}
+	for len(remaining) > 0 {
+		contOverhead := 1 + 10 + 60
+		available = blockSize - len(sw.dataBlockBuilder.data) - contOverhead
+		if available <= 0 {
+			if err := sw.flushDataBlock(); err != nil {
+				return err
+			}
+			available = blockSize - contOverhead
+		}
+		isLast := len(remaining) <= available
+		var chunkData []byte
+		if isLast {
+			chunkData = remaining
+			remaining = nil
+		} else {
+			chunkData = remaining[:available]
+			remaining = remaining[available:]
+		}
+		chunkType := ChunkTypeMiddle
+		if isLast {
+			chunkType = ChunkTypeLast
+		}
+		if !sw.dataBlockBuilder.AddContinuationChunk(chunkType, chunkData) {
+			if err := sw.flushDataBlock(); err != nil {
+				return err
+			}
+			if !sw.dataBlockBuilder.AddContinuationChunk(chunkType, chunkData) {
+				return fmt.Errorf("cannot write continuation chunk after flush")
+			}
 		}
 	}
 	return nil
