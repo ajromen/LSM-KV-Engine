@@ -16,6 +16,11 @@ func handleListBackups(engine *core.Engine, parts []string) {
 
 	backups := engine.GetAllBackups()
 
+	if len(backups) == 1 {
+		PrintError("No backups found")
+		return
+	}
+
 	PrintSpecial(backups[0])
 	for _, backup := range backups[1:] {
 		PrintSuccess(backup)

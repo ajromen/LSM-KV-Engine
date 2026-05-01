@@ -219,12 +219,12 @@ func (engine *Engine) MemtableFlushed() {
 	}
 }
 
-func (engine *Engine) ClearAll() error {
+func (engine *Engine) ClearAll(forBackup bool) error {
 	if err := engine.lsm.ClearAll(); err != nil {
 		return fmt.Errorf("clear-all: lsm clear failed: %w", err)
 	}
 
-	if err := engine.wal.ClearAll(); err != nil {
+	if err := engine.wal.ClearAll(!forBackup); err != nil {
 		return fmt.Errorf("clear-all: wal clear failed: %w", err)
 	}
 
