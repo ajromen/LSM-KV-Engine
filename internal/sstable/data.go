@@ -347,8 +347,10 @@ func (r *DataBlockReader) ReadRecord() (*Record, error) {
 	if r.pos >= r.dataSize {
 		return nil, errors.New("out of data")
 	}
+
 	chunkType := r.data[r.pos]
 	r.pos++
+
 	if chunkType == ChunkTypeMiddle || chunkType == ChunkTypeLast {
 		valLen, n := binary.Uvarint(r.data[r.pos:])
 		if n <= 0 {
@@ -363,28 +365,32 @@ func (r *DataBlockReader) ReadRecord() (*Record, error) {
 		r.recordIdx++
 		return &Record{ChunkType: chunkType, Value: value}, nil
 	}
+
+	// seqId
 	seqId, n := binary.Uvarint(r.data[r.pos:])
 	if n <= 0 {
 		return nil, errors.New("invalid seqId")
 	}
 	r.pos += n
-	if r.pos >= r.dataSize {
-		return nil, errors.New("unexpected end")
+	if r.pos+8 > r.dataSize {
+		return nil, errors.New("unexpected end reading expiresAt")
 	}
 
+	// expiresAt — matches write order in AddRecord
+	expiresAt := int64(binary.LittleEndian.Uint64(r.data[r.pos:]))
+	r.pos += 8
+	if r.pos >= r.dataSize {
+		return nil, errors.New("unexpected end reading opType")
+	}
+
+	// opType
 	opType := r.data[r.pos]
 	if opType > byte(3) {
 		return nil, errors.New("invalid opType")
 	}
 	r.pos += 1
 	if r.pos >= r.dataSize {
-		return nil, errors.New("unexpected end")
-	}
-
-	expiresAt := int64(binary.LittleEndian.Uint64(r.data[r.pos:]))
-	r.pos += 8
-	if r.pos >= r.dataSize {
-		return nil, errors.New("unexpected end")
+		return nil, errors.New("unexpected end reading key")
 	}
 
 	key, err := r.decoder.Decode(r.data, &r.pos)
