@@ -82,6 +82,13 @@ func (l *LSM) PutWithTTL(key []byte, value []byte, seqId uint64, opType enums.Op
 	l.memtableeManager.PutWithTTL(key, value, seqId, opType, ttl)
 }
 
+// Remove physically deletes a specific version of a key from the active memtable.
+// Used exclusively for batch rollback.
+func (l *LSM) Remove(key []byte, seqId uint64) {
+	l.memtableeManager.Remove(key, seqId)
+	l.readCache.Put(string(key), nil)
+}
+
 func (l *LSM) Get(key []byte) ([]byte, bool, error) {
 	// 1. check memtable
 	entry, found := l.memtableeManager.Get(key)

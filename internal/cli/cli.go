@@ -67,6 +67,10 @@ func RunCli(engine *core.Engine) {
 			handleDeleteAllBackups(engine, parts)
 		case "restore-backup":
 			handleRestoreBackup(engine, parts)
+		case "batch-write":
+			handleBatchWrite(engine, parts)
+		case "batch-delete":
+			handleBatchDelete(engine, parts)
 		case "exit", "quit", "q":
 			print(blue + "Exiting...")
 			err := engine.Close()
