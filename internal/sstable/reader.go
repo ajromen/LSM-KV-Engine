@@ -351,6 +351,9 @@ func (r *SSTableReader) Get(key []byte) (*Record, error) {
 	// step 1
 	if r.filterSegment != nil && r.filterSegment.Filter() != nil {
 		if !r.filterSegment.Filter().MightContain(key) {
+			if config.GetSettings().Debug {
+				fmt.Printf("Filter of sstable informs that no key is present in that sstable.\n")
+			}
 			return nil, nil
 		}
 	}
@@ -359,6 +362,9 @@ func (r *SSTableReader) Get(key []byte) (*Record, error) {
 	minKey := r.Metadata.GetBytes(FieldMinKey)
 	maxKey := r.Metadata.GetBytes(FieldMaxKey)
 	if bytes.Compare(minKey, key) > 0 || bytes.Compare(maxKey, key) < 0 {
+		if config.GetSettings().Debug {
+			fmt.Printf("Skipping sstable cause it doesn't contain keys in given range\n")
+		}
 		return nil, nil
 	}
 
@@ -374,53 +380,15 @@ func (r *SSTableReader) Get(key []byte) (*Record, error) {
 	}
 
 	// step 2
-	indexBlockNum := r.SummarySegment.FindIndexBlockNumber(key)
-	if indexBlockNum < 0 {
-		return nil, nil
-	}
-
-	// step 3.1
-	indexBlock, err := r.loadIndexBlock(indexBlockNum)
+	iter, err := NewSSTableIteratorRaw(r)
 	if err != nil {
 		return nil, err
 	}
-
-	// step 3.2
-	entryIdx := indexBlock.FindBlock(key)
-	if entryIdx < 0 {
+	iter.Seek(Record{Key: key})
+	if !iter.Valid() {
 		return nil, nil
 	}
-
-	// step 4
-	dataBlockIdx := indexBlock.Entries[entryIdx].BlockIndex
-	dataFilePath := r.filePath
-	if _, err := os.Stat(r.filePath + string(DataSegmentExtension)); err == nil {
-		dataFilePath = r.filePath + string(DataSegmentExtension)
-	}
-	blockKey := block.BlockKey{
-		FilePath: dataFilePath,
-		Offset:   dataBlockIdx,
-	}
-	blockData, err := r.blockManager.Read(blockKey)
-	if err != nil {
-		return nil, err
-	}
-	if validated := r.merkleTree.ValidateBlock(dataBlockIdx, blockData); !validated {
-		return nil, errors.New("sstable data corruption detected (merkle root mismatch)")
-	}
-
-	// step 5
-	restartInterval, _ := r.Metadata.GetUint64(FieldRestartInterval)
-
-	iterator, err := NewDataBlockIteratorRaw(blockData, int(restartInterval), encoders.PrefixCompression, r.valueDecoder)
-	if err != nil {
-		return nil, err
-	}
-	iterator.Seek(Record{Key: key})
-	if !iterator.Valid() {
-		return nil, nil
-	}
-	rec := iterator.Key()
+	rec := iter.Key()
 	if !bytes.Equal(rec.Key, key) {
 		return nil, nil
 	}

@@ -85,6 +85,13 @@ func (mm *MemtableManager) PutWithTTL(key []byte, value []byte, seqId uint64, op
 	}
 }
 
+// Remove physically deletes the entry with the given key+seqId from the active memtable.
+func (mm *MemtableManager) Remove(key []byte, seqId uint64) {
+	mm.mu.Lock()
+	defer mm.mu.Unlock()
+	mm.active.Remove(key, seqId)
+}
+
 // rotate moves the active memtable to immutable list and creates a new one
 // if too many immutable instances of memtable exist, it blocks new puts until space is available
 func (mm *MemtableManager) rotate() {

@@ -71,6 +71,10 @@ func (s *BTreeStore) Upsert(entry MemtableEntry) bool {
 	return replaced
 }
 
+func (s *BTreeStore) Remove(entry MemtableEntry) {
+	s.tree.Delete(entry)
+}
+
 // ---- Skiplist store adapter ----
 
 type SkipListStore struct {
@@ -127,6 +131,10 @@ func (s *SkipListStore) Upsert(entry MemtableEntry) bool {
 	}
 	s.list.Insert(entry)
 	return replaced
+}
+
+func (s *SkipListStore) Remove(entry MemtableEntry) {
+	s.list.Delete(entry)
 }
 
 // ---- Hashmap store adapter ----
@@ -255,6 +263,13 @@ func (s *RBTreeStore) Upsert(entry MemtableEntry) bool {
 	return replaced
 }
 
+func (s *RBTreeStore) Remove(entry MemtableEntry) {
+	node := s.tree.LowerBound(entry)
+	if node != nil && bytes.Equal(node.Key.Key, entry.Key) && node.Key.SeqId == entry.SeqId {
+		s.tree.Delete(node)
+	}
+}
+
 // ---- AVLTree store adapter ----
 
 type AVLTreeStore struct {
@@ -317,4 +332,11 @@ func (s *AVLTreeStore) Upsert(entry MemtableEntry) bool {
 	}
 	s.tree.Insert(entry)
 	return replaced
+}
+
+func (s *AVLTreeStore) Remove(entry MemtableEntry) {
+	node := s.tree.LowerBound(entry)
+	if node != nil && bytes.Equal(node.Key.Key, entry.Key) && node.Key.SeqId == entry.SeqId {
+		s.tree.Delete(node.Key)
+	}
 }

@@ -95,6 +95,17 @@ func (m *GenericMemtable) UpsertWithTTL(key []byte, value []byte, seqId uint64, 
 	}
 }
 
+// Remove physically deletes a specific entry from the store.
+// Used for batch rollback — does not write a tombstone.
+func (m *GenericMemtable) Remove(key []byte, seqId uint64) {
+	entry := MemtableEntry{Key: key, SeqId: seqId}
+	m.store.Remove(entry)
+	m.numEntries--
+	if m.numEntries < 0 {
+		m.numEntries = 0
+	}
+}
+
 // Get retrieves the value for a given key
 func (m *GenericMemtable) Get(key []byte) (*MemtableEntry, bool) {
 	dummy := MemtableEntry{

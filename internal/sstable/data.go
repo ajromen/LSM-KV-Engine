@@ -86,10 +86,11 @@ type DataBlockBuilder struct {
 	valueEncoder    *encoders.AdaptiveEncoder // encoder used on values
 	data            []byte                    // raw data for block
 	restartInterval int                       // number of keys between delta restart points
-	recordCount     int                       // number of records added to block
-	firstKey        []byte                    // first key in the block (for index)
-	lastKey         []byte                    // last key in the block (for index)
-	isEncodedBits   *BitSet                   // bitmap for whether record value is encoded using adaptive encoder
+	blockSize       int
+	recordCount     int     // number of records added to block
+	firstKey        []byte  // first key in the block (for index)
+	lastKey         []byte  // last key in the block (for index)
+	isEncodedBits   *BitSet // bitmap for whether record value is encoded using adaptive encoder
 }
 
 func NewDataBlockBuilder(t byte, restartInterval, blockSize int, valueEncoder *encoders.AdaptiveEncoder) *DataBlockBuilder {
@@ -98,6 +99,7 @@ func NewDataBlockBuilder(t byte, restartInterval, blockSize int, valueEncoder *e
 		valueEncoder:    valueEncoder,
 		data:            make([]byte, 0, blockSize),
 		restartInterval: restartInterval,
+		blockSize:       blockSize,
 		isEncodedBits:   NewBitSet(0),
 	}
 }
@@ -105,22 +107,25 @@ func NewDataBlockBuilder(t byte, restartInterval, blockSize int, valueEncoder *e
 // AddRecord APPENDS A SINGLE RECORD TO THE CURRENT BLOCK -> RETURNS FALSE IF THE RECORD DOES NOT FIT IN THE REMAINING BLOCK CAPACITY
 func (builder *DataBlockBuilder) AddRecord(record Record) bool {
 	// if its the first key store it for index
-	if builder.recordCount == 0 {
+	if builder.firstKey == nil {
 		builder.firstKey = append([]byte(nil), record.Key...)
 	}
 	// change last key to current key
 	builder.lastKey = append([]byte(nil), record.Key...)
 
 	// estimate size to see if record fits in current block
-	estimatedSize := len(record.Key)*2 + len(record.Value) + 32 + 8
+	estimatedSize := 1 + len(record.Key)*2 + len(record.Value) + 32 + 8
 	bitmapSize := (builder.recordCount / 8) + 1
 	reserved := 12 + (builder.recordCount/builder.restartInterval+1)*4 + bitmapSize
-	if len(builder.data)+estimatedSize+reserved > cap(builder.data) && builder.recordCount > 0 {
+	if len(builder.data)+estimatedSize+reserved > builder.blockSize {
 		return false
 	}
 
-	// append sequence Id
 	keyOffset := uint32(len(builder.data))
+	// append chunk type
+	builder.data = append(builder.data, ChunkTypeFull)
+
+	// append sequence Id
 	builder.data = binary.AppendUvarint(builder.data, record.SeqId)
 
 	//append ttl
@@ -150,6 +155,58 @@ func (builder *DataBlockBuilder) AddRecord(record Record) bool {
 
 	// append value (could be encoded, but it doesn't need to be)
 	builder.data = append(builder.data, encodedValue[1:]...)
+	builder.recordCount++
+	return true
+}
+
+// AddFirstChunk writes the header+key of a record with a partial value.
+// valueChunk is a slice of the full value that fits in the current block.
+func (builder *DataBlockBuilder) AddFirstChunk(record Record, valueChunk []byte) bool {
+	if builder.firstKey == nil {
+		builder.firstKey = append([]byte(nil), record.Key...)
+	}
+	builder.lastKey = append([]byte(nil), record.Key...)
+
+	estimatedSize := 1 + len(record.Key)*2 + len(valueChunk) + 32 + 8
+	reserved := 12 + (builder.recordCount/builder.restartInterval+1)*4
+	if len(builder.data)+estimatedSize+reserved > builder.blockSize {
+		return false
+	}
+
+	keyOffset := uint32(len(builder.data))
+
+	builder.data = append(builder.data, ChunkTypeFirst)
+	builder.data = binary.AppendUvarint(builder.data, record.SeqId)
+
+	var expBuf [8]byte
+	binary.LittleEndian.PutUint64(expBuf[:], uint64(record.ExpiresAt))
+	builder.data = append(builder.data, expBuf[:]...)
+
+	var opType enums.OpType
+	opType = record.OpType
+	builder.data = append(builder.data, byte(opType))
+
+	builder.data = builder.encoder.Encode(record.Key, keyOffset, builder.data)
+
+	// raw chunk — no dict encoding for partial values
+	builder.data = utils.AppendUvarint(builder.data, uint64(len(valueChunk)))
+	builder.data = append(builder.data, valueChunk...)
+	// isEncodedBits bit stays 0
+	builder.recordCount++
+	return true
+}
+
+// AddContinuationChunk writes a MIDDLE or LAST chunk containing only value bytes.
+func (builder *DataBlockBuilder) AddContinuationChunk(chunkType byte, valueChunk []byte) bool {
+	estimatedSize := 1 + binary.MaxVarintLen64 + len(valueChunk)
+	reserved := 12 + (builder.recordCount/builder.restartInterval+1)*4
+	if len(builder.data)+estimatedSize+reserved > builder.blockSize {
+		return false
+	}
+
+	builder.data = append(builder.data, chunkType)
+	builder.data = utils.AppendUvarint(builder.data, uint64(len(valueChunk)))
+	builder.data = append(builder.data, valueChunk...)
 	builder.recordCount++
 	return true
 }
@@ -204,6 +261,7 @@ func (builder *DataBlockBuilder) Reset() {
 	builder.encoder.Reset()
 	builder.recordCount = 0
 	builder.firstKey = nil
+
 	builder.isEncodedBits = NewBitSet(0)
 }
 
@@ -285,46 +343,61 @@ func (r *DataBlockReader) Restart() {
 	r.pos = 0
 }
 
-// READS AND DECODES THE NEXT RECORD FROM THE BLOCK
 func (r *DataBlockReader) ReadRecord() (*Record, error) {
 	if r.pos >= r.dataSize {
 		return nil, errors.New("out of data")
 	}
 
-	// read seqId
+	chunkType := r.data[r.pos]
+	r.pos++
+
+	if chunkType == ChunkTypeMiddle || chunkType == ChunkTypeLast {
+		valLen, n := binary.Uvarint(r.data[r.pos:])
+		if n <= 0 {
+			return nil, errors.New("invalid continuation chunk value size")
+		}
+		r.pos += n
+		if r.pos+int(valLen) > r.dataSize {
+			return nil, errors.New("continuation chunk exceeds block bounds")
+		}
+		value := append([]byte(nil), r.data[r.pos:r.pos+int(valLen)]...)
+		r.pos += int(valLen)
+		r.recordIdx++
+		return &Record{ChunkType: chunkType, Value: value}, nil
+	}
+
+	// seqId
 	seqId, n := binary.Uvarint(r.data[r.pos:])
 	if n <= 0 {
 		return nil, errors.New("invalid seqId")
 	}
 	r.pos += n
-	if r.pos >= r.dataSize {
-		return nil, errors.New("unexpected end")
+	if r.pos+8 > r.dataSize {
+		return nil, errors.New("unexpected end reading expiresAt")
 	}
 
-	// read Expiry Time
+	// expiresAt — matches write order in AddRecord
 	expiresAt := int64(binary.LittleEndian.Uint64(r.data[r.pos:]))
 	r.pos += 8
 	if r.pos >= r.dataSize {
-		return nil, errors.New("unexpected end")
+		return nil, errors.New("unexpected end reading opType")
 	}
 
-	// read OpType
+	// opType
 	opType := r.data[r.pos]
 	if opType > byte(3) {
 		return nil, errors.New("invalid opType")
 	}
 	r.pos += 1
 	if r.pos >= r.dataSize {
-		return nil, errors.New("unexpected end")
+		return nil, errors.New("unexpected end reading key")
 	}
 
-	// read key
 	key, err := r.decoder.Decode(r.data, &r.pos)
 	if err != nil {
 		return nil, err
 	}
 
-	// read value len
 	valLen, n := binary.Uvarint(r.data[r.pos:])
 	if n <= 0 {
 		return nil, errors.New("invalid value size")
@@ -334,16 +407,15 @@ func (r *DataBlockReader) ReadRecord() (*Record, error) {
 		return nil, errors.New("value exceeds block bounds")
 	}
 
-	// read value
 	isEncoded := r.isEncodedBits.Get(r.recordIdx)
 	rawValue := r.data[r.pos : r.pos+int(valLen)]
 	r.pos += int(valLen)
+
 	var value []byte
 	if isEncoded {
 		encoded := make([]byte, 0, valLen+1)
 		encoded = append(encoded, 1)
 		encoded = append(encoded, rawValue...)
-		var err error
 		value, err = r.valueDecoder.Decode(encoded)
 		if err != nil {
 			return nil, err
@@ -359,6 +431,7 @@ func (r *DataBlockReader) ReadRecord() (*Record, error) {
 		ExpiresAt: expiresAt,
 		Key:       key,
 		Value:     value,
+		ChunkType: chunkType,
 	}, nil
 }
 
@@ -410,10 +483,9 @@ func (it *DataBlockIteratorRaw) Valid() bool { return it.valid }
 
 // SeekToFirst moves the iterator to the first record in a block by using restart array
 func (it *DataBlockIteratorRaw) SeekToFirst() {
-	if err := it.reader.SeekToRestart(0); err != nil {
-		it.valid = false
-		return
-	}
+	it.reader.pos = 0
+	it.reader.decoder.Reset()
+	it.reader.recordIdx = 0
 	it.readNext()
 }
 
