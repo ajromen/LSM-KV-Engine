@@ -244,7 +244,7 @@ func (sm *SSTableManager) Get(key []byte) (*Record, bool, error) {
 	defer sm.mu.Unlock()
 	t := time.Now().UnixMilli()
 	fragments := sm.getFragments()
-	var best *Record // TODO razmisli kako ovo moze efikasnije
+	var best *Record
 	for _, layer := range sm.Layers {
 		for i := len(layer.SSTables) - 1; i >= 0; i-- {
 			record, err := layer.SSTables[i].Get(key)
@@ -254,19 +254,18 @@ func (sm *SSTableManager) Get(key []byte) (*Record, bool, error) {
 			if record == nil {
 				continue
 			}
-			if record.OpType == enums.OpTypeDel {
-				return nil, false, nil
-			}
-			if utils.IsCoveredByRangeTombstone(fragments, key, record.SeqId) {
-				return nil, false, nil
-			}
 			if best == nil || record.SeqId > best.SeqId {
 				best = record
 			}
-
 		}
 	}
 	if best == nil {
+		return nil, false, nil
+	}
+	if best.OpType == enums.OpTypeDel {
+		return nil, false, nil
+	}
+	if utils.IsCoveredByRangeTombstone(fragments, key, best.SeqId) {
 		return nil, false, nil
 	}
 	return sm.checkTTL(best, t)

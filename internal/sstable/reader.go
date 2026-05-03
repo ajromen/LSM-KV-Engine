@@ -218,9 +218,14 @@ func (r *SSTableReader) GetTTLEntries() ([]shared.TTLEntry, error) {
 
 func (r *SSTableReader) GetRangeDelEntries() ([]shared.RangeDelEntry, error) {
 	entries := make([]shared.RangeDelEntry, 0)
+	if r.footer.RangeDelIndexHandler.Size == 0 {
+		return entries, nil
+	}
 	blockSize := uint64(r.blockManager.BlockSize())
-	for off := uint64(0); uint32(off) < r.footer.RangeDelIndexHandler.Size; off += blockSize {
-		buf, err := r.storage.ReadSegment(enums.SegmentRangeDelIndex, 0, uint32(blockSize))
+	baseOffset := r.footer.RangeDelIndexHandler.Offset
+	totalSize := uint64(r.footer.RangeDelIndexHandler.Size)
+	for off := uint64(0); off < totalSize; off += blockSize {
+		buf, err := r.storage.ReadSegment(enums.SegmentRangeDelIndex, baseOffset+off, uint32(blockSize))
 		if err != nil {
 			return nil, err
 		}
@@ -228,7 +233,7 @@ func (r *SSTableReader) GetRangeDelEntries() ([]shared.RangeDelEntry, error) {
 		if err != nil {
 			return nil, err
 		}
-		entries = append(b.Entries)
+		entries = append(entries, b.Entries...)
 	}
 	return entries, nil
 }
