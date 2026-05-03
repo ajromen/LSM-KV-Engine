@@ -111,6 +111,8 @@ func RunCli(engine *core.Engine) {
 			os.Exit(0)
 		case "help":
 			printHelpMessage()
+		case "help-probabilistic":
+			printHelpProbabilisticMessage()
 		case "dataraw":
 			if config.GetSettings().Debug {
 				handleDataRaw(engine, parts)
