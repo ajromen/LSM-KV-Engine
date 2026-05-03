@@ -14,6 +14,7 @@ import (
 	"github.com/ajromen/LSM-KV-Engine/internal/enums"
 	"github.com/ajromen/LSM-KV-Engine/internal/iterator"
 	"github.com/ajromen/LSM-KV-Engine/internal/memtable"
+	mergeop "github.com/ajromen/LSM-KV-Engine/internal/merge"
 	"github.com/ajromen/LSM-KV-Engine/internal/shared"
 	"github.com/ajromen/LSM-KV-Engine/internal/ttl"
 	"github.com/ajromen/LSM-KV-Engine/internal/utils"
@@ -357,140 +358,151 @@ func (sm *SSTableManager) isSnapshotted(key []byte) bool {
 func (sm *SSTableManager) MergeSSTables(readers []*SSTableReader, toLayer int, skipTombstones bool) error {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
-	// 1. create new sstable
 
 	expectedElems := uint64(0)
 	for _, reader := range readers {
 		tr, _ := reader.Metadata.GetUint64(FieldTotalRecords)
 		expectedElems += tr
 	}
-
 	_, sstableID, writer, err := sm.createSSTable(expectedElems, toLayer)
 	if err != nil {
 		return err
 	}
-
-	// collect and re-fragment all range tombstones from input readers
 	mergedRangeDels := MergeAndFragment(readers)
 
-	// 2. iterate through all elems and add to new sstable
 	rawIter, err := NewSSTableMergeIteratorRaw(readers, byte(enums.Heap))
 	if err != nil {
 		return err
 	}
 
-	type versionState uint8
-	const (
-		stateUnseen     versionState = 0
-		stateWritten    versionState = 1
-		stateTombstoned versionState = 2
-	)
-	keyStates := make(map[string]versionState)
 	count := 0
 	t := time.Now().UnixMilli()
 
 	for rawIter.Valid() {
-		rec := rawIter.Value()
-		keyStr := string(rec.Key)
-		state := keyStates[keyStr]
-		isSnap := sm.isSnapshotted(rec.Key)
+		firstRec := rawIter.Value()
+		currentKey := append([]byte(nil), firstRec.Key...)
 
-		// key was tombstoned — all older versions are dead
-		if state == stateTombstoned {
+		// Collect ALL records for this key (sorted newest-first by seqId)
+		var keyRecs []Record
+		for rawIter.Valid() && bytes.Equal(rawIter.Value().Key, currentKey) {
+			keyRecs = append(keyRecs, rawIter.Value())
 			rawIter.Next()
-			continue
 		}
 
-		// non-snapshotted key already written — skip older version
-		if state == stateWritten && !isSnap {
-			rawIter.Next()
-			continue
-		}
-
-		// skip expired
-		if rec.ExpiresAt != 0 && rec.ExpiresAt < t {
-			rawIter.Next()
-			continue
-		}
-
-		// skip range-deleted
-		if utils.IsCoveredByRangeTombstone(mergedRangeDels, rec.Key, rec.SeqId) {
-			rawIter.Next()
-			continue
-		}
-
-		// tombstone record
-		if rec.OpType == enums.OpTypeDel {
-			keyStates[keyStr] = stateTombstoned
+		// Tombstone — newest version is a delete
+		if keyRecs[0].OpType == enums.OpTypeDel {
 			if !skipTombstones {
-				if err := writer.AddRecord(rec); err != nil {
+				if err := writer.AddRecord(keyRecs[0]); err != nil {
 					return err
 				}
 				count++
 			}
-			rawIter.Next()
 			continue
 		}
 
-		if err := writer.AddRecord(rec); err != nil {
-			return err
+		// Skip range-deleted keys
+		if utils.IsCoveredByRangeTombstone(mergedRangeDels, currentKey, keyRecs[0].SeqId) {
+			continue
 		}
-		keyStates[keyStr] = stateWritten
-		count++
-		rawIter.Next()
+
+		// Probabilistic key
+		if mergeop.IsProbKey(currentKey) {
+			// SimHash nije merge struktura, zadržava se samo najnoviji zapis
+			if mergeop.ProbType(currentKey) == mergeop.TypeSimHash {
+				r := keyRecs[0]
+				if r.ExpiresAt != 0 && r.ExpiresAt < t {
+					continue
+				}
+				if err := writer.AddRecord(r); err != nil {
+					return err
+				}
+				count++
+				continue
+			}
+
+			values := make([][]byte, len(keyRecs))
+			var latestSeqId uint64
+			for i, r := range keyRecs {
+				values[i] = r.Value
+				if r.SeqId > latestSeqId {
+					latestSeqId = r.SeqId
+				}
+			}
+
+			state, err := mergeop.ApplyAll(currentKey, values)
+			if err != nil {
+				return err
+			}
+			if state != nil {
+				mergedValue := mergeop.WrapBaseState(state)
+				if err := writer.AddRecord(Record{
+					Key:    currentKey,
+					Value:  mergedValue,
+					SeqId:  latestSeqId,
+					OpType: enums.OpTypeMerge,
+				}); err != nil {
+					return err
+				}
+				count++
+			}
+			continue
+		}
+
+		// Normal key: snapshotted = keep all versions; not snapshotted = keep newest only
+		isSnap := sm.isSnapshotted(currentKey)
+		if isSnap {
+			for _, r := range keyRecs {
+				if r.ExpiresAt != 0 && r.ExpiresAt < t {
+					continue
+				}
+				if err := writer.AddRecord(r); err != nil {
+					return err
+				}
+				count++
+			}
+		} else {
+			r := keyRecs[0] // newest
+			if r.ExpiresAt != 0 && r.ExpiresAt < t {
+				continue
+			}
+			if err := writer.AddRecord(r); err != nil {
+				return err
+			}
+			count++
+		}
 	}
 
-	// write surviving range tombstones
-	// at the bottommost level (skipTombstones=true) drop them: nothing below to cover
-	// at any other level keep them: they must cover keys in layers below
+	// Write surviving range tombstones
 	if !skipTombstones {
 		for _, rd := range mergedRangeDels {
 			if err := writer.AddToRangeDel(Record{
-				Key:    rd.StartKey,
-				Value:  rd.EndKey,
-				SeqId:  rd.SeqId,
-				OpType: enums.OpTypeRangeDel,
+				Key: rd.StartKey, Value: rd.EndKey,
+				SeqId: rd.SeqId, OpType: enums.OpTypeRangeDel,
 			}); err != nil {
 				return err
 			}
 		}
 	}
+
 	if count == 0 && (skipTombstones || len(mergedRangeDels) == 0) {
 		return nil
 	}
-
-	// last layer all tombstones
-	if count == 0 {
-		return nil
+	if err := writer.Finalize(); err != nil {
+		return fmt.Errorf("cant finalize: %w", err)
 	}
-	//if count == 0 {
-	//	return fmt.Errorf("merge produced no records. All %d input SSTables may be empty", len(readers))
-	//}
-	err = writer.Finalize()
-	if err != nil {
-		return fmt.Errorf("cant finalize SSTable writer: %w", err)
-	}
-
-	// 3. open new reader and add to manager
 	reader, err := NewSSTableReaderFromWriter(writer, sstableID)
 	if err != nil {
 		return err
 	}
-	err = sm.addToLayers(reader, toLayer)
-	if err != nil {
+	if err := sm.addToLayers(reader, toLayer); err != nil {
 		return err
 	}
-
-	err = sm.DeleteSSTables(readers)
-	if err != nil {
+	if err := sm.DeleteSSTables(readers); err != nil {
 		return err
 	}
-
 	sm.invalidateFragmentCache()
-
 	sm.blockManager.ClearCache()
 	return nil
-
 }
 
 // MoveSSTable moves sstable from one layer to another

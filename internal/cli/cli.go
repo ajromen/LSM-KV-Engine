@@ -71,6 +71,36 @@ func RunCli(engine *core.Engine) {
 			handleBatchWrite(engine, parts)
 		case "batch-delete":
 			handleBatchDelete(engine, parts)
+		case "bf-create":
+			handleBFCreate(engine, parts)
+		case "bf-add":
+			handleBFAdd(engine, parts)
+		case "bf-contains":
+			handleBFContains(engine, parts)
+		case "bf-delete":
+			handleBFDelete(engine, parts)
+		case "cms-create":
+			handleCMSCreate(engine, parts)
+		case "cms-add":
+			handleCMSAdd(engine, parts)
+		case "cms-freq":
+			handleCMSFreq(engine, parts)
+		case "cms-delete":
+			handleCMSDelete(engine, parts)
+		case "hll-create":
+			handleHLLCreate(engine, parts)
+		case "hll-add":
+			handleHLLAdd(engine, parts)
+		case "hll-count":
+			handleHLLCount(engine, parts)
+		case "hll-delete":
+			handleHLLDelete(engine, parts)
+		case "sh-store":
+			handleSHStore(engine, parts)
+		case "sh-dist":
+			handleSHDist(engine, parts)
+		case "sh-delete":
+			handleSHDelete(engine, parts)
 		case "exit", "quit", "q":
 			print(blue + "Exiting...")
 			err := engine.Close()

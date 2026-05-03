@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/iterator"
+	"github.com/ajromen/LSM-KV-Engine/internal/merge"
 )
 
 // ScanResult is a single key-value pair returned from scan operations
@@ -18,23 +19,35 @@ func (engine *Engine) RangeScan(lower, upper string, pageNumber, pageSize int) (
 	if pageSize <= 0 {
 		return nil, fmt.Errorf("pageSize must be > 0")
 	}
+
 	it, err := engine.lsm.NewRangeIterator([]byte(lower), []byte(upper))
 	if err != nil {
 		return nil, err
 	}
+
 	skip := pageNumber * pageSize
-	for i := 0; i < skip && it.Valid(); i++ {
+	visibleSeen := 0
+
+	for it.Valid() && visibleSeen < skip {
+		entry := it.Current()
+		if !merge.IsProbKey(entry.Key) {
+			visibleSeen++
+		}
 		it.Next()
 	}
+
 	results := make([]ScanResult, 0, pageSize)
 	for it.Valid() && len(results) < pageSize {
 		entry := it.Current()
-		results = append(results, ScanResult{
-			Key:   string(entry.Key),
-			Value: string(entry.Value),
-		})
+		if !merge.IsProbKey(entry.Key) {
+			results = append(results, ScanResult{
+				Key:   string(entry.Key),
+				Value: string(entry.Value),
+			})
+		}
 		it.Next()
 	}
+
 	return results, nil
 }
 
@@ -44,23 +57,35 @@ func (engine *Engine) PrefixScan(prefix string, pageNumber, pageSize int) ([]Sca
 	if pageSize <= 0 {
 		return nil, fmt.Errorf("pageSize must be > 0")
 	}
+
 	it, err := engine.lsm.NewPrefixIterator([]byte(prefix))
 	if err != nil {
 		return nil, err
 	}
+
 	skip := pageNumber * pageSize
-	for i := 0; i < skip && it.Valid(); i++ {
+	visibleSeen := 0
+
+	for it.Valid() && visibleSeen < skip {
+		entry := it.Current()
+		if !merge.IsProbKey(entry.Key) {
+			visibleSeen++
+		}
 		it.Next()
 	}
+
 	results := make([]ScanResult, 0, pageSize)
 	for it.Valid() && len(results) < pageSize {
 		entry := it.Current()
-		results = append(results, ScanResult{
-			Key:   string(entry.Key),
-			Value: string(entry.Value),
-		})
+		if !merge.IsProbKey(entry.Key) {
+			results = append(results, ScanResult{
+				Key:   string(entry.Key),
+				Value: string(entry.Value),
+			})
+		}
 		it.Next()
 	}
+
 	return results, nil
 }
 
@@ -71,21 +96,38 @@ type ActiveIterator struct {
 
 // Next returns current entry and advances. Returns false if exhausted
 func (a *ActiveIterator) Next() (ScanResult, bool) {
-	if a.it == nil || !a.it.Valid() {
-		return ScanResult{}, false
+	for a.it != nil && a.it.Valid() {
+		entry := a.it.Key()
+		a.it.Next()
+
+		if merge.IsProbKey(entry.Key) {
+			continue
+		}
+
+		return ScanResult{
+			Key:   string(entry.Key),
+			Value: string(entry.Value),
+		}, true
 	}
-	entry := a.it.Key()
-	result := ScanResult{
-		Key:   string(entry.Key),
-		Value: string(entry.Value),
-	}
-	a.it.Next()
-	return result, true
+
+	return ScanResult{}, false
 }
 
 // Valid reports whether the iterator has more entries
 func (a *ActiveIterator) Valid() bool {
-	return a.it != nil && a.it.Valid()
+	if a.it == nil {
+		return false
+	}
+
+	for a.it.Valid() {
+		entry := a.it.Key()
+		if !merge.IsProbKey(entry.Key) {
+			return true
+		}
+		a.it.Next()
+	}
+
+	return false
 }
 
 // RangeIterate creates an interactive iterator over [lower, upper]
