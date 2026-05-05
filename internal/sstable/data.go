@@ -437,11 +437,18 @@ func (r *DataBlockReader) ReadRecord() (*Record, error) {
 
 // positions the reader on the nth restart key in actual data -> allows faster binary search
 func (r *DataBlockReader) SeekToRestart(idx int) error {
+	if idx == 0 && len(r.restartArray) == 0 {
+		r.pos = 0
+		r.decoder.Reset()
+		r.recordIdx = 0
+		return nil
+	}
 	if idx < 0 || idx >= len(r.restartArray) {
 		return errors.New("invalid restart index")
 	}
 	r.pos = int(r.restartArray[idx])
 	r.decoder.Reset()
+	r.recordIdx = idx * r.decoder.RestartInterval()
 	return nil
 }
 
@@ -540,7 +547,6 @@ func (it *DataBlockIteratorRaw) Seek(target Record) {
 		it.valid = false
 		return
 	}
-	it.reader.recordIdx = best * it.reader.decoder.RestartInterval()
 	for it.reader.HasNext() {
 		rec, err := it.reader.ReadRecord()
 		if err != nil {

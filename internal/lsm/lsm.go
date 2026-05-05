@@ -18,10 +18,10 @@ type LSM struct {
 	sstableManager      *sstable.SSTableManager
 	strategy            CompactionStrategy
 	readCache           *cache.LRU[string, []byte]
-	EngineFlushCallback func()
+	EngineFlushCallback func(maxSeqId uint64)
 }
 
-func NewLSM(dataDir string, engineFlushCallback func()) (*LSM, error) {
+func NewLSM(dataDir string, engineFlushCallback func(maxSeqId uint64)) (*LSM, error) {
 	lsm := LSM{}
 	lsm.sstableManager = sstable.NewSSTableManager(dataDir)
 	stt := config.GetSettings()
@@ -49,12 +49,24 @@ func NewLSM(dataDir string, engineFlushCallback func()) (*LSM, error) {
 }
 
 func (l *LSM) onFlush(entries []memtable.MemtableEntry, rangeDelEntries []memtable.MemtableEntry) {
+	var maxSeqId uint64
+	for _, e := range entries {
+		if e.SeqId > maxSeqId {
+			maxSeqId = e.SeqId
+		}
+	}
+	for _, e := range rangeDelEntries {
+		if e.SeqId > maxSeqId {
+			maxSeqId = e.SeqId
+		}
+	}
+
 	err := l.sstableManager.FlushToSSTable(entries, rangeDelEntries)
 	if err != nil {
 		panic(fmt.Errorf("error flushing memtable entries: %v", err))
 	}
 
-	l.EngineFlushCallback()
+	l.EngineFlushCallback(maxSeqId)
 
 	// TODO set this in a goroutine
 	err = l.strategy.Compact(l.sstableManager)

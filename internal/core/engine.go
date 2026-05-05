@@ -236,9 +236,8 @@ func (engine *Engine) Close() error {
 	return nil
 }
 
-func (engine *Engine) MemtableFlushed() {
-	err := engine.wal.MemtableFlushed(engine.seqGen.Current())
-	if err != nil {
+func (engine *Engine) MemtableFlushed(maxFlushedSeqId uint64) {
+	if err := engine.wal.MemtableFlushed(maxFlushedSeqId); err != nil {
 		panic(err)
 	}
 }
@@ -306,6 +305,7 @@ func (engine *Engine) BFCreate(name string, expectedElements uint, falsePositive
 		return err
 	}
 
+	engine.lsm.SnapshotProbKey(key)
 	engine.probPut(key, merge.WrapBaseState(data), enums.OpTypeMerge)
 	return nil
 }
@@ -368,6 +368,7 @@ func (engine *Engine) CMSCreate(name string) error {
 		return err
 	}
 
+	engine.lsm.SnapshotProbKey(key)
 	engine.probPut(key, merge.WrapBaseState(buf.Bytes()), enums.OpTypeMerge)
 	return nil
 }
@@ -428,6 +429,7 @@ func (engine *Engine) HLLCreate(name string) error {
 		return err
 	}
 
+	engine.lsm.SnapshotProbKey(key)
 	engine.probPut(key, merge.WrapBaseState(data), enums.OpTypeMerge)
 	return nil
 }
