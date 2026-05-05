@@ -8,6 +8,7 @@ import (
 	"github.com/ajromen/LSM-KV-Engine/internal/enums"
 	"github.com/ajromen/LSM-KV-Engine/internal/iterator"
 	"github.com/ajromen/LSM-KV-Engine/internal/memtable"
+	mergeop "github.com/ajromen/LSM-KV-Engine/internal/merge"
 	"github.com/ajromen/LSM-KV-Engine/internal/sstable"
 	"github.com/ajromen/LSM-KV-Engine/internal/ttl"
 )
@@ -17,10 +18,10 @@ type LSM struct {
 	sstableManager      *sstable.SSTableManager
 	strategy            CompactionStrategy
 	readCache           *cache.LRU[string, []byte]
-	EngineFlushCallback func()
+	EngineFlushCallback func(maxSeqId uint64)
 }
 
-func NewLSM(dataDir string, engineFlushCallback func()) (*LSM, error) {
+func NewLSM(dataDir string, engineFlushCallback func(maxSeqId uint64)) (*LSM, error) {
 	lsm := LSM{}
 	lsm.sstableManager = sstable.NewSSTableManager(dataDir)
 	stt := config.GetSettings()
@@ -48,12 +49,24 @@ func NewLSM(dataDir string, engineFlushCallback func()) (*LSM, error) {
 }
 
 func (l *LSM) onFlush(entries []memtable.MemtableEntry, rangeDelEntries []memtable.MemtableEntry) {
+	var maxSeqId uint64
+	for _, e := range entries {
+		if e.SeqId > maxSeqId {
+			maxSeqId = e.SeqId
+		}
+	}
+	for _, e := range rangeDelEntries {
+		if e.SeqId > maxSeqId {
+			maxSeqId = e.SeqId
+		}
+	}
+
 	err := l.sstableManager.FlushToSSTable(entries, rangeDelEntries)
 	if err != nil {
 		panic(fmt.Errorf("error flushing memtable entries: %v", err))
 	}
 
-	l.EngineFlushCallback()
+	l.EngineFlushCallback(maxSeqId)
 
 	// TODO set this in a goroutine
 	err = l.strategy.Compact(l.sstableManager)
@@ -70,6 +83,8 @@ func (l *LSM) Put(key []byte, value []byte, seqId uint64, opType enums.OpType) {
 	if opType == enums.OpTypeDel {
 		l.readCache.Put(string(key), nil)
 	} else if opType == enums.OpTypeRangeDel {
+		l.readCache.Put(string(key), nil)
+	} else if opType == enums.OpTypeMerge {
 		l.readCache.Put(string(key), nil)
 	} else {
 		l.readCache.Put(string(key), value)
@@ -151,6 +166,42 @@ func (l *LSM) GetTTL(key []byte) (int64, bool, error) {
 		return record.ExpiresAt, true, nil
 	}
 	return 0, false, nil
+}
+
+// PutMerge writes a merge record (either base state or operand) for a probabilistic key.
+func (l *LSM) PutMerge(key []byte, value []byte, seqId uint64) {
+	// Always use Insert (not Upsert) — versioning is needed for merge
+	// Route through Put with OpTypeMerge so the manager uses Insert
+	l.memtableeManager.Put(key, value, seqId, enums.OpTypeMerge)
+}
+
+// PutProbBase writes the initial base state of a probabilistic structure.
+func (l *LSM) PutProbBase(key []byte, value []byte, seqId uint64) {
+	l.memtableeManager.Put(key, value, seqId, enums.OpTypePut)
+}
+
+// GetMerged reconstructs a probabilistic structure by applying all merge operands.
+func (l *LSM) GetMerged(key []byte) ([]byte, bool, error) {
+	versions, err := l.GetVersions(key, 0)
+	if err != nil {
+		return nil, false, err
+	}
+	if len(versions) == 0 {
+		return nil, false, nil
+	}
+	state, err := mergeop.ApplyAll(key, versions)
+	if err != nil {
+		return nil, false, err
+	}
+	if state == nil {
+		return nil, false, nil
+	}
+	return state, true, nil
+}
+
+func (l *LSM) SnapshotProbKey(key []byte) {
+	l.memtableeManager.Snapshot(key)
+	l.sstableManager.AddSnapshotKey(key)
 }
 
 // flushes memtable

@@ -117,7 +117,7 @@ func (block *IndexBlock) FindBlock(key []byte) int {
 		return 0
 	}
 	lastIdx := len(block.Entries) - 1
-	if bytes.Compare(key, block.Entries[lastIdx].Key) >= 0 {
+	if bytes.Compare(key, block.Entries[lastIdx].Key) > 0 {
 		return lastIdx
 	}
 	left := 0

@@ -24,6 +24,7 @@ Commands:
   Aditional:
     del-range <key1> <key2>   Delete a range of keys 
     clear-all                 Delete all data
+    help-probabilistic
   TTL:
     expire <key1> <key2> ... <keyN> <ttl>   Set TTL for a key/keys
     ttl <key>                               Prints remaining TTL for a key (O(1) only if InMemoryTTL=true)
@@ -48,6 +49,28 @@ Commands:
 Notes:
   ttl: time-to-live in seconds,
   unit suffixes: ms, s (default), min, h, D, M, Y`
+
+const helpProbabilistic = `LSM-KV-Engine CLI Help Probabilistic
+Probabilistic operations:
+  Bloom Filter:
+    bf-create <name> <expectedElements> <falsePositiveRate>   Create Bloom Filter
+    bf-add <name> <element>                                   Add element
+    bf-contains <name> <element>                              Check membership
+    bf-delete <name>                                          Delete Bloom Filter
+  Count-Min Sketch:
+    cms-create <name>         Create Count-Min Sketch
+    cms-add <name> <event>    Add event
+    cms-freq <name> <event>   Estimate frequency
+    cms-delete <name>         Delete Count-Min Sketch
+  HyperLogLog:
+    hll-create <name>          Create HyperLogLog
+    hll-add <name> <element>   Add element
+    hll-count <name>           Estimate unique count
+    hll-delete <name>          Delete HyperLogLog
+  SimHash:
+    sh-store <name> <text...>   Store SimHash fingerprint
+    sh-dist <name1> <name2>     Compare fingerprints
+    sh-delete <name>            Delete SimHash`
 
 const banner = blue + " \n██▓      ██████  ███▄ ▄███▓ ██ ▄█▀██▒   █▓▓█████  ███▄    █   ▄████  ██▓ ███▄    █ ▓█████ \n▓██▒    ▒██    ▒ ▓██▒▀█▀ ██▒ ██▄█▒▓██░   █▒▓█   ▀  ██ ▀█   █  ██▒ ▀█▒▓██▒ ██ ▀█   █ ▓█   ▀ \n▒██░    ░ ▓██▄   ▓██    ▓██░▓███▄░ ▓██  █▒░▒███   ▓██  ▀█ ██▒▒██░▄▄▄░▒██▒▓██  ▀█ ██▒▒███   \n▒██░      ▒   ██▒▒██    ▒██ ▓██ █▄  ▒██ █░░▒▓█  ▄ ▓██▒  ▐▌██▒░▓█  ██▓░██░▓██▒  ▐▌██▒▒▓█  ▄ \n░██████▒▒██████▒▒▒██▒   ░██▒▒██▒ █▄  ▒▀█░  ░▒████▒▒██░   ▓██░░▒▓███▀▒░██░▒██░   ▓██░░▒████▒\n░ ▒░▓  ░▒ ▒▓▒ ▒ ░░ ▒░   ░  ░▒ ▒▒ ▓▒  ░ ▐░  ░░ ▒░ ░░ ▒░   ▒ ▒  ░▒   ▒ ░▓  ░ ▒░   ▒ ▒ ░░ ▒░ ░\n░ ░ ▒  ░░ ░▒  ░ ░░  ░      ░░ ░▒ ▒░  ░ ░░   ░ ░  ░░ ░░   ░ ▒░  ░   ░  ▒ ░░ ░░   ░ ▒░ ░ ░  ░\n  ░ ░   ░  ░  ░  ░      ░   ░ ░░ ░     ░░     ░      ░   ░ ░ ░ ░   ░  ▒ ░   ░   ░ ░    ░   \n    ░  ░      ░         ░   ░  ░        ░     ░            ░       ░  ░           ░    ░   \n" + reset
 
@@ -79,4 +102,8 @@ func printHelpMessage() {
 		PrintSuccess("Debug:\n  dataraw <index>   Print decoded raw data for requested sstable")
 		PrintSuccess("  print-wal         Print decoded raw data for all wal segments")
 	}
+}
+
+func printHelpProbabilisticMessage() {
+	PrintSuccess(helpProbabilistic)
 }

@@ -62,7 +62,7 @@ func NewDefaultConfig() *Config {
 			BlockSize:     defaultBlockSize, // MUST match BlockManager.BlockSize
 			SyncInterval:  0,                // ms; 0 => only on Flush/Commit
 			MaxSegments:   0,                // 0 => unlimited
-			MaxBlocks:     2,
+			MaxBlocks:     16,
 			SaveDirectory: defaultWalSaveDirectory,
 		},
 		Memtable: MemtableConfig{

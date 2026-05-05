@@ -59,7 +59,7 @@ func (mm *MemtableManager) isSnapshotted(key []byte) bool {
 // Put inserts an entry into active memtable and if the memtable reaches max capacity, triggers rotation
 func (mm *MemtableManager) Put(key []byte, value []byte, seqId uint64, opType enums.OpType) {
 	mm.mu.Lock()
-	if opType == enums.OpTypeRangeDel || mm.isSnapshotted(key) {
+	if opType == enums.OpTypeRangeDel || opType == enums.OpTypeMerge || mm.isSnapshotted(key) {
 		mm.active.Put(key, value, seqId, opType)
 	} else {
 		mm.active.Upsert(key, value, seqId, opType)
