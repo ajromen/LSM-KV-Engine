@@ -16,6 +16,7 @@ import (
 	"github.com/ajromen/LSM-KV-Engine/internal/probabilistics"
 	"github.com/ajromen/LSM-KV-Engine/internal/sequence"
 	"github.com/ajromen/LSM-KV-Engine/internal/shared"
+	"github.com/ajromen/LSM-KV-Engine/internal/sstable"
 	"github.com/ajromen/LSM-KV-Engine/internal/token_bucket"
 	"github.com/ajromen/LSM-KV-Engine/internal/ttl"
 	"github.com/ajromen/LSM-KV-Engine/internal/wal"
@@ -573,4 +574,12 @@ func (engine *Engine) ensureProbExists(key []byte, typeName string, name string)
 		return fmt.Errorf("%s '%s' does not exist", typeName, name)
 	}
 	return nil
+}
+
+func (engine *Engine) ValidateSSTable(id int) (string, *sstable.ValidationResult, error) {
+	return engine.lsm.ValidateSSTable(id)
+}
+
+func (engine *Engine) ListSSTables() []sstable.SSTableInfo {
+	return engine.lsm.ListSSTables()
 }

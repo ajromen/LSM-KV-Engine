@@ -438,3 +438,29 @@ func (reader *SSTableReader) OverlapsRange(start, end []byte) bool {
 
 	return true
 }
+
+// Validate reads every data block, hashes it, and checks the result against
+// the stored Merkle tree. Returns the ValidationResult or an error.
+func (r *SSTableReader) Validate() (*ValidationResult, error) {
+	if err := r.loadMerkleTree(); err != nil {
+		return nil, fmt.Errorf("load merkle tree: %w", err)
+	}
+	if r.merkleTree == nil {
+		return nil, errors.New("no merkle tree in this SSTable")
+	}
+
+	numBlocks := int(r.merkleTree.NumDataBlocks)
+	blockSize := uint64(r.blockManager.BlockSize())
+	blockHashes := make([][32]byte, numBlocks)
+
+	for i := 0; i < numBlocks; i++ {
+		offset := uint64(i) * blockSize
+		data, err := r.storage.ReadSegment(enums.SegmentData, offset, uint32(blockSize))
+		if err != nil {
+			return nil, fmt.Errorf("read data block %d: %w", i, err)
+		}
+		blockHashes[i] = HashDataBlock(data)
+	}
+
+	return r.merkleTree.Verify(blockHashes)
+}
