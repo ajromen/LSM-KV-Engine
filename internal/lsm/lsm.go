@@ -2,6 +2,7 @@ package lsm
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/cache"
 	"github.com/ajromen/LSM-KV-Engine/internal/config"
@@ -17,7 +18,7 @@ type LSM struct {
 	memtableeManager    *memtable.MemtableManager
 	sstableManager      *sstable.SSTableManager
 	strategy            CompactionStrategy
-	readCache           *cache.LRU[string, []byte]
+	readCache           *cache.LRU[string, *sstable.Record]
 	EngineFlushCallback func(maxSeqId uint64)
 }
 
@@ -44,7 +45,7 @@ func NewLSM(dataDir string, engineFlushCallback func(maxSeqId uint64)) (*LSM, er
 	factory := memtable.NewFactory(stt.Memtable)
 	memManager := memtable.NewMemtableManager(3, 0, factory, lsm.onFlush)
 	lsm.memtableeManager = memManager
-	lsm.readCache = cache.NewLRU[string, []byte](stt.LSMTree.ReadCacheSize)
+	lsm.readCache = cache.NewLRU[string, *sstable.Record](stt.LSMTree.ReadCacheSize)
 	return &lsm, nil
 }
 
@@ -80,21 +81,18 @@ func (l *LSM) Put(key []byte, value []byte, seqId uint64, opType enums.OpType) {
 	value = append([]byte(nil), value...)
 	key = append([]byte(nil), key...)
 	l.memtableeManager.Put(key, value, seqId, opType)
-	if opType == enums.OpTypeDel {
-		l.readCache.Put(string(key), nil)
-	} else if opType == enums.OpTypeRangeDel {
-		l.readCache.Put(string(key), nil)
-	} else if opType == enums.OpTypeMerge {
-		l.readCache.Put(string(key), nil)
-	} else {
-		l.readCache.Put(string(key), value)
-	}
+	//if opType == enums.OpTypeDel || opType == enums.OpTypeMerge {
+	//	l.readCache.Put(string(key), nil)
+	//} else {
+	//	l.readCache.Put(string(key), &sstable.Record{Value: value, ExpiresAt: 0})
+	//}
 }
 
 func (l *LSM) PutWithTTL(key []byte, value []byte, seqId uint64, opType enums.OpType, ttl int64) {
 	value = append([]byte(nil), value...)
 	key = append([]byte(nil), key...)
 	l.memtableeManager.PutWithTTL(key, value, seqId, opType, ttl)
+	//l.readCache.Put(string(key), &sstable.Record{Value: value, ExpiresAt: ttl})
 }
 
 // Remove physically deletes a specific version of a key from the active memtable.
@@ -112,7 +110,8 @@ func (l *LSM) Get(key []byte) ([]byte, bool, error) {
 			l.readCache.Put(string(key), nil)
 			return nil, false, nil
 		}
-		l.readCache.Put(string(key), entry.Value)
+		rec := &sstable.Record{Value: entry.Value, ExpiresAt: entry.ExpiresAt}
+		l.readCache.Put(string(key), rec)
 		return entry.Value, true, nil
 	}
 
@@ -121,11 +120,15 @@ func (l *LSM) Get(key []byte) ([]byte, bool, error) {
 	}
 
 	// 2. check cache
-	if val, ok := l.readCache.Get(string(key)); ok {
-		if val == nil {
-			found = false
+	if rec, ok := l.readCache.Get(string(key)); ok {
+		if rec == nil {
+			return nil, false, nil
 		}
-		found = true
+		if rec.ExpiresAt > 0 && rec.ExpiresAt <= time.Now().UnixMilli() {
+			l.readCache.Put(string(key), nil)
+			return nil, false, nil
+		}
+		return rec.Value, true, nil
 	}
 
 	if config.GetSettings().Debug {
@@ -138,12 +141,14 @@ func (l *LSM) Get(key []byte) ([]byte, bool, error) {
 		return nil, false, err
 	}
 	if found {
-		// The key exists in SSTable but a range tombstone in the memtable
-		// may have been written after it. Check with the record's own seqId.
 		if l.memtableeManager.IsCoveredByRangeDel(key, record.SeqId) {
 			return nil, false, nil
 		}
-		l.readCache.Put(string(key), record.Value)
+		if record.ExpiresAt > 0 && record.ExpiresAt < time.Now().UnixMilli() {
+			l.readCache.Put(string(key), nil)
+			return nil, false, nil
+		}
+		l.readCache.Put(string(key), record)
 		return record.Value, true, nil
 	}
 
@@ -154,15 +159,31 @@ func (l *LSM) GetTTL(key []byte) (int64, bool, error) {
 	entry, found := l.memtableeManager.Get(key)
 	if found {
 		if entry == nil {
-			return 0, false, nil // tombstone
+			return 0, false, nil
 		}
 		return entry.ExpiresAt, true, nil
 	}
+
+	// check cache
+	if rec, ok := l.readCache.Get(string(key)); ok {
+		if rec == nil {
+			return 0, false, nil
+		}
+		if rec.ExpiresAt > 0 && rec.ExpiresAt < time.Now().UnixMilli() {
+			l.readCache.Put(string(key), nil)
+			return 0, false, nil
+		}
+		return rec.ExpiresAt, true, nil
+	}
+
 	record, found, err := l.sstableManager.Get(key)
 	if err != nil {
 		return 0, false, err
 	}
 	if found {
+		if record.ExpiresAt > 0 && record.ExpiresAt < time.Now().UnixMilli() {
+			return 0, false, nil
+		}
 		return record.ExpiresAt, true, nil
 	}
 	return 0, false, nil
