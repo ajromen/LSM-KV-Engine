@@ -689,3 +689,42 @@ func (sm *SSTableManager) GetAllTTL() (*ttl.ExpiryHeap, error) {
 	}
 	return heap, nil
 }
+
+type SSTableInfo struct {
+	Id    int
+	Layer int
+	Path  string
+}
+
+// ValidateSSTable runs Merkle validation on the SSTable with the given ID.
+// Returns the SSTable's file path, the result, and any error.
+func (sm *SSTableManager) ValidateSSTable(id int) (string, *ValidationResult, error) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	for _, layer := range sm.Layers {
+		for _, r := range layer.SSTables {
+			if r.Id == id {
+				result, err := r.Validate()
+				return r.filePath, result, err
+			}
+		}
+	}
+	return "", nil, fmt.Errorf("SSTable with id %d not found", id)
+}
+
+// ListSSTables returns a summary of all loaded SSTables (id, layer, path).
+func (sm *SSTableManager) ListSSTables() []SSTableInfo {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	var out []SSTableInfo
+	for layerIdx, layer := range sm.Layers {
+		for _, r := range layer.SSTables {
+			out = append(out, SSTableInfo{
+				Id:    r.Id,
+				Layer: layerIdx,
+				Path:  r.filePath,
+			})
+		}
+	}
+	return out
+}

@@ -321,3 +321,11 @@ func (l *LSM) GetVersions(key []byte, maxVersions int) ([][]byte, error) {
 func (l *LSM) GetManifest() sstable.Manifest {
 	return *l.sstableManager.Manifest
 }
+
+func (l *LSM) ValidateSSTable(id int) (string, *sstable.ValidationResult, error) {
+	return l.sstableManager.ValidateSSTable(id)
+}
+
+func (l *LSM) ListSSTables() []sstable.SSTableInfo {
+	return l.sstableManager.ListSSTables()
+}

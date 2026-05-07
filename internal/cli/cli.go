@@ -71,6 +71,10 @@ func RunCli(engine *core.Engine) {
 			handleBatchWrite(engine, parts)
 		case "batch-delete":
 			handleBatchDelete(engine, parts)
+		case "list-sstables":
+			handleListSSTables(engine, parts)
+		case "validate-sstable":
+			handleValidateSSTable(engine, parts)
 		case "bf-create":
 			handleBFCreate(engine, parts)
 		case "bf-add":
