@@ -24,7 +24,8 @@ Commands:
   Aditional:
     del-range <key1> <key2>   Delete a range of keys 
     clear-all                 Delete all data
-    help-probabilistic
+    help-probabilistic	      Display probabilistic help message 
+	validate-sstable <id>     Merkle proof of sstable 
   TTL:
     expire <key1> <key2> ... <keyN> <ttl>   Set TTL for a key/keys
     ttl <key>                               Prints remaining TTL for a key (O(1) only if InMemoryTTL=true)
