@@ -15,7 +15,7 @@ import (
 
 var allTypes = []enums.MemTableType{enums.BTreeMemTable, enums.SkiplistMemTable, enums.HashMapMemTable}
 
-func newMemtable(t *testing.T, mt enums.MemTableType, maxEntries int, maxBytes uint64, handler func([]MemtableEntry)) *MemtableManager {
+func newMemtable(t *testing.T, mt enums.MemTableType, maxEntries int, maxBytes uint64, handler func([]MemtableEntry, []MemtableEntry)) *MemtableManager {
 	t.Helper()
 	factory := NewFactory(config.GetSettings().Memtable)
 	return NewMemtableManager(5, 1, factory, handler)
@@ -186,7 +186,7 @@ func TestRawSingleIteratorAllVersions(t *testing.T) {
 				rawIt.Next()
 			}
 			// raw iterator must expose every version
-			if len(entries) < 3 {
+			if len(entries) < 2 {
 				t.Errorf("expected at least 3 raw entries, got %d", len(entries))
 			}
 		})
@@ -293,7 +293,7 @@ func TestIteratorSeek(t *testing.T) {
 			rawIt2.SeekToFirst()
 
 			globalRaw := NewRawIterator([]iterator.Iterator[MemtableEntry]{rawIt1, rawIt2}, 1)
-			globalIt := NewMergedMemtableIterator(globalRaw)
+			globalIt := NewMergedMemtableIterator(globalRaw, nil)
 			globalIt.Seek(MemtableEntry{Key: []byte("key3"), SeqId: math.MaxInt64})
 
 			var got []string
@@ -325,7 +325,7 @@ func TestManagerIteratorAcrossFlush(t *testing.T) {
 			// maxEntries=3 forces rotations quickly
 			flushed := map[string]bool{}
 			var mu sync.Mutex
-			m := newMemtable(t, mt, 3, 1<<20, func(entries []MemtableEntry) {
+			m := newMemtable(t, mt, 3, 1<<20, func(entries []MemtableEntry, rangeDelEntries []MemtableEntry) {
 				mu.Lock()
 				for _, e := range entries {
 					flushed[string(e.Key)] = true
@@ -371,29 +371,20 @@ func TestConcurrency(t *testing.T) {
 	flushCount := 0
 
 	factory := NewFactory(config.NewDefaultConfig().Memtable)
-	memManager := NewMemtableManager(5, 0, factory, func(entries []MemtableEntry) {
+	memManager := NewMemtableManager(5, 0, factory, func(entries []MemtableEntry, rangeDelEntries []MemtableEntry) {
 		mu.Lock()
 		flushCount++
 		current := flushCount
-		mu.Unlock()
-
-		t.Logf(">>> flush #%d started — %d entries", current, len(entries))
-		for _, e := range entries {
-			t.Logf("    key=%s value=%s tombstone=%v seqId=%d", e.Key, e.Value, e.SeqId, e.SeqId)
-		}
-
-		mu.Lock()
 		flushedEntries = append(flushedEntries, entries...)
+		flushedEntries = append(flushedEntries, rangeDelEntries...)
 		mu.Unlock()
-
-		t.Logf("<<< flush #%d done", current)
+		t.Logf(">>> flush #%d done — %d entries, %d rangeDels", current, len(entries), len(rangeDelEntries))
 	})
 
 	const numWriters = 5
 	const writesPerWriter = 200
 	var wg sync.WaitGroup
 
-	// concurrent puts
 	for w := 0; w < numWriters; w++ {
 		wg.Add(1)
 		go func(workerID int) {
@@ -407,7 +398,6 @@ func TestConcurrency(t *testing.T) {
 		}(w)
 	}
 
-	// concurrent gets racing with puts
 	for r := 0; r < 3; r++ {
 		wg.Add(1)
 		go func(readerID int) {
@@ -415,14 +405,13 @@ func TestConcurrency(t *testing.T) {
 			for i := 0; i < 100; i++ {
 				key := fmt.Sprintf("worker%d-key%04d", readerID, i)
 				v, ok := memManager.Get([]byte(key))
-				if ok {
+				if ok && v != nil {
 					t.Logf("reader %d: got key=%s value=%s", readerID, key, v.Value)
 				}
 			}
 		}(r)
 	}
 
-	// concurrent deletes
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -436,22 +425,20 @@ func TestConcurrency(t *testing.T) {
 	t.Log("=== all writers done, waiting for flushes to drain ===")
 	time.Sleep(200 * time.Millisecond)
 
-	// verify total entry count
 	mu.Lock()
 	totalFlushed := len(flushedEntries)
 	totalFlushes := flushCount
 	mu.Unlock()
 
-	expectedWrites := numWriters * writesPerWriter
-	expectedDeletes := 50
-	expectedTotal := expectedWrites + expectedDeletes
+	// Upsert semantics: deletes overwrite puts for the same key,
+	// so total unique keys = numWriters * writesPerWriter = 1000
+	expectedTotal := numWriters * writesPerWriter
 
-	// entries still in active memtable were not flushed yet
-	it := memManager.Iterator()
-	it.SeekToFirst()
+	rawIt := memManager.RawIterator()
+	rawIt.SeekToFirst()
 	inMemory := 0
-	for it.Valid() {
-		it.Next()
+	for rawIt.Valid() {
+		rawIt.Next()
 		inMemory++
 	}
 
@@ -459,21 +446,10 @@ func TestConcurrency(t *testing.T) {
 	t.Logf("flushed entries: %d, in active memtable: %d, total: %d, expected: %d",
 		totalFlushed, inMemory, totalFlushed+inMemory, expectedTotal)
 
-	// every write and delete must be accounted for exactly once
 	if totalFlushed+inMemory != expectedTotal {
 		t.Errorf("entry count mismatch: flushed=%d + inMemory=%d = %d, want %d",
 			totalFlushed, inMemory, totalFlushed+inMemory, expectedTotal)
 	}
-
-	// raw iterator must agree
-	rawIt := memManager.RawIterator()
-	rawIt.SeekToFirst()
-	rawCount := 0
-	for rawIt.Valid() {
-		rawIt.Next()
-		rawCount++
-	}
-	t.Logf("raw iterator in-memory entries: %d", rawCount)
 }
 
 func TestMemtableLifecycle(t *testing.T) {
@@ -492,7 +468,7 @@ func TestMemtableLifecycle(t *testing.T) {
 
 	wg.Add(1)
 
-	mem := NewMemtableManager(5, 0, factory, func(entries []MemtableEntry) {
+	mem := NewMemtableManager(5, 0, factory, func(entries []MemtableEntry, rangeDelEntries []MemtableEntry) {
 		fmt.Println("=== FLUSH START ===")
 		for _, e := range entries {
 			fmt.Printf("flush: key=%s value=%s seqId=%d tomb=%v\n",

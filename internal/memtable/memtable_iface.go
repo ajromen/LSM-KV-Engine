@@ -31,6 +31,8 @@ func (m MemtableEntry) HashKey() string {
 // MemtableStore defines the interface for underlying in-memory data structures
 type MemtableStore interface {
 	Insert(entry MemtableEntry)
+	Upsert(entry MemtableEntry) bool
+	Remove(entry MemtableEntry)
 	Search(entry MemtableEntry) *MemtableEntry
 	EntriesInOrder() []MemtableEntry
 	Reset()
@@ -44,21 +46,25 @@ type MemtableStore interface {
 type Memtable interface {
 	Put(key []byte, value []byte, seqId uint64, opType enums.OpType)
 	PutWithTTL(key []byte, value []byte, seqId uint64, opType enums.OpType, ttl int64)
+	Upsert(key []byte, value []byte, seqId uint64, opType enums.OpType)
+	UpsertWithTTL(key []byte, value []byte, seqId uint64, opType enums.OpType, ttl int64)
+	Remove(key []byte, seqId uint64)
 	Get(key []byte) (*MemtableEntry, bool)
 	ShouldFlush() bool
 	Reset()
-	Flush() []MemtableEntry
+	Flush() ([]MemtableEntry, []MemtableEntry)
 	ReadEntries() []MemtableEntry
 	NumEntries() int
 	SizeBytes() uint64
 	Visualize() string
 	RawIterator() iterator.Iterator[MemtableEntry]
 	Iterator() iterator.Iterator[MemtableEntry]
+	IsCoveredByRangeDel(key []byte, keySeqId uint64) bool
 }
 
 // GenericMemtable is a concrete implementation of Memtable.
 type GenericMemtable struct {
-	store MemtableStore
+	store         MemtableStore
 	rangeDelStore MemtableStore
 	numEntries    int
 	sizeBytes     uint64

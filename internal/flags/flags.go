@@ -5,10 +5,10 @@ import (
 	"strconv"
 )
 
-// FLags should be pointers to allow nil value when flag is not explicitly provided
 type FLags struct {
 	ConfigPath                 *string
 	Debug                      *bool
+	CreateDefaultConfig        *bool
 	MemtableMaxSize            *int
 	MemtableMaxSizeB           *uint64
 	MemtableType               *string
@@ -20,11 +20,13 @@ type FLags struct {
 	TTLRefreshRate             *uint64
 	TokenBucketMaxTokens       *int64
 	TokenBucketResetIntervalMs *int64
+	WalMaxBlocks               *int64
 }
 
 func ParseFlags() *FLags {
 	var configPathOpt OptionalString
 	var debugOpt OptionalBool
+	var createDefaultConfigOpt OptionalBool
 	var mtMaxSizeOpt OptionalInt
 	var mtMaxSizeBOpt OptionalUInt64
 	var instancesOpt OptionalInt
@@ -36,11 +38,14 @@ func ParseFlags() *FLags {
 	var TTLRefreshRateOpt OptionalUInt64
 	var tokenBucketMaxTokensOpt OptionalInt64
 	var tokenBucketResetIntervalMsOpt OptionalInt64
+	var walMaxBlocksOpt OptionalInt64
 
 	flagString(&configPathOpt, "config", "Path to config file")
 	flagString(&configPathOpt, "c", "Path to config file")
+
 	flagBool(&debugOpt, "debug", "Debug mode")
 	flagBool(&debugOpt, "d", "Debug mode")
+	flagBool(&createDefaultConfigOpt, "create-default-config", "Creates default config")
 	flagInt(&mtMaxSizeOpt, "memtable-max-size", "Max memtable size in number of entries")
 	flagUint64(&mtMaxSizeBOpt, "memtable-max-size-b", "Max memtable size in bytes")
 	flagInt(&instancesOpt, "instances", "Number of memtable instances")
@@ -52,12 +57,14 @@ func ParseFlags() *FLags {
 	flagUint64(&TTLRefreshRateOpt, "ttl-refresh-rate", "Timer in ms for checking expiring keys (Works only if ttl-in-memory=true")
 	flagInt64(&tokenBucketMaxTokensOpt, "token-bucket-max-tokens", "Max tokens in token bucket (0 = disabled)")
 	flagInt64(&tokenBucketResetIntervalMsOpt, "token-bucket-reset-ms", "Token bucket reset interval in milliseconds")
+	flagInt64(&walMaxBlocksOpt, "wal-seg-max-blocks", "Max blocks in WAL segment")
 
 	flag.Parse()
 
 	return &FLags{
 		ConfigPath:                 configPathOpt.Get(),
 		Debug:                      debugOpt.Get(),
+		CreateDefaultConfig:        createDefaultConfigOpt.Get(),
 		MemtableMaxSize:            mtMaxSizeOpt.Get(),
 		MemtableMaxSizeB:           mtMaxSizeBOpt.Get(),
 		MemtableType:               mtTypeOpt.Get(),
@@ -68,6 +75,7 @@ func ParseFlags() *FLags {
 		TTLRefreshRate:             TTLRefreshRateOpt.Get(),
 		TokenBucketMaxTokens:       tokenBucketMaxTokensOpt.Get(),
 		TokenBucketResetIntervalMs: tokenBucketResetIntervalMsOpt.Get(),
+		WalMaxBlocks:               walMaxBlocksOpt.Get(),
 	}
 }
 

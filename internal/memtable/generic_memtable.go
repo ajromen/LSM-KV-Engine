@@ -51,6 +51,21 @@ func (m *GenericMemtable) Put(key []byte, value []byte, seqId uint64, opType enu
 	m.sizeBytes += uint64(sizeEntry)
 }
 
+// Upsert inserts or replaces the entry for this key (no versioning).
+// numEntries only grows when a new key is written, not on overwrite.
+func (m *GenericMemtable) Upsert(key []byte, value []byte, seqId uint64, opType enums.OpType) {
+	entry := MemtableEntry{Key: key,
+		Value:  value,
+		SeqId:  seqId,
+		OpType: opType,
+	}
+	replaced := m.store.Upsert(entry)
+	if !replaced {
+		m.numEntries++
+		m.sizeBytes += uint64(len(key) + len(value) + 8 + 8 + 1)
+	}
+}
+
 func (m *GenericMemtable) PutWithTTL(key []byte, value []byte, seqId uint64, opType enums.OpType, ttl int64) {
 	expiresAt := time.Now().UnixMilli() + ttl
 	sizeEntry := len(key) + len(value) + 8 + 8 + 1
@@ -63,6 +78,32 @@ func (m *GenericMemtable) PutWithTTL(key []byte, value []byte, seqId uint64, opT
 	})
 	m.numEntries++
 	m.sizeBytes += uint64(sizeEntry)
+}
+
+func (m *GenericMemtable) UpsertWithTTL(key []byte, value []byte, seqId uint64, opType enums.OpType, ttl int64) {
+	expiresAt := time.Now().UnixMilli() + ttl
+	entry := MemtableEntry{
+		Key: key, Value: value,
+		SeqId:     seqId,
+		ExpiresAt: expiresAt,
+		OpType:    opType,
+	}
+	replaced := m.store.Upsert(entry)
+	if !replaced {
+		m.numEntries++
+		m.sizeBytes += uint64(len(key) + len(value) + 8 + 8 + 1)
+	}
+}
+
+// Remove physically deletes a specific entry from the store.
+// Used for batch rollback — does not write a tombstone.
+func (m *GenericMemtable) Remove(key []byte, seqId uint64) {
+	entry := MemtableEntry{Key: key, SeqId: seqId}
+	m.store.Remove(entry)
+	m.numEntries--
+	if m.numEntries < 0 {
+		m.numEntries = 0
+	}
 }
 
 // Get retrieves the value for a given key
@@ -87,15 +128,6 @@ func (m *GenericMemtable) Get(key []byte) (*MemtableEntry, bool) {
 	return entry, true
 }
 
-//// Delete marks a key deleted by inserting a tombstone entry
-//func (m *GenericMemtable) Delete(key []byte, seqId uint64) {
-//	m.Put(key, nil, seqId, true)
-//}
-//
-//func (m *GenericMemtable) DeleteWithTTL(key []byte, seqId uint64, ttl int64) {
-//	m.PutWithTTL(key, nil, seqId, true, ttl)
-//}
-
 // ShouldFlush determines whether the memtable has reached its capacity
 func (m *GenericMemtable) ShouldFlush() bool {
 	return m.numEntries >= m.maxNumEntries
@@ -109,10 +141,11 @@ func (m *GenericMemtable) Reset() {
 }
 
 // Flush returns all entries in sorted order and then resets the memtable.
-func (m *GenericMemtable) Flush() []MemtableEntry {
+func (m *GenericMemtable) Flush() ([]MemtableEntry, []MemtableEntry) {
 	entries := m.store.EntriesInOrder()
+	rangeDelEntries := m.rangeDelStore.EntriesInOrder()
 	m.Reset()
-	return entries
+	return entries, rangeDelEntries
 }
 
 // ReadEntries returns all entries currently stored in the memtable in order.
@@ -174,4 +207,10 @@ func (m *GenericMemtable) isRangeDeleted(validRanges []MemtableEntry, key []byte
 		}
 	}
 	return false
+}
+
+func (m *GenericMemtable) IsCoveredByRangeDel(key []byte, keySeqId uint64) bool {
+	rangeDels := m.gatherAllRangeDeletions(key)
+	validRanges := m.filtrateNewerRanges(rangeDels, keySeqId)
+	return m.isRangeDeleted(validRanges, key)
 }

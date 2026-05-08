@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path"
 	"strings"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/enums"
@@ -12,10 +13,32 @@ import (
 
 func LoadConfig(flags *flags.FLags) error {
 	cfg := NewDefaultConfig()
-	if flags.ConfigPath != nil {
-		err := cfg.loadFromFile(*flags.ConfigPath)
+	debug := flags.Debug != nil && *flags.Debug
+	conFile := path.Join(getDefaultConfigPath(), configFileName)
+
+	if flags.CreateDefaultConfig != nil {
+		data, err := json.MarshalIndent(cfg, "", "	")
 		if err != nil {
 			return err
+		}
+		if err := os.WriteFile(conFile, data, 0644); err != nil {
+			return err
+		}
+		println("Successfully created new default config at: ", conFile)
+	}
+
+	if flags.ConfigPath != nil {
+		err := cfg.loadFromFile(*flags.ConfigPath, debug)
+		if err != nil {
+			return err
+		}
+	} else {
+		_, err := os.Stat(conFile)
+		if err == nil {
+			err := cfg.loadFromFile(conFile, debug)
+			if err != nil {
+				return err
+			}
 		}
 	}
 	err := cfg.applyFlags(flags)
@@ -23,8 +46,8 @@ func LoadConfig(flags *flags.FLags) error {
 		return err
 	}
 
-	err = cfg.validateFields()
-	if err != nil {
+	// validate final config
+	if err := cfg.validateFields(); err != nil {
 		return err
 	}
 	createSettings(cfg)
@@ -77,6 +100,8 @@ func (c *Config) applyFlags(flags *flags.FLags) error {
 			return fmt.Errorf("invalid sstable format: %s", format)
 		}
 	}
+
+	// Block cache
 	if flags.BlockCacheMaxBlocks != nil {
 		c.BlockManager.BlockCacheMaxBlocks = *flags.BlockCacheMaxBlocks
 	}
@@ -106,6 +131,9 @@ func (c *Config) applyFlags(flags *flags.FLags) error {
 	if flags.TokenBucketResetIntervalMs != nil {
 		c.TokenBucket.ResetIntervalMs = *flags.TokenBucketResetIntervalMs
 	}
+	if flags.WalMaxBlocks != nil {
+		c.WAL.MaxBlocks = int(*flags.WalMaxBlocks)
+	}
 	return nil
 }
 
@@ -125,23 +153,38 @@ func (c *Config) validateFields() error {
 		return fmt.Errorf("invalid sstable format")
 	}
 
+	// BlockManager validation
+	if c.BlockManager.BlockSize <= 0 {
+		return fmt.Errorf("blockmanager.block_size must be positive")
+	}
+	// multiple of 4KB
 	if c.BlockManager.BlockSize%(4*1024) != 0 {
 		return fmt.Errorf("invalid block size, must be multiple of 4kb")
 	}
 
 	if c.BlockManager.BlockCacheMaxBlocks < 1 {
-		return fmt.Errorf("invalid block cacheMaxBlocks must be positive")
+		return fmt.Errorf("invalid blockcache_max_blocks must be positive")
 	}
 
 	if !fileExists(c.SavePath) {
 		return fmt.Errorf("save path does not exist")
 	}
 
+	if c.WAL.SaveDirectory == "" {
+		return fmt.Errorf("wal dir is empty")
+	}
+	if c.WAL.BlockSize < 64 {
+		return fmt.Errorf("blockSize is smaller than minimum WAL fragment size")
+	}
+	if c.WAL.MaxBlocks <= 0 {
+		return fmt.Errorf("maxBlocks must be >0")
+	}
+
 	// TODO continue validation
 	return nil
 }
 
-func (c *Config) loadFromFile(path string) error {
+func (c *Config) loadFromFile(path string, isDebug bool) error {
 	file, err := os.Open(path)
 	if err != nil {
 		return fmt.Errorf("cannot open config file: %w", err)
@@ -154,6 +197,11 @@ func (c *Config) loadFromFile(path string) error {
 	if err := decoder.Decode(c); err != nil {
 		return fmt.Errorf("invalid config format: %w", err)
 	}
+
+	if c.Debug || isDebug {
+		fmt.Println("Loaded config file:", path)
+	}
+
 	return nil
 }
 

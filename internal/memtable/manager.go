@@ -1,6 +1,9 @@
 package memtable
 
 import (
+	"bytes"
+	"math"
+	"sort"
 	"sync"
 	"time"
 
@@ -22,15 +25,17 @@ type MemtableManager struct {
 	cond           *sync.Cond            // used to block when to many immutable instances
 	wg             sync.WaitGroup        // wait for flush
 	closing        bool
+	snapshots      map[string]struct{}
 }
 
 // NewMemtableManager initializes a new instance of a manager and starts the flush worker
-func NewMemtableManager(maxTables int, mergeStructure byte, factory func() Memtable, flushHandler func([]MemtableEntry)) *MemtableManager {
+func NewMemtableManager(maxTables int, mergeStructure byte, factory func() Memtable, flushHandler func([]MemtableEntry, []MemtableEntry)) *MemtableManager {
 	mm := &MemtableManager{
 		maxTables:      maxTables,
 		mergeStructure: mergeStructure,
 		factory:        factory,
 		flushChannel:   make(chan Memtable, maxTables),
+		snapshots:      make(map[string]struct{}),
 	}
 	mm.cond = sync.NewCond(&mm.mu)
 	mm.active = mm.factory()
@@ -38,10 +43,27 @@ func NewMemtableManager(maxTables int, mergeStructure byte, factory func() Memta
 	return mm
 }
 
+// Snapshot marks key so that all future writes to it create new versions
+// rather than overwriting the previous one.
+func (mm *MemtableManager) Snapshot(key []byte) {
+	mm.mu.Lock()
+	defer mm.mu.Unlock()
+	mm.snapshots[string(key)] = struct{}{}
+}
+
+func (mm *MemtableManager) isSnapshotted(key []byte) bool {
+	_, ok := mm.snapshots[string(key)]
+	return ok
+}
+
 // Put inserts an entry into active memtable and if the memtable reaches max capacity, triggers rotation
 func (mm *MemtableManager) Put(key []byte, value []byte, seqId uint64, opType enums.OpType) {
 	mm.mu.Lock()
-	mm.active.Put(key, value, seqId, opType)
+	if opType == enums.OpTypeRangeDel || opType == enums.OpTypeMerge || mm.isSnapshotted(key) {
+		mm.active.Put(key, value, seqId, opType)
+	} else {
+		mm.active.Upsert(key, value, seqId, opType)
+	}
 	shouldRotate := mm.active.ShouldFlush()
 	mm.mu.Unlock()
 	if shouldRotate {
@@ -51,12 +73,23 @@ func (mm *MemtableManager) Put(key []byte, value []byte, seqId uint64, opType en
 
 func (mm *MemtableManager) PutWithTTL(key []byte, value []byte, seqId uint64, opType enums.OpType, ttl int64) {
 	mm.mu.Lock()
-	mm.active.PutWithTTL(key, value, seqId, opType, ttl)
+	if mm.isSnapshotted(key) {
+		mm.active.PutWithTTL(key, value, seqId, opType, ttl)
+	} else {
+		mm.active.UpsertWithTTL(key, value, seqId, opType, ttl)
+	}
 	shouldRotate := mm.active.ShouldFlush()
 	mm.mu.Unlock()
 	if shouldRotate {
 		mm.rotate()
 	}
+}
+
+// Remove physically deletes the entry with the given key+seqId from the active memtable.
+func (mm *MemtableManager) Remove(key []byte, seqId uint64) {
+	mm.mu.Lock()
+	defer mm.mu.Unlock()
+	mm.active.Remove(key, seqId)
 }
 
 // rotate moves the active memtable to immutable list and creates a new one
@@ -79,9 +112,8 @@ func (mm *MemtableManager) rotate() {
 }
 
 // flushWorker runs in a separate goroutine, and it takes immutable memtables and flushes them to disk
-func (mm *MemtableManager) flushWorker(flushHandler func([]MemtableEntry)) {
+func (mm *MemtableManager) flushWorker(flushHandler func([]MemtableEntry, []MemtableEntry)) {
 	for mem := range mm.flushChannel {
-
 		mm.mu.Lock()
 		shouldFlush := mm.containsImmutable(mem)
 		mm.removeImmutable(mem)
@@ -89,9 +121,9 @@ func (mm *MemtableManager) flushWorker(flushHandler func([]MemtableEntry)) {
 		mm.mu.Unlock()
 
 		if shouldFlush {
-			entries := mem.Flush()
+			entries, rangeDelEntries := mem.Flush()
 			if flushHandler != nil {
-				flushHandler(entries)
+				flushHandler(entries, rangeDelEntries)
 			}
 		}
 
@@ -173,7 +205,18 @@ func (mm *MemtableManager) Iterator() iterator.Iterator[MemtableEntry] {
 	}
 
 	rawMerge := NewRawIterator(rawIters, mm.mergeStructure)
-	return NewMergedMemtableIterator(rawMerge)
+	checker := func(key []byte, seqId uint64) bool {
+		if mm.active.IsCoveredByRangeDel(key, seqId) {
+			return true
+		}
+		for i := len(mm.immutable) - 1; i >= 0; i-- {
+			if mm.immutable[i].IsCoveredByRangeDel(key, seqId) {
+				return true
+			}
+		}
+		return false
+	}
+	return NewMergedMemtableIterator(rawMerge, checker)
 }
 
 func (mm *MemtableManager) ResetAll() {
@@ -186,18 +229,16 @@ func (mm *MemtableManager) ResetAll() {
 
 func (mm *MemtableManager) Close() {
 	mm.mu.Lock()
-
 	if mm.active != nil && mm.active.ShouldFlush() {
 		immutable := mm.active
 		mm.immutable = append(mm.immutable, immutable)
 		mm.active = mm.factory()
-
 		mm.wg.Add(1)
+		mm.mu.Unlock()
 		mm.flushChannel <- immutable
+	} else {
+		mm.mu.Unlock()
 	}
-
-	mm.closing = true
-	mm.mu.Unlock()
 
 	close(mm.flushChannel)
 	mm.wg.Wait()
@@ -221,4 +262,74 @@ func (mm *MemtableManager) EntryIterator() iterator.Iterator[iterator.Entry] {
 			return MemtableEntry{Key: key}
 		},
 	)
+}
+
+// memtableIteratorSeekWrapper wraps Iterator[MemtableEntry] to add TypedSeekIterator interface
+type memtableIteratorSeekWrapper struct {
+	inner iterator.Iterator[MemtableEntry]
+}
+
+func (w *memtableIteratorSeekWrapper) Valid() bool          { return w.inner.Valid() }
+func (w *memtableIteratorSeekWrapper) SeekToFirst()         { w.inner.SeekToFirst() }
+func (w *memtableIteratorSeekWrapper) SeekToLast()          { w.inner.SeekToLast() }
+func (w *memtableIteratorSeekWrapper) Next()                { w.inner.Next() }
+func (w *memtableIteratorSeekWrapper) Key() MemtableEntry   { return w.inner.Key() }
+func (w *memtableIteratorSeekWrapper) Seek(e MemtableEntry) { w.inner.Seek(e) }
+
+func (mm *MemtableManager) IsCoveredByRangeDel(key []byte, keySeqId uint64) bool {
+	mm.mu.Lock()
+	defer mm.mu.Unlock()
+	if mm.active.IsCoveredByRangeDel(key, keySeqId) {
+		return true
+	}
+	for i := len(mm.immutable) - 1; i >= 0; i-- {
+		if mm.immutable[i].IsCoveredByRangeDel(key, keySeqId) {
+			return true
+		}
+	}
+	return false
+}
+
+// GetVersions returns all stored versions of key from all memtable instances, newest first.
+func (mm *MemtableManager) GetVersions(key []byte, maxVersions int) []MemtableEntry {
+	mm.mu.Lock()
+	defer mm.mu.Unlock()
+
+	seen := make(map[uint64]struct{})
+	var versions []MemtableEntry
+
+	collect := func(mem Memtable) {
+		it := mem.RawIterator()
+		target := MemtableEntry{Key: key, SeqId: math.MaxUint64}
+		it.Seek(target)
+		for it.Valid() {
+			entry := it.Key()
+			if !bytes.Equal(entry.Key, key) {
+				break
+			}
+			if entry.OpType != enums.OpTypeDel {
+				if _, dup := seen[entry.SeqId]; !dup {
+					seen[entry.SeqId] = struct{}{}
+					versions = append(versions, entry)
+				}
+			}
+			it.Next()
+			if maxVersions > 0 && len(versions) >= maxVersions {
+				return
+			}
+		}
+	}
+
+	collect(mm.active)
+	for i := len(mm.immutable) - 1; i >= 0; i-- {
+		collect(mm.immutable[i])
+		if maxVersions > 0 && len(versions) >= maxVersions {
+			break
+		}
+	}
+
+	sort.Slice(versions, func(i, j int) bool {
+		return versions[i].SeqId > versions[j].SeqId
+	})
+	return versions
 }

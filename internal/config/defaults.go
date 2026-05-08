@@ -10,9 +10,10 @@ import (
 
 // Engine defaults
 const (
-	defaultDebug = false
+	configFileName = "config.json"
+	defaultDebug   = false
 	//WAL
-	defaultWalSegmentSize = 1 * 1024 * 1024
+	defaultWalSaveDirectory = "wal"
 
 	//memtable
 	memtableType                = enums.HashMapMemTable
@@ -58,7 +59,11 @@ func NewDefaultConfig() *Config {
 		SavePath: getDefaultSavePath(),
 		Debug:    defaultDebug,
 		WAL: WALConfig{
-			WALSegmentSize: defaultWalSegmentSize,
+			BlockSize:     defaultBlockSize, // MUST match BlockManager.BlockSize
+			SyncInterval:  0,                // ms; 0 => only on Flush/Commit
+			MaxSegments:   0,                // 0 => unlimited
+			MaxBlocks:     16,
+			SaveDirectory: defaultWalSaveDirectory,
 		},
 		Memtable: MemtableConfig{
 			MemtableType:         memtableType,
@@ -115,6 +120,10 @@ func NewDefaultConfig() *Config {
 			MaxTokens:       defaultTokenBucketMaxTokens,
 			ResetIntervalMs: defaultTokenBucketResetIntervalMs,
 		},
+		Backup: BackupConfig{
+			Type:          enums.FullBackup,
+			SaveDirectory: "backups",
+		},
 	}
 }
 
@@ -139,6 +148,35 @@ func getDefaultSavePath() string {
 		}
 		home, _ := os.UserHomeDir()
 		path = filepath.Join(home, ".local", "share", "lsm-kv-engine")
+	}
+	err := os.MkdirAll(path, 0755)
+	if err != nil {
+		panic(err)
+	}
+	return path
+}
+
+func getDefaultConfigPath() string {
+	var path string
+	switch runtime.GOOS {
+	case "windows":
+		// C:\AppData\Roaming\lsm-kv-engine
+		base := os.Getenv("APPDATA")
+		if base == "" {
+			base = `C:\AppData\Roaming`
+		}
+		path = filepath.Join(base, "lsm-kv-engine")
+	case "darwin":
+		// ~/Library/Preferences/lsm-kv-engine
+		home, _ := os.UserHomeDir()
+		path = filepath.Join(home, "Library", "Preferences", "lsm-kv-engine")
+	default:
+		// ~/.config/lsm-kv-engine
+		if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
+			return filepath.Join(xdg, "lsm-kv-engine")
+		}
+		home, _ := os.UserHomeDir()
+		path = filepath.Join(home, ".config", "lsm-kv-engine")
 	}
 	err := os.MkdirAll(path, 0755)
 	if err != nil {

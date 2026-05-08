@@ -28,20 +28,35 @@ func (c *CountMinSketch) calculateK() {
 }
 
 func NewCountMinSketch(config config.CountMinSketchConfig) *CountMinSketch {
-	cms := &CountMinSketch{
-		accuracy:   config.Accuracy,
-		confidence: config.Confidence,
+	accuracy := config.Accuracy
+	if accuracy <= 0 || accuracy >= 1 {
+		accuracy = 0.01
 	}
+
+	confidence := config.Confidence
+	if confidence <= 0 || confidence >= 1 {
+		confidence = 0.99
+	}
+
+	cms := &CountMinSketch{
+		accuracy:   accuracy,
+		confidence: confidence,
+	}
+
 	cms.calculateM()
 	cms.calculateK()
-	matrix := make([][]uint, cms.k)
 
+	matrix := make([][]uint, cms.k)
 	for i := uint(0); i < cms.k; i++ {
 		matrix[i] = make([]uint, cms.m)
 	}
-
 	cms.table = matrix
-	cms.hashFunctions = CreateHashFunctions(config.Seeds)
+
+	seeds := config.Seeds
+	if len(seeds) != int(cms.k) {
+		seeds = generateSeeds(int(cms.k), 32)
+	}
+	cms.hashFunctions = CreateHashFunctions(seeds)
 
 	return cms
 }

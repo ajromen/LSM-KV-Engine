@@ -2,7 +2,7 @@ package sstable
 
 import (
 	"bytes"
-	"errors"
+	"fmt"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/block"
 	"github.com/ajromen/LSM-KV-Engine/internal/config"
@@ -16,29 +16,30 @@ const SSTableFileExtension = ".sst"
 
 // SSTableWriter allows writing records into sstable
 type SSTableWriter struct {
-	storage           SegmentStorage      // low-level writing of segments
-	blockManager      *block.BlockManager // writing and encoding data blocks
-	filePath          string              // file path where sstable is written (base path if multi file format)
-	dataBlockBuilder  *DataBlockBuilder   // data block builder for building data block from records being written into sstable
-	indexSegment      *IndexSegment       // index segment of sstable : references data blocks
-	ttlIndexSegment   *TTLIndexSegment    // ttl index segment of sstable : contains keys and their ttl
-	currentIndexBlock *IndexBlock
-	valueEncoder      *encoders.AdaptiveEncoder
-	summarySegment    *SummarySegment // summary segment of sstable : references index blocks
-	filterSegment     *FilterSegment  // filter segment of sstable
-	merkleTree        *MerkleTree     // merkle tree of sstable
-	metadataSegment   *Metadata       // meta data of sstable
-	footer            *Footer         // footer of sstable
-	currentBlockIndex uint32          // tracks current data block index
-	recordCount       uint64          // tracks number of records
-	minSeqId          uint64          // min seqId (newest record)
-	maxSeqId          uint64          // max seqId (newest record)
-	minKeyLength      uint32          // smallest key by length
-	maxKeyLength      uint32          // largest key by length
-	minKey            []byte          // smallest key in sorting order
-	maxKey            []byte          // largest ket in sorting order
-	firstRecord       bool            // whether it is first record
-	Layer             int             // number of the lsm layer
+	storage              SegmentStorage      // low-level writing of segments
+	blockManager         *block.BlockManager // writing and encoding data blocks
+	filePath             string              // file path where sstable is written (base path if multi file format)
+	dataBlockBuilder     *DataBlockBuilder   // data block builder for building data block from records being written into sstable
+	indexSegment         *IndexSegment       // index segment of sstable : references data blocks
+	ttlIndexSegment      *TTLIndexSegment    // ttl index segment of sstable : contains keys and their ttl
+	rangeDelIndexSegment *RangeDelIndexSegment
+	currentIndexBlock    *IndexBlock
+	valueEncoder         *encoders.AdaptiveEncoder
+	summarySegment       *SummarySegment // summary segment of sstable : references index blocks
+	filterSegment        *FilterSegment  // filter segment of sstable
+	merkleTree           *MerkleTree     // merkle tree of sstable
+	metadataSegment      *Metadata       // meta data of sstable
+	footer               *Footer         // footer of sstable
+	currentBlockIndex    uint32          // tracks current data block index
+	recordCount          uint64          // tracks number of records
+	minSeqId             uint64          // min seqId (newest record)
+	maxSeqId             uint64          // max seqId (newest record)
+	minKeyLength         uint32          // smallest key by length
+	maxKeyLength         uint32          // largest key by length
+	minKey               []byte          // smallest key in sorting order
+	maxKey               []byte          // largest ket in sorting order
+	firstRecord          bool            // whether it is first record
+	Layer                int             // number of the lsm layer
 }
 
 func NewSSTableWriter(filePath string, blockManager *block.BlockManager, expectedElements uint64, layer int) (*SSTableWriter, error) {
@@ -57,24 +58,25 @@ func NewSSTableWriter(filePath string, blockManager *block.BlockManager, expecte
 	}
 	valueEncoder := encoders.NewAdaptiveDictEncoderFrequency(2, 5)
 	return &SSTableWriter{
-		storage:           storage,
-		blockManager:      blockManager,
-		filePath:          filePath,
-		valueEncoder:      valueEncoder,
-		dataBlockBuilder:  NewDataBlockBuilder(1, cfg.SSTable.DataSegment.RestartInterval, blockManager.BlockSize(), valueEncoder),
-		indexSegment:      NewIndexSegment(uint64(blockManager.BlockSize())),
-		ttlIndexSegment:   NewTTLIndexSegment(uint64(blockManager.BlockSize())),
-		currentIndexBlock: NewIndexBlock(),
-		summarySegment:    NewSummarySegment(1),
-		filterSegment:     filterSegment,
-		merkleTree:        NewMerkleTree(),
-		footer:            NewFooter(),
-		currentBlockIndex: 0,
-		recordCount:       0,
-		minKeyLength:      ^uint32(0),
-		maxKeyLength:      0,
-		firstRecord:       true,
-		Layer:             layer,
+		storage:              storage,
+		blockManager:         blockManager,
+		filePath:             filePath,
+		valueEncoder:         valueEncoder,
+		dataBlockBuilder:     NewDataBlockBuilder(1, cfg.SSTable.DataSegment.RestartInterval, blockManager.BlockSize(), valueEncoder),
+		indexSegment:         NewIndexSegment(uint64(blockManager.BlockSize())),
+		ttlIndexSegment:      NewTTLIndexSegment(uint64(blockManager.BlockSize())),
+		rangeDelIndexSegment: NewRangeDelIndexSegment(uint64(blockManager.BlockSize())),
+		currentIndexBlock:    NewIndexBlock(),
+		summarySegment:       NewSummarySegment(1),
+		filterSegment:        filterSegment,
+		merkleTree:           NewMerkleTree(),
+		footer:               NewFooter(),
+		currentBlockIndex:    0,
+		recordCount:          0,
+		minKeyLength:         ^uint32(0),
+		maxKeyLength:         0,
+		firstRecord:          true,
+		Layer:                layer,
 	}, nil
 }
 
@@ -137,8 +139,82 @@ func (sw *SSTableWriter) AddRecord(record Record) error {
 			return err
 		}
 		if !sw.dataBlockBuilder.AddRecord(record) {
-			return errors.New("record too large for block")
+			sw.recordCount--
+			return sw.addRecordChunked(record)
 		}
+	}
+	return nil
+}
+
+// addRecordChunked splits a record whose value does not fit in a single block.
+// It writes a FIRST chunk, zero or more MIDDLE chunks, and a LAST chunk.
+func (sw *SSTableWriter) addRecordChunked(record Record) error {
+	blockSize := sw.blockManager.BlockSize()
+	headerOverhead := 1 + 10 + 8 + 1 + len(record.Key)*2 + 10 + 60
+	if len(sw.dataBlockBuilder.data)+headerOverhead >= blockSize {
+		if err := sw.flushDataBlock(); err != nil {
+			return err
+		}
+	}
+	available := blockSize - len(sw.dataBlockBuilder.data) - headerOverhead
+	if available <= 0 {
+		return fmt.Errorf("key too large for data block (key size: %d)", len(record.Key))
+	}
+	remaining := record.Value
+	var firstChunk []byte
+	if available >= len(remaining) {
+		if !sw.dataBlockBuilder.AddRecord(record) {
+			return fmt.Errorf("unexpected: record still doesn't fit")
+		}
+		return nil
+	}
+	firstChunk = remaining[:available]
+	remaining = remaining[available:]
+	if !sw.dataBlockBuilder.AddFirstChunk(record, firstChunk) {
+		return fmt.Errorf("cannot write first chunk")
+	}
+	for len(remaining) > 0 {
+		contOverhead := 1 + 10 + 60
+		available = blockSize - len(sw.dataBlockBuilder.data) - contOverhead
+		if available <= 0 {
+			if err := sw.flushDataBlock(); err != nil {
+				return err
+			}
+			available = blockSize - contOverhead
+		}
+		isLast := len(remaining) <= available
+		var chunkData []byte
+		if isLast {
+			chunkData = remaining
+			remaining = nil
+		} else {
+			chunkData = remaining[:available]
+			remaining = remaining[available:]
+		}
+		chunkType := ChunkTypeMiddle
+		if isLast {
+			chunkType = ChunkTypeLast
+		}
+		if !sw.dataBlockBuilder.AddContinuationChunk(chunkType, chunkData) {
+			if err := sw.flushDataBlock(); err != nil {
+				return err
+			}
+			if !sw.dataBlockBuilder.AddContinuationChunk(chunkType, chunkData) {
+				return fmt.Errorf("cannot write continuation chunk after flush")
+			}
+		}
+	}
+	return nil
+}
+
+func (sw *SSTableWriter) AddToRangeDel(record Record) error {
+	if true {
+		rangeDelEntry := shared.RangeDelEntry{
+			StartKey: record.Key,
+			EndKey:   record.Value,
+			SeqId:    record.SeqId,
+		}
+		sw.rangeDelIndexSegment.AddEntryToBlock(rangeDelEntry, config.GetSettings().SSTable.DataSegment.BlockSize)
 	}
 	return nil
 }
@@ -192,8 +268,9 @@ func (sw *SSTableWriter) flushDataBlock() error {
 // 5. Write index blocks on disk
 // 6. Write summary segment on disk
 // 7. Write TTL index on disk
-// 8. Write metadata (merkle tree) segment on disk
-// 9. Write footer and sync storage
+// 8. Write RangeDel index on disk
+// 9. Write metadata (merkle tree) segment on disk
+// 10. Write footer and sync storage
 func (sw *SSTableWriter) Finalize() error {
 	// add remaining unfinished index block
 	// step 1
@@ -326,6 +403,32 @@ func (sw *SSTableWriter) Finalize() error {
 	}
 
 	// step 8
+	var rangeDelOffsets []uint64
+	if len(sw.rangeDelIndexSegment.Blocks) > 0 {
+		rangeDelOffsets = make([]uint64, len(sw.rangeDelIndexSegment.Blocks))
+		var firstOffset uint64
+		var lastOffsetPlusSize uint64
+		for i, rangeDelBlock := range sw.rangeDelIndexSegment.Blocks {
+			blockData := rangeDelBlock.Encode(uint64(config.GetSettings().SSTable.DataSegment.BlockSize))
+			offset, size, err := sw.storage.WriteSegment(enums.SegmentRangeDelIndex, blockData)
+			if err != nil {
+				return err
+			}
+			rangeDelOffsets[i] = offset
+			if i == 0 {
+				firstOffset = offset
+			}
+			lastOffsetPlusSize = offset + uint64(size)
+		}
+		sw.footer.RangeDelIndexHandler.Offset = firstOffset
+		sw.footer.RangeDelIndexHandler.Size = uint32(lastOffsetPlusSize - firstOffset)
+	} else {
+		sw.footer.RangeDelIndexHandler.Offset = 0
+		sw.footer.RangeDelIndexHandler.Size = 0
+		rangeDelOffsets = []uint64{}
+	}
+
+	// step 9
 	merkleTreeData := sw.merkleTree.Encode()
 	merkleTreeOffset, merkleTreeSize, err := sw.storage.WriteSegment(enums.SegmentMerkleTree, merkleTreeData)
 	if err != nil {
@@ -345,7 +448,7 @@ func (sw *SSTableWriter) Finalize() error {
 		Size:   metaDataSize,
 	}
 
-	// step 9
+	// step 10
 	dictData := sw.valueEncoder.SaveDict()
 	dictOffset, dictSize, err := sw.storage.WriteSegment(enums.SegmentDictionary, dictData)
 	if err != nil {

@@ -17,23 +17,26 @@ import (
 	"github.com/ajromen/LSM-KV-Engine/internal/encoders"
 	"github.com/ajromen/LSM-KV-Engine/internal/enums"
 	"github.com/ajromen/LSM-KV-Engine/internal/shared"
+	"github.com/ajromen/LSM-KV-Engine/internal/utils"
 )
 
 // SSTableReader allows reading an SSTable file, accesing singular records and validating data integrity
 type SSTableReader struct {
-	filePath        string              // file path of given sstable file (base path if multi file format)
-	Id              int                 // SSTable segment id
-	Layer           int                 // number of the lsm layer
-	SizeBytes       int64               //file size in bytes
-	storage         SegmentStorage      // low-level reading of segments
-	blockManager    *block.BlockManager // reading and decoding data blocks
-	footer          *Footer             // footer of given sstable
-	Metadata        *Metadata
-	SummarySegment  *SummarySegment  // summary segment (read into RAM)
-	filterSegment   *FilterSegment   // filter segment (read into RAM)
-	merkleTree      *MerkleTree      // merkle tree - metadata segment (read into RAM)
-	TTLIndexSegment *TTLIndexSegment // read once
-	valueDecoder    *encoders.AdaptiveEncoder
+	filePath            string              // file path of given sstable file (base path if multi file format)
+	Id                  int                 // SSTable segment id
+	Layer               int                 // number of the lsm layer
+	SizeBytes           int64               //file size in bytes
+	storage             SegmentStorage      // low-level reading of segments
+	blockManager        *block.BlockManager // reading and decoding data blocks
+	footer              *Footer             // footer of given sstable
+	Metadata            *Metadata
+	SummarySegment      *SummarySegment  // summary segment (read into RAM)
+	filterSegment       *FilterSegment   // filter segment (read into RAM)
+	merkleTree          *MerkleTree      // merkle tree - metadata segment (read into RAM)
+	TTLIndexSegment     *TTLIndexSegment // read once
+	valueDecoder        *encoders.AdaptiveEncoder
+	fragmentedRangeDels []shared.RangeDelEntry
+	rangeDelLoaded      bool
 }
 
 type ReaderOptions struct {
@@ -146,17 +149,18 @@ func NewSSTableReaderFromWriter(w *SSTableWriter, id int) (*SSTableReader, error
 	newStorage.SetBlockManager(w.blockManager)
 
 	r := &SSTableReader{
-		storage:        newStorage,
-		Layer:          w.Layer,
-		filePath:       w.filePath,
-		blockManager:   w.blockManager,
-		merkleTree:     w.merkleTree,
-		filterSegment:  w.filterSegment,
-		footer:         w.footer,
-		SummarySegment: w.summarySegment,
-		valueDecoder:   w.valueEncoder,
-		Metadata:       w.metadataSegment,
-		Id:             id,
+		storage:         newStorage,
+		Layer:           w.Layer,
+		filePath:        w.filePath,
+		blockManager:    w.blockManager,
+		merkleTree:      w.merkleTree,
+		filterSegment:   w.filterSegment,
+		footer:          w.footer,
+		SummarySegment:  w.summarySegment,
+		valueDecoder:    w.valueEncoder,
+		Metadata:        w.metadataSegment,
+		Id:              id,
+		TTLIndexSegment: w.ttlIndexSegment,
 	}
 	switch s := r.storage.(type) {
 	case *SingleFileStorage:
@@ -191,11 +195,15 @@ func (r *SSTableReader) loadSummary() error {
 
 func (r *SSTableReader) GetTTLEntries() ([]shared.TTLEntry, error) {
 	entries := make([]shared.TTLEntry, 0)
-
+	if r.footer.TTLIndexHandler.Size == 0 {
+		return entries, nil
+	}
 	blockSize := uint64(r.blockManager.BlockSize())
+	baseOffset := r.footer.TTLIndexHandler.Offset
+	totalSize := uint64(r.footer.TTLIndexHandler.Size)
 
-	for off := uint64(0); uint32(off) < r.footer.TTLIndexHandler.Size; off += blockSize { // ovo je pakao sta je ovo sto se ni jedan int ne poklapa
-		buf, err := r.storage.ReadSegment(enums.SegmentTTLIndex, 0, uint32(blockSize))
+	for off := uint64(0); off < totalSize; off += blockSize {
+		buf, err := r.storage.ReadSegment(enums.SegmentTTLIndex, baseOffset+off, uint32(blockSize))
 		if err != nil {
 			return nil, err
 		}
@@ -203,9 +211,30 @@ func (r *SSTableReader) GetTTLEntries() ([]shared.TTLEntry, error) {
 		if err != nil {
 			return nil, err
 		}
-		entries = append(b.Entries)
+		entries = append(entries, b.Entries...)
 	}
+	return entries, nil
+}
 
+func (r *SSTableReader) GetRangeDelEntries() ([]shared.RangeDelEntry, error) {
+	entries := make([]shared.RangeDelEntry, 0)
+	if r.footer.RangeDelIndexHandler.Size == 0 {
+		return entries, nil
+	}
+	blockSize := uint64(r.blockManager.BlockSize())
+	baseOffset := r.footer.RangeDelIndexHandler.Offset
+	totalSize := uint64(r.footer.RangeDelIndexHandler.Size)
+	for off := uint64(0); off < totalSize; off += blockSize {
+		buf, err := r.storage.ReadSegment(enums.SegmentRangeDelIndex, baseOffset+off, uint32(blockSize))
+		if err != nil {
+			return nil, err
+		}
+		b, err := DecodeRangeDelIndexBlock(buf)
+		if err != nil {
+			return nil, err
+		}
+		entries = append(entries, b.Entries...)
+	}
 	return entries, nil
 }
 
@@ -286,6 +315,37 @@ func (r *SSTableReader) loadDictionary() error {
 	return nil
 }
 
+func (r *SSTableReader) LoadRangeDels() error {
+	if r.rangeDelLoaded {
+		return nil
+	}
+	r.rangeDelLoaded = true
+	if r.footer.RangeDelIndexHandler.Size == 0 {
+		return nil
+	}
+	blockSize := uint64(r.blockManager.BlockSize())
+	totalSize := uint64(r.footer.RangeDelIndexHandler.Size)
+	baseOffset := r.footer.RangeDelIndexHandler.Offset
+	var all []shared.RangeDelEntry
+	for off := uint64(0); off < totalSize; off += blockSize {
+		buf, err := r.storage.ReadSegment(enums.SegmentRangeDelIndex, baseOffset+off, uint32(blockSize))
+		if err != nil {
+			return err
+		}
+		blk, err := DecodeRangeDelIndexBlock(buf)
+		if err != nil {
+			return err
+		}
+		all = append(all, blk.Entries...)
+	}
+	r.fragmentedRangeDels = utils.FragmentRangeTombstones(all)
+	return nil
+}
+
+func (r *SSTableReader) IsCoveredByRangeDel(key []byte, keySeqId uint64) bool {
+	return utils.IsCoveredByRangeTombstone(r.fragmentedRangeDels, key, keySeqId)
+}
+
 // Get looks up a record by key in the SSTable in given order:
 // 1. Use filter segment to check if key might exist
 // 2. Use summary segment to find the correct index block that should contain key
@@ -296,6 +356,9 @@ func (r *SSTableReader) Get(key []byte) (*Record, error) {
 	// step 1
 	if r.filterSegment != nil && r.filterSegment.Filter() != nil {
 		if !r.filterSegment.Filter().MightContain(key) {
+			if config.GetSettings().Debug {
+				fmt.Printf("Filter of sstable informs that no key is present in that sstable.\n")
+			}
 			return nil, nil
 		}
 	}
@@ -304,6 +367,9 @@ func (r *SSTableReader) Get(key []byte) (*Record, error) {
 	minKey := r.Metadata.GetBytes(FieldMinKey)
 	maxKey := r.Metadata.GetBytes(FieldMaxKey)
 	if bytes.Compare(minKey, key) > 0 || bytes.Compare(maxKey, key) < 0 {
+		if config.GetSettings().Debug {
+			fmt.Printf("Skipping sstable cause it doesn't contain keys in given range\n")
+		}
 		return nil, nil
 	}
 
@@ -319,59 +385,32 @@ func (r *SSTableReader) Get(key []byte) (*Record, error) {
 	}
 
 	// step 2
-	indexBlockNum := r.SummarySegment.FindIndexBlockNumber(key)
-	if indexBlockNum < 0 {
-		return nil, nil
-	}
-
-	// step 3.1
-	indexBlock, err := r.loadIndexBlock(indexBlockNum)
+	iter, err := NewSSTableIteratorRaw(r)
 	if err != nil {
 		return nil, err
 	}
-
-	// step 3.2
-	entryIdx := indexBlock.FindBlock(key)
-	if entryIdx < 0 {
+	iter.Seek(Record{Key: key})
+	if !iter.Valid() {
 		return nil, nil
 	}
-
-	// step 4
-	dataBlockIdx := indexBlock.Entries[entryIdx].BlockIndex
-	dataFilePath := r.filePath
-	if _, err := os.Stat(r.filePath + string(DataSegmentExtension)); err == nil {
-		dataFilePath = r.filePath + string(DataSegmentExtension)
-	}
-	blockKey := block.BlockKey{
-		FilePath: dataFilePath,
-		Offset:   dataBlockIdx,
-	}
-	blockData, err := r.blockManager.Read(blockKey)
-	if err != nil {
-		return nil, err
-	}
-	if validated := r.merkleTree.ValidateBlock(dataBlockIdx, blockData); !validated {
-		return nil, errors.New("sstable data corruption detected (merkle root mismatch)")
-	}
-
-	// step 5
-	restartInterval, _ := r.Metadata.GetUint64(FieldRestartInterval)
-
-	iterator, err := NewDataBlockIteratorRaw(blockData, int(restartInterval), encoders.PrefixCompression, r.valueDecoder)
-	if err != nil {
-		return nil, err
-	}
-	iterator.Seek(Record{Key: key})
-	if !iterator.Valid() {
-		return nil, nil
-	}
-	rec := iterator.Key()
+	rec := iter.Key()
 	if !bytes.Equal(rec.Key, key) {
 		return nil, nil
 	}
+
+	// check whether it is deleted by range delete
+	rangeEntries, err := r.GetRangeDelEntries()
+	if err != nil {
+		return nil, err
+	}
+	r.fragmentedRangeDels = utils.FragmentRangeTombstones(rangeEntries)
+	if r.IsCoveredByRangeDel(key, rec.SeqId) {
+		return nil, nil
+	}
+
 	return &Record{
 		SeqId:     rec.SeqId,
-		Tombstone: rec.Tombstone,
+		OpType:    rec.OpType,
 		Key:       rec.Key,
 		Value:     rec.Value,
 		ExpiresAt: rec.ExpiresAt,
@@ -398,4 +437,30 @@ func (reader *SSTableReader) OverlapsRange(start, end []byte) bool {
 	}
 
 	return true
+}
+
+// Validate reads every data block, hashes it, and checks the result against
+// the stored Merkle tree. Returns the ValidationResult or an error.
+func (r *SSTableReader) Validate() (*ValidationResult, error) {
+	if err := r.loadMerkleTree(); err != nil {
+		return nil, fmt.Errorf("load merkle tree: %w", err)
+	}
+	if r.merkleTree == nil {
+		return nil, errors.New("no merkle tree in this SSTable")
+	}
+
+	numBlocks := int(r.merkleTree.NumDataBlocks)
+	blockSize := uint64(r.blockManager.BlockSize())
+	blockHashes := make([][32]byte, numBlocks)
+
+	for i := 0; i < numBlocks; i++ {
+		offset := uint64(i) * blockSize
+		data, err := r.storage.ReadSegment(enums.SegmentData, offset, uint32(blockSize))
+		if err != nil {
+			return nil, fmt.Errorf("read data block %d: %w", i, err)
+		}
+		blockHashes[i] = HashDataBlock(data)
+	}
+
+	return r.merkleTree.Verify(blockHashes)
 }

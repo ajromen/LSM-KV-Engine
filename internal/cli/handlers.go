@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/core"
@@ -84,9 +85,48 @@ func handleClear(engine *core.Engine, parts []string) {
 		PrintError(fmt.Sprint("Aborted."))
 		return
 	}
-	if err := engine.ClearAll(); err != nil {
+	if err := engine.ClearAll(false); err != nil {
 		PrintError(fmt.Sprint("ClearAll:", err))
 		return
 	}
 	PrintSuccess(fmt.Sprint("ClearAll: OK"))
+}
+
+func handleListSSTables(e *core.Engine, p []string) {
+	tables := e.ListSSTables()
+	if len(tables) == 0 {
+		PrintSuccess("No SSTables loaded.")
+		return
+	}
+	for _, t := range tables {
+		PrintSuccess(fmt.Sprintf("  id=%-4d  layer=%d  %s", t.Id, t.Layer, filepath.Base(t.Path)))
+	}
+}
+
+func handleValidateSSTable(e *core.Engine, p []string) {
+	if len(p) != 2 {
+		PrintError("Usage: validate-sstable <id>")
+		return
+	}
+	var id int
+	if _, err := fmt.Sscan(p[1], &id); err != nil {
+		PrintError("Invalid id")
+		return
+	}
+	path, result, err := e.ValidateSSTable(id)
+	if err != nil {
+		PrintError(fmt.Sprintf("validate-sstable: %v", err))
+		return
+	}
+	fmt.Printf("SSTable: %s\n", filepath.Base(path))
+	if result.Valid {
+		PrintSuccess("✓ Merkle tree valid — all blocks intact")
+	} else {
+		PrintError(fmt.Sprintf("✗ Merkle tree INVALID — %d corrupted block(s)", len(result.CorruptedBlocks)))
+		PrintError(fmt.Sprintf("  Expected root: %x", result.ExpectedRootHash))
+		PrintError(fmt.Sprintf("  Actual root:   %x", result.ActualRootHash))
+		for _, b := range result.CorruptedBlocks {
+			PrintError(fmt.Sprintf("  Corrupted block index: %d", b))
+		}
+	}
 }

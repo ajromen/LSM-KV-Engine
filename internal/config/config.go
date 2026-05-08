@@ -22,7 +22,17 @@ type Config struct {
 }
 
 type WALConfig struct {
-	WALSegmentSize int `json:"segment_size"`
+	SegmentSize       int    `json:"segment_size"`
+	BlockSize         int    `json:"block_size"`
+	MaxBlocks         int    `json:"max_blocks"`
+	SyncInterval      int    `json:"sync_interval"`
+	MaxSegments       int    `json:"max_segments"`
+	BufferPoolEnabled bool   `json:"buffer_pool"`
+	BufferPoolSize    int    `json:"buffer_pool_size"`
+	SaveDirectory     string `json:"save_directory"`
+	//SyncMode          string `json:"sync_mode"`
+	//LowWaterMarkAutomatic bool   `json:"low_water_mark_automatic"`
+	//MMapEnabled           bool `json:"mmap_enabled"`
 }
 
 type MemtableConfig struct {
@@ -73,8 +83,8 @@ type CheckpointConfig struct {
 }
 
 type BackupConfig struct {
-	BackupEnabled     bool `json:"backup_enabled"`
-	BackupIncremental bool `json:"backup_incremental"`
+	Type          enums.BackupType `json:"backup_type"`
+	SaveDirectory string           `json:"save_directory"`
 }
 
 type TokenBucketConfig struct {

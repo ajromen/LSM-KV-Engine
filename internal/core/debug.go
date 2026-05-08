@@ -11,7 +11,7 @@ import (
 )
 
 func (engine *Engine) DataRaw(index int) {
-	basePath := path.Join(config.GetSettings().SavePath, fmt.Sprintf("%06d.sst", index))
+	basePath := path.Join(config.GetSettings().SavePath, fmt.Sprintf("L0_%06d.sst", index))
 	dataPath := basePath + ".data"
 	var filePath string
 	var readSize int64
@@ -65,4 +65,8 @@ func (engine *Engine) DataRaw(index int) {
 	fmt.Println("File:", filePath)
 	fmt.Println("Data bytes:", buf)
 	fmt.Println("-----")
+}
+
+func (engine *Engine) WalPrintAll() error {
+	return engine.wal.PrintAll()
 }

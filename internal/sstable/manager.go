@@ -14,7 +14,10 @@ import (
 	"github.com/ajromen/LSM-KV-Engine/internal/enums"
 	"github.com/ajromen/LSM-KV-Engine/internal/iterator"
 	"github.com/ajromen/LSM-KV-Engine/internal/memtable"
+	mergeop "github.com/ajromen/LSM-KV-Engine/internal/merge"
+	"github.com/ajromen/LSM-KV-Engine/internal/shared"
 	"github.com/ajromen/LSM-KV-Engine/internal/ttl"
+	"github.com/ajromen/LSM-KV-Engine/internal/utils"
 )
 
 type Layer struct {
@@ -58,11 +61,14 @@ func newLayer() *Layer {
 }
 
 type SSTableManager struct {
-	Layers       []*Layer
-	blockManager *block.BlockManager
-	Manifest     *Manifest
-	dataDir      string
-	mu           sync.Mutex
+	Layers          []*Layer
+	blockManager    *block.BlockManager
+	Manifest        *Manifest
+	dataDir         string
+	cachedFragments []shared.RangeDelEntry
+	fragmentsDirty  bool
+	mu              sync.Mutex
+	snapshotKeys    map[string]struct{}
 }
 
 func NewSSTableManager(dataDir string) *SSTableManager {
@@ -78,6 +84,7 @@ func NewSSTableManager(dataDir string) *SSTableManager {
 	}
 	manager.Manifest = manifest
 	manager.blockManager = block.NewBlockManager(blockSize)
+	manager.snapshotKeys = make(map[string]struct{})
 	num, err := manager.LoadExistingSSTables()
 	if err != nil {
 		panic(fmt.Errorf("failed to load existing sstables: %v", err))
@@ -170,7 +177,7 @@ func (sm *SSTableManager) addToLayers(reader *SSTableReader, toLayer int) error 
 // 1. create new sstable
 // 2. add entries
 // 3. create reader and add to manager
-func (sm *SSTableManager) FlushToSSTable(entries []memtable.MemtableEntry) error {
+func (sm *SSTableManager) FlushToSSTable(entries []memtable.MemtableEntry, rangeDelEntries []memtable.MemtableEntry) error {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 	if len(entries) == 0 {
@@ -193,10 +200,22 @@ func (sm *SSTableManager) FlushToSSTable(entries []memtable.MemtableEntry) error
 			Key:       entry.Key,
 			Value:     entry.Value,
 			SeqId:     entry.SeqId,
-			Tombstone: entry.OpType == enums.OpTypeDel,
+			OpType:    entry.OpType,
 			ExpiresAt: entry.ExpiresAt,
 		}
 		if err := writer.AddRecord(record); err != nil {
+			return fmt.Errorf("cant add record: %w", err)
+		}
+	}
+	for _, entry := range rangeDelEntries {
+		record := Record{
+			Key:       entry.Key,
+			Value:     entry.Value,
+			SeqId:     entry.SeqId,
+			OpType:    entry.OpType,
+			ExpiresAt: entry.ExpiresAt,
+		}
+		if err := writer.AddToRangeDel(record); err != nil {
 			return fmt.Errorf("cant add record: %w", err)
 		}
 	}
@@ -217,6 +236,7 @@ func (sm *SSTableManager) FlushToSSTable(entries []memtable.MemtableEntry) error
 	if config.GetSettings().Debug {
 		fmt.Printf("SSTable %s created with %d entries\n", filepath.Base(filePath), len(entries))
 	}
+	sm.invalidateFragmentCache()
 	return nil
 }
 
@@ -224,7 +244,8 @@ func (sm *SSTableManager) Get(key []byte) (*Record, bool, error) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 	t := time.Now().UnixMilli()
-	var best *Record // TODO razmisli kako ovo moze efikasnije
+	fragments := sm.getFragments()
+	var best *Record
 	for _, layer := range sm.Layers {
 		for i := len(layer.SSTables) - 1; i >= 0; i-- {
 			record, err := layer.SSTables[i].Get(key)
@@ -237,10 +258,15 @@ func (sm *SSTableManager) Get(key []byte) (*Record, bool, error) {
 			if best == nil || record.SeqId > best.SeqId {
 				best = record
 			}
-
 		}
 	}
 	if best == nil {
+		return nil, false, nil
+	}
+	if best.OpType == enums.OpTypeDel {
+		return nil, false, nil
+	}
+	if utils.IsCoveredByRangeTombstone(fragments, key, best.SeqId) {
 		return nil, false, nil
 	}
 	return sm.checkTTL(best, t)
@@ -251,6 +277,10 @@ func (sm *SSTableManager) checkTTL(r *Record, t int64) (*Record, bool, error) {
 		return nil, false, nil
 	}
 	return r, true, nil
+}
+
+func (sm *SSTableManager) checkRangeDel(r *Record, layer int, i int) {
+	sm.Layers[layer].SSTables[i].GetRangeDelEntries()
 }
 
 // DeleteSSTable deletes at specified layer/index
@@ -308,6 +338,17 @@ func (sm *SSTableManager) ClearAll() error {
 	return sm.Manifest.Save()
 }
 
+func (sm *SSTableManager) AddSnapshotKey(key []byte) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	sm.snapshotKeys[string(key)] = struct{}{}
+}
+
+func (sm *SSTableManager) isSnapshotted(key []byte) bool {
+	_, ok := sm.snapshotKeys[string(key)]
+	return ok
+}
+
 // MergeSSTables pass in sstables to merge them into a single sstable and delete old ones
 // skipTombstones if it's the last layer
 // 1. create new sstable
@@ -317,71 +358,151 @@ func (sm *SSTableManager) ClearAll() error {
 func (sm *SSTableManager) MergeSSTables(readers []*SSTableReader, toLayer int, skipTombstones bool) error {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
-	// 1. create new sstable
 
 	expectedElems := uint64(0)
 	for _, reader := range readers {
 		tr, _ := reader.Metadata.GetUint64(FieldTotalRecords)
 		expectedElems += tr
 	}
-
 	_, sstableID, writer, err := sm.createSSTable(expectedElems, toLayer)
 	if err != nil {
 		return err
 	}
+	mergedRangeDels := MergeAndFragment(readers)
 
-	// 2. iterate through all elems and add to new sstable
-	iterator, err := NewSSTableMergeIterator(readers, byte(enums.Heap))
+	rawIter, err := NewSSTableMergeIteratorRaw(readers, byte(enums.Heap))
 	if err != nil {
 		return err
 	}
+
 	count := 0
 	t := time.Now().UnixMilli()
-	for iterator.Valid() {
-		rec := iterator.Value()
-		if (skipTombstones && rec.Tombstone) || (rec.ExpiresAt != 0 && rec.ExpiresAt < t) {
-			iterator.Next()
+
+	for rawIter.Valid() {
+		firstRec := rawIter.Value()
+		currentKey := append([]byte(nil), firstRec.Key...)
+
+		// Collect ALL records for this key (sorted newest-first by seqId)
+		var keyRecs []Record
+		for rawIter.Valid() && bytes.Equal(rawIter.Value().Key, currentKey) {
+			keyRecs = append(keyRecs, rawIter.Value())
+			rawIter.Next()
+		}
+
+		// Tombstone — newest version is a delete
+		if keyRecs[0].OpType == enums.OpTypeDel {
+			if !skipTombstones {
+				if err := writer.AddRecord(keyRecs[0]); err != nil {
+					return err
+				}
+				count++
+			}
 			continue
 		}
-		err := writer.AddRecord(rec)
-		if err != nil {
-			return err
+
+		// Skip range-deleted keys
+		if utils.IsCoveredByRangeTombstone(mergedRangeDels, currentKey, keyRecs[0].SeqId) {
+			continue
 		}
-		iterator.Next()
-		count++
-	}
-	// last layer all tombstones
-	if count == 0 {
-		return nil
-	}
-	//if count == 0 {
-	//	return fmt.Errorf("merge produced no records. All %d input SSTables may be empty", len(readers))
-	//}
-	err = writer.Finalize()
-	if err != nil {
-		return fmt.Errorf("cant finalize SSTable writer: %w", err)
+
+		// Probabilistic key
+		if mergeop.IsProbKey(currentKey) {
+			// SimHash nije merge struktura, zadržava se samo najnoviji zapis
+			if mergeop.ProbType(currentKey) == mergeop.TypeSimHash {
+				r := keyRecs[0]
+				if r.ExpiresAt != 0 && r.ExpiresAt < t {
+					continue
+				}
+				if err := writer.AddRecord(r); err != nil {
+					return err
+				}
+				count++
+				continue
+			}
+
+			values := make([][]byte, len(keyRecs))
+			var latestSeqId uint64
+			for i, r := range keyRecs {
+				values[i] = r.Value
+				if r.SeqId > latestSeqId {
+					latestSeqId = r.SeqId
+				}
+			}
+
+			state, err := mergeop.ApplyAll(currentKey, values)
+			if err != nil {
+				return err
+			}
+			if state != nil {
+				mergedValue := mergeop.WrapBaseState(state)
+				if err := writer.AddRecord(Record{
+					Key:    currentKey,
+					Value:  mergedValue,
+					SeqId:  latestSeqId,
+					OpType: enums.OpTypeMerge,
+				}); err != nil {
+					return err
+				}
+				count++
+			}
+			continue
+		}
+
+		// Normal key: snapshotted = keep all versions; not snapshotted = keep newest only
+		isSnap := sm.isSnapshotted(currentKey)
+		if isSnap {
+			for _, r := range keyRecs {
+				if r.ExpiresAt != 0 && r.ExpiresAt < t {
+					continue
+				}
+				if err := writer.AddRecord(r); err != nil {
+					return err
+				}
+				count++
+			}
+		} else {
+			r := keyRecs[0] // newest
+			if r.ExpiresAt != 0 && r.ExpiresAt < t {
+				continue
+			}
+			if err := writer.AddRecord(r); err != nil {
+				return err
+			}
+			count++
+		}
 	}
 
-	// 3. open new reader and add to manager
+	// Write surviving range tombstones
+	if !skipTombstones {
+		for _, rd := range mergedRangeDels {
+			if err := writer.AddToRangeDel(Record{
+				Key: rd.StartKey, Value: rd.EndKey,
+				SeqId: rd.SeqId, OpType: enums.OpTypeRangeDel,
+			}); err != nil {
+				return err
+			}
+		}
+	}
+
+	if count == 0 && (skipTombstones || len(mergedRangeDels) == 0) {
+		return nil
+	}
+	if err := writer.Finalize(); err != nil {
+		return fmt.Errorf("cant finalize: %w", err)
+	}
 	reader, err := NewSSTableReaderFromWriter(writer, sstableID)
 	if err != nil {
 		return err
 	}
-	err = sm.addToLayers(reader, toLayer)
-	if err != nil {
+	if err := sm.addToLayers(reader, toLayer); err != nil {
 		return err
 	}
-
-	// 4. delete old sstables
-	err = sm.DeleteSSTables(readers)
-
-	err = sm.DeleteSSTables(readers)
-	if err != nil {
+	if err := sm.DeleteSSTables(readers); err != nil {
 		return err
 	}
+	sm.invalidateFragmentCache()
 	sm.blockManager.ClearCache()
 	return nil
-
 }
 
 // MoveSSTable moves sstable from one layer to another
@@ -425,6 +546,100 @@ func (sm *SSTableManager) ReadersForRange(start, end []byte) []*SSTableReader {
 	return readers
 }
 
+func (sm *SSTableManager) invalidateFragmentCache() {
+	sm.fragmentsDirty = true
+}
+
+func (sm *SSTableManager) getFragments() []shared.RangeDelEntry {
+	if !sm.fragmentsDirty && sm.cachedFragments != nil {
+		return sm.cachedFragments
+	}
+	var all []shared.RangeDelEntry
+	for _, layer := range sm.Layers {
+		for _, r := range layer.SSTables {
+			if err := r.LoadRangeDels(); err == nil {
+				all = append(all, r.fragmentedRangeDels...)
+			}
+		}
+	}
+	sm.cachedFragments = utils.FragmentRangeTombstones(all)
+	sm.fragmentsDirty = false
+	return sm.cachedFragments
+}
+
+// GetVersions returns all stored versions of a key from SSTables, newest first.
+// If maxVersions <= 0 all versions are returned.
+func (sm *SSTableManager) GetVersions(key []byte, maxVersions int) ([]*Record, error) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	t := time.Now().UnixMilli()
+	seen := make(map[uint64]struct{})
+	var versions []*Record
+
+	for _, layer := range sm.Layers {
+		for i := len(layer.SSTables) - 1; i >= 0; i-- {
+			r := layer.SSTables[i]
+			minKey := r.Metadata.GetBytes(FieldMinKey)
+			maxKey := r.Metadata.GetBytes(FieldMaxKey)
+			if bytes.Compare(minKey, key) > 0 || bytes.Compare(maxKey, key) < 0 {
+				continue
+			}
+			it, err := NewSSTableIteratorRaw(r)
+			if err != nil {
+				continue
+			}
+			it.Seek(Record{Key: key})
+			for it.Valid() {
+				rec := it.Key()
+				if !bytes.Equal(rec.Key, key) {
+					break
+				}
+				if rec.OpType != enums.OpTypeDel {
+					if _, dup := seen[rec.SeqId]; !dup {
+						if rec.ExpiresAt == 0 || rec.ExpiresAt >= t {
+							cp := rec
+							versions = append(versions, &cp)
+							seen[rec.SeqId] = struct{}{}
+						}
+					}
+				}
+				it.Next()
+				if maxVersions > 0 && len(versions) >= maxVersions {
+					goto done
+				}
+			}
+		}
+	}
+done:
+	sort.Slice(versions, func(i, j int) bool {
+		return versions[i].SeqId > versions[j].SeqId
+	})
+	return versions, nil
+}
+
+func sstableOverlapsRange(reader *SSTableReader, start, end []byte) bool {
+	if reader == nil || reader.SummarySegment == nil {
+		return true
+	}
+
+	minKey := reader.Metadata.GetBytes(FieldMinKey)
+	maxKey := reader.Metadata.GetBytes(FieldMaxKey)
+
+	if len(minKey) == 0 || len(maxKey) == 0 {
+		return true
+	}
+
+	if len(end) > 0 && bytes.Compare(minKey, end) > 0 {
+		return false
+	}
+	if len(start) > 0 && bytes.Compare(maxKey, start) < 0 {
+		return false
+	}
+
+	return true
+}
+
 // EntryIterator returns an SSTableMergeIterator adapted to iterator.Entry,
 // optionally filtering readers by key range (start/end can be nil for full scan).
 func (sm *SSTableManager) EntryIterator(start, end []byte) (iterator.Iterator[iterator.Entry], error) {
@@ -440,14 +655,9 @@ func (sm *SSTableManager) EntryIterator(start, end []byte) (iterator.Iterator[it
 		&sstableIteratorSeekWrapper{inner: raw},
 		func(r Record) iterator.Entry {
 			return iterator.Entry{
-				Key:   append([]byte(nil), r.Key...),
-				Value: append([]byte(nil), r.Value...),
-				OpType: func() enums.OpType {
-					if r.Tombstone {
-						return enums.OpTypeDel
-					}
-					return enums.OpTypePut
-				}(),
+				Key:        append([]byte(nil), r.Key...),
+				Value:      append([]byte(nil), r.Value...),
+				OpType:     r.OpType,
 				SequenceID: r.SeqId,
 			}
 		},
@@ -457,16 +667,15 @@ func (sm *SSTableManager) EntryIterator(start, end []byte) (iterator.Iterator[it
 	), nil
 }
 
-func (sm *SSTableManager) GetAllTTL() (*ttl.ExpiryHeap, map[string]int64, error) {
+func (sm *SSTableManager) GetAllTTL() (*ttl.ExpiryHeap, error) {
 	heap := ttl.NewExpiryHeap()
-	index := make(map[string]int64)
 	timeNow := time.Now().UnixMilli()
 
 	for _, layer := range sm.Layers {
 		for i := 0; i < len(layer.SSTables); i++ {
 			e, err := layer.SSTables[i].GetTTLEntries()
 			if err != nil {
-				return nil, nil, err
+				return nil, err
 			}
 
 			for _, entry := range e {
@@ -474,10 +683,48 @@ func (sm *SSTableManager) GetAllTTL() (*ttl.ExpiryHeap, map[string]int64, error)
 					continue
 				}
 				heap.Push(entry)
-				index[string(entry.Key)] = entry.ExpiresAt
 			}
 
 		}
 	}
-	return heap, index, nil
+	return heap, nil
+}
+
+type SSTableInfo struct {
+	Id    int
+	Layer int
+	Path  string
+}
+
+// ValidateSSTable runs Merkle validation on the SSTable with the given ID.
+// Returns the SSTable's file path, the result, and any error.
+func (sm *SSTableManager) ValidateSSTable(id int) (string, *ValidationResult, error) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	for _, layer := range sm.Layers {
+		for _, r := range layer.SSTables {
+			if r.Id == id {
+				result, err := r.Validate()
+				return r.filePath, result, err
+			}
+		}
+	}
+	return "", nil, fmt.Errorf("SSTable with id %d not found", id)
+}
+
+// ListSSTables returns a summary of all loaded SSTables (id, layer, path).
+func (sm *SSTableManager) ListSSTables() []SSTableInfo {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	var out []SSTableInfo
+	for layerIdx, layer := range sm.Layers {
+		for _, r := range layer.SSTables {
+			out = append(out, SSTableInfo{
+				Id:    r.Id,
+				Layer: layerIdx,
+				Path:  r.filePath,
+			})
+		}
+	}
+	return out
 }

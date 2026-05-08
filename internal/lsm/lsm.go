@@ -2,24 +2,27 @@ package lsm
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/ajromen/LSM-KV-Engine/internal/cache"
 	"github.com/ajromen/LSM-KV-Engine/internal/config"
 	"github.com/ajromen/LSM-KV-Engine/internal/enums"
 	"github.com/ajromen/LSM-KV-Engine/internal/iterator"
 	"github.com/ajromen/LSM-KV-Engine/internal/memtable"
+	mergeop "github.com/ajromen/LSM-KV-Engine/internal/merge"
 	"github.com/ajromen/LSM-KV-Engine/internal/sstable"
 	"github.com/ajromen/LSM-KV-Engine/internal/ttl"
 )
 
 type LSM struct {
-	memtableeManager *memtable.MemtableManager
-	sstableManager   *sstable.SSTableManager
-	strategy         CompactionStrategy
-	readCache        *cache.LRU[string, []byte]
+	memtableeManager    *memtable.MemtableManager
+	sstableManager      *sstable.SSTableManager
+	strategy            CompactionStrategy
+	readCache           *cache.LRU[string, *sstable.Record]
+	EngineFlushCallback func(maxSeqId uint64)
 }
 
-func NewLSM(dataDir string) (*LSM, error) {
+func NewLSM(dataDir string, engineFlushCallback func(maxSeqId uint64)) (*LSM, error) {
 	lsm := LSM{}
 	lsm.sstableManager = sstable.NewSSTableManager(dataDir)
 	stt := config.GetSettings()
@@ -37,18 +40,34 @@ func NewLSM(dataDir string) (*LSM, error) {
 		}
 	}
 
+	lsm.EngineFlushCallback = engineFlushCallback
+
 	factory := memtable.NewFactory(stt.Memtable)
 	memManager := memtable.NewMemtableManager(3, 0, factory, lsm.onFlush)
 	lsm.memtableeManager = memManager
-	lsm.readCache = cache.NewLRU[string, []byte](stt.LSMTree.ReadCacheSize)
+	lsm.readCache = cache.NewLRU[string, *sstable.Record](stt.LSMTree.ReadCacheSize)
 	return &lsm, nil
 }
 
-func (l *LSM) onFlush(entries []memtable.MemtableEntry) {
-	err := l.sstableManager.FlushToSSTable(entries)
+func (l *LSM) onFlush(entries []memtable.MemtableEntry, rangeDelEntries []memtable.MemtableEntry) {
+	var maxSeqId uint64
+	for _, e := range entries {
+		if e.SeqId > maxSeqId {
+			maxSeqId = e.SeqId
+		}
+	}
+	for _, e := range rangeDelEntries {
+		if e.SeqId > maxSeqId {
+			maxSeqId = e.SeqId
+		}
+	}
+
+	err := l.sstableManager.FlushToSSTable(entries, rangeDelEntries)
 	if err != nil {
 		panic(fmt.Errorf("error flushing memtable entries: %v", err))
 	}
+
+	l.EngineFlushCallback(maxSeqId)
 
 	// TODO set this in a goroutine
 	err = l.strategy.Compact(l.sstableManager)
@@ -58,40 +77,69 @@ func (l *LSM) onFlush(entries []memtable.MemtableEntry) {
 }
 
 func (l *LSM) Put(key []byte, value []byte, seqId uint64, opType enums.OpType) {
+	// copy array
+	value = append([]byte(nil), value...)
+	key = append([]byte(nil), key...)
 	l.memtableeManager.Put(key, value, seqId, opType)
-	if opType == enums.OpTypeDel {
+	switch opType {
+	case enums.OpTypeDel, enums.OpTypeRangeDel:
 		l.readCache.Put(string(key), nil)
-	} else {
-		l.readCache.Put(string(key), value)
+	case enums.OpTypeMerge:
+		l.readCache.Delete(string(key))
+	default:
+		l.readCache.Put(string(key), &sstable.Record{Value: value, ExpiresAt: 0})
 	}
 }
 
 func (l *LSM) PutWithTTL(key []byte, value []byte, seqId uint64, opType enums.OpType, ttl int64) {
+	value = append([]byte(nil), value...)
+	key = append([]byte(nil), key...)
 	l.memtableeManager.PutWithTTL(key, value, seqId, opType, ttl)
+	l.readCache.Put(string(key), &sstable.Record{
+		Value:     value,
+		ExpiresAt: time.Now().UnixMilli() + ttl,
+	})
+}
+
+// Remove physically deletes a specific version of a key from the active memtable.
+// Used exclusively for batch rollback.
+func (l *LSM) Remove(key []byte, seqId uint64) {
+	l.memtableeManager.Remove(key, seqId)
+	l.readCache.Put(string(key), nil)
 }
 
 func (l *LSM) Get(key []byte) ([]byte, bool, error) {
-	// 1. check cache
-	if val, ok := l.readCache.Get(string(key)); ok {
-		if val == nil {
-			return nil, false, nil
-		}
-		return val, true, nil
-	}
-
-	// 2. check memtable
+	// 1. check memtable
 	entry, found := l.memtableeManager.Get(key)
 	if found {
 		if entry == nil {
 			l.readCache.Put(string(key), nil)
 			return nil, false, nil
 		}
-		l.readCache.Put(string(key), entry.Value)
+		rec := &sstable.Record{Value: entry.Value, ExpiresAt: entry.ExpiresAt}
+		l.readCache.Put(string(key), rec)
 		return entry.Value, true, nil
 	}
 
 	if config.GetSettings().Debug {
-		fmt.Printf("Key not found in memtable checking sstable\n")
+		fmt.Printf("Key not found in memtable checking cache\n")
+	}
+
+	// 2. check cache
+
+	if rec, ok := l.readCache.Get(string(key)); ok {
+		if rec == nil {
+			return nil, false, nil
+		}
+		if rec.ExpiresAt > 0 && rec.ExpiresAt <= time.Now().UnixMilli() {
+			l.readCache.Put(string(key), nil)
+			return nil, false, nil
+		}
+		return rec.Value, true, nil
+	}
+
+	if config.GetSettings().Debug {
+		fmt.Printf("Key not found in cache checking sstable\n")
 	}
 
 	// 3. check SSTable
@@ -100,7 +148,16 @@ func (l *LSM) Get(key []byte) ([]byte, bool, error) {
 		return nil, false, err
 	}
 	if found {
-		l.readCache.Put(string(key), record.Value)
+		if l.memtableeManager.IsCoveredByRangeDel(key, record.SeqId) {
+			return nil, false, nil
+		}
+		if record.ExpiresAt > 0 && record.ExpiresAt < time.Now().UnixMilli() {
+			l.readCache.Put(string(key), nil)
+			return nil, false, nil
+		}
+		if record.OpType != enums.OpTypeMerge {
+			l.readCache.Put(string(key), record)
+		}
 		return record.Value, true, nil
 	}
 
@@ -111,23 +168,76 @@ func (l *LSM) GetTTL(key []byte) (int64, bool, error) {
 	entry, found := l.memtableeManager.Get(key)
 	if found {
 		if entry == nil {
-			return 0, false, nil // tombstone
+			return 0, false, nil
 		}
 		return entry.ExpiresAt, true, nil
 	}
+
+	// check cache
+	if rec, ok := l.readCache.Get(string(key)); ok {
+		if rec == nil {
+			return 0, false, nil
+		}
+		if rec.ExpiresAt > 0 && rec.ExpiresAt < time.Now().UnixMilli() {
+			l.readCache.Put(string(key), nil)
+			return 0, false, nil
+		}
+		return rec.ExpiresAt, true, nil
+	}
+
 	record, found, err := l.sstableManager.Get(key)
 	if err != nil {
 		return 0, false, err
 	}
 	if found {
+		if record.ExpiresAt > 0 && record.ExpiresAt < time.Now().UnixMilli() {
+			return 0, false, nil
+		}
 		return record.ExpiresAt, true, nil
 	}
 	return 0, false, nil
 }
 
+// PutMerge writes a merge record (either base state or operand) for a probabilistic key.
+func (l *LSM) PutMerge(key []byte, value []byte, seqId uint64) {
+	// Always use Insert (not Upsert) — versioning is needed for merge
+	// Route through Put with OpTypeMerge so the manager uses Insert
+	l.memtableeManager.Put(key, value, seqId, enums.OpTypeMerge)
+}
+
+// PutProbBase writes the initial base state of a probabilistic structure.
+func (l *LSM) PutProbBase(key []byte, value []byte, seqId uint64) {
+	l.memtableeManager.Put(key, value, seqId, enums.OpTypePut)
+}
+
+// GetMerged reconstructs a probabilistic structure by applying all merge operands.
+func (l *LSM) GetMerged(key []byte) ([]byte, bool, error) {
+	versions, err := l.GetVersions(key, 0)
+	if err != nil {
+		return nil, false, err
+	}
+	if len(versions) == 0 {
+		return nil, false, nil
+	}
+	state, err := mergeop.ApplyAll(key, versions)
+	if err != nil {
+		return nil, false, err
+	}
+	if state == nil {
+		return nil, false, nil
+	}
+	return state, true, nil
+}
+
+func (l *LSM) SnapshotProbKey(key []byte) {
+	l.memtableeManager.Snapshot(key)
+	l.sstableManager.AddSnapshotKey(key)
+}
+
+// flushes memtable
 func (l *LSM) Finish() error {
 	l.memtableeManager.Close()
-	return l.sstableManager.Manifest.Save()
+	return nil
 }
 
 func (l *LSM) ClearAll() error {
@@ -148,7 +258,7 @@ func (l *LSM) NewDBIterator(start, end []byte) (*iterator.DBIterator, error) {
 	if err != nil {
 		return nil, err
 	}
-	return iterator.NewDBIterator(memIt, sstIt), nil
+	return iterator.NewDBIteratorWithRangeDel(memIt, sstIt, l.memtableeManager.IsCoveredByRangeDel), nil
 }
 
 // NewRangeIterator creates a RangeIterator over [lower, upper]
@@ -170,6 +280,61 @@ func (l *LSM) NewPrefixIterator(prefix []byte) (*iterator.PrefixIterator, error)
 	return iterator.NewPrefixIterator(dbIt, prefix), nil
 }
 
-func (l *LSM) GetAllTTLFomSST() (*ttl.ExpiryHeap, map[string]int64, error) {
+func (l *LSM) GetAllTTLFomSST() (*ttl.ExpiryHeap, error) {
 	return l.sstableManager.GetAllTTL()
+}
+
+func (l *LSM) Snapshot(key []byte) {
+	l.memtableeManager.Snapshot(key)
+	l.sstableManager.AddSnapshotKey(key)
+}
+
+// GetVersions returns all versions of key, newest first
+func (l *LSM) GetVersions(key []byte, maxVersions int) ([][]byte, error) {
+	seen := make(map[uint64]struct{})
+	var values [][]byte
+	for _, e := range l.memtableeManager.GetVersions(key, maxVersions) {
+		if _, dup := seen[e.SeqId]; !dup {
+			seen[e.SeqId] = struct{}{}
+			values = append(values, e.Value)
+		}
+		if maxVersions > 0 && len(values) >= maxVersions {
+			return values, nil
+		}
+	}
+
+	remaining := 0
+	if maxVersions > 0 {
+		remaining = maxVersions - len(values)
+		if remaining <= 0 {
+			return values, nil
+		}
+	}
+
+	sstVersions, err := l.sstableManager.GetVersions(key, remaining)
+	if err != nil {
+		return nil, err
+	}
+	for _, r := range sstVersions {
+		if _, dup := seen[r.SeqId]; !dup {
+			seen[r.SeqId] = struct{}{}
+			values = append(values, r.Value)
+		}
+		if maxVersions > 0 && len(values) >= maxVersions {
+			break
+		}
+	}
+	return values, nil
+}
+
+func (l *LSM) GetManifest() sstable.Manifest {
+	return *l.sstableManager.Manifest
+}
+
+func (l *LSM) ValidateSSTable(id int) (string, *sstable.ValidationResult, error) {
+	return l.sstableManager.ValidateSSTable(id)
+}
+
+func (l *LSM) ListSSTables() []sstable.SSTableInfo {
+	return l.sstableManager.ListSSTables()
 }

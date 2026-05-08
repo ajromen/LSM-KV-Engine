@@ -225,6 +225,20 @@ func (btn *BTreeNode[T]) delete(key T, t int, cmp Comparator[T]) bool {
 	return btn.children[i].delete(key, t, cmp)
 }
 
+func (bt *BTree[T]) Delete(key T) bool {
+	if bt.root == nil {
+		return false
+	}
+	deleted := bt.root.delete(key, bt.t, bt.cmp)
+	if deleted {
+		bt.size--
+		if len(bt.root.nodeData) == 0 && !bt.root.leaf && len(bt.root.children) > 0 {
+			bt.root = bt.root.children[0]
+		}
+	}
+	return deleted
+}
+
 func (btn *BTreeNode[T]) getMin() T {
 	current := btn
 	for !current.leaf {

@@ -5,23 +5,25 @@ import (
 	"encoding/binary"
 	"hash/crc32"
 	"testing"
+
+	"github.com/ajromen/LSM-KV-Engine/internal/shared"
 )
 
 func TestIndexEntryEncodeDecode(t *testing.T) {
-	t.Log("---- INDEX ENTRY ENCODE/DECODE TEST ----")
-
-	entry := IndexEntry{
+	entry := shared.IndexEntry{
 		Key:        []byte("key1"),
 		BlockIndex: 42,
 	}
 
-	encoded := entry.EncodeIndexEntry()
-	decoded, n, err := DecodeIndexEntry(encoded)
+	buf := make([]byte, entry.EncodedSize())
+	n := entry.EncodeTo(buf)
+
+	decoded, read, err := shared.DecodeIndexEntry(buf)
 	if err != nil {
 		t.Fatalf("failed to decode index entry: %v", err)
 	}
-	if n != len(encoded) {
-		t.Fatalf("expected to consume %d bytes, got %d", len(encoded), n)
+	if read != n {
+		t.Fatalf("expected to consume %d bytes, got %d", n, read)
 	}
 	if !bytes.Equal(decoded.Key, entry.Key) {
 		t.Fatalf("expected key %s, got %s", entry.Key, decoded.Key)
@@ -32,14 +34,12 @@ func TestIndexEntryEncodeDecode(t *testing.T) {
 }
 
 func TestIndexBlockEncodeDecode(t *testing.T) {
-	t.Log("---- INDEX BLOCK ENCODE/DECODE TEST ----")
-
 	block := NewIndexBlock()
-	block.AddEntry(IndexEntry{Key: []byte("a"), BlockIndex: 10})
-	block.AddEntry(IndexEntry{Key: []byte("b"), BlockIndex: 20})
-	block.AddEntry(IndexEntry{Key: []byte("c"), BlockIndex: 30})
+	block.AddEntry(shared.IndexEntry{Key: []byte("a"), BlockIndex: 10})
+	block.AddEntry(shared.IndexEntry{Key: []byte("b"), BlockIndex: 20})
+	block.AddEntry(shared.IndexEntry{Key: []byte("c"), BlockIndex: 30})
 
-	encoded := block.EncodeIndexBlock(50)
+	encoded := block.EncodeIndexBlock(128)
 
 	dataWithoutCRC := encoded[:len(encoded)-4]
 	expectedCRC := binary.LittleEndian.Uint32(encoded[len(encoded)-4:])
@@ -53,6 +53,7 @@ func TestIndexBlockEncodeDecode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to decode index block: %v", err)
 	}
+
 	if len(decoded.Entries) != 3 {
 		t.Fatalf("expected 3 entries, got %d", len(decoded.Entries))
 	}
@@ -66,47 +67,36 @@ func TestIndexBlockEncodeDecode(t *testing.T) {
 }
 
 func TestIndexBlockFindBlock(t *testing.T) {
-	t.Log("---- INDEX BLOCK FIND BLOCK TEST ----")
-
 	block := NewIndexBlock()
-	block.AddEntry(IndexEntry{Key: []byte("a"), BlockIndex: 0})
-	block.AddEntry(IndexEntry{Key: []byte("d"), BlockIndex: 100})
-	block.AddEntry(IndexEntry{Key: []byte("g"), BlockIndex: 200})
+	block.AddEntry(shared.IndexEntry{Key: []byte("a"), BlockIndex: 0})
+	block.AddEntry(shared.IndexEntry{Key: []byte("d"), BlockIndex: 100})
+	block.AddEntry(shared.IndexEntry{Key: []byte("g"), BlockIndex: 200})
 
-	idx := block.FindBlock([]byte("a"))
-	if idx != 0 {
-		t.Fatalf("expected index 0 for key a, got %d", idx)
+	tests := []struct {
+		key      string
+		expected int
+	}{
+		{"a", 0},
+		{"b", 0},
+		{"e", 1},
+		{"z", 2},
+		{"0", 0}, // ⚠️ changed: no longer -1
 	}
 
-	idx = block.FindBlock([]byte("b"))
-	if idx != 0 {
-		t.Fatalf("expected index 0 for key b, got %d", idx)
-	}
-
-	idx = block.FindBlock([]byte("e"))
-	if idx != 1 {
-		t.Fatalf("expected index 1 for key e, got %d", idx)
-	}
-
-	idx = block.FindBlock([]byte("z"))
-	if idx != 2 {
-		t.Fatalf("expected index 2 for key z, got %d", idx)
-	}
-
-	idx = block.FindBlock([]byte("0"))
-	if idx != -1 {
-		t.Fatalf("expected -1 for key smaller than first, got %d", idx)
+	for _, tt := range tests {
+		idx := block.FindBlock([]byte(tt.key))
+		if idx != tt.expected {
+			t.Fatalf("key %s: expected %d, got %d", tt.key, tt.expected, idx)
+		}
 	}
 }
 
 func TestIndexSegmentAddEntryToBlock(t *testing.T) {
-	t.Log("---- INDEX SEGMENT ADD ENTRY TO BLOCK TEST ----")
-
 	seg := NewIndexSegment(160)
 
-	seg.AddEntryToBlock(IndexEntry{Key: []byte("a"), BlockIndex: 1}, 2)
-	seg.AddEntryToBlock(IndexEntry{Key: []byte("b"), BlockIndex: 2}, 2)
-	seg.AddEntryToBlock(IndexEntry{Key: []byte("c"), BlockIndex: 3}, 2)
+	seg.AddEntryToBlock(shared.IndexEntry{Key: []byte("a"), BlockIndex: 1}, 2)
+	seg.AddEntryToBlock(shared.IndexEntry{Key: []byte("b"), BlockIndex: 2}, 2)
+	seg.AddEntryToBlock(shared.IndexEntry{Key: []byte("c"), BlockIndex: 3}, 2)
 
 	if len(seg.Blocks) != 2 {
 		t.Fatalf("expected 2 index blocks, got %d", len(seg.Blocks))
@@ -122,21 +112,20 @@ func TestIndexSegmentAddEntryToBlock(t *testing.T) {
 }
 
 func TestIndexSegmentGetBlockSizes(t *testing.T) {
-	t.Log("---- INDEX SEGMENT GET BLOCK SIZES TEST ----")
-
 	seg := NewIndexSegment(160)
 
 	block1 := NewIndexBlock()
-	block1.AddEntry(IndexEntry{Key: []byte("a"), BlockIndex: 1})
+	block1.AddEntry(shared.IndexEntry{Key: []byte("a"), BlockIndex: 1})
 
 	block2 := NewIndexBlock()
-	block2.AddEntry(IndexEntry{Key: []byte("b"), BlockIndex: 2})
-	block2.AddEntry(IndexEntry{Key: []byte("c"), BlockIndex: 3})
+	block2.AddEntry(shared.IndexEntry{Key: []byte("b"), BlockIndex: 2})
+	block2.AddEntry(shared.IndexEntry{Key: []byte("c"), BlockIndex: 3})
 
 	seg.AddBlock(block1)
 	seg.AddBlock(block2)
 
 	sizes := seg.GetBlockSizes()
+
 	if len(sizes) != 2 {
 		t.Fatalf("expected 2 block sizes, got %d", len(sizes))
 	}

@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	FooterSize  = 94
+	FooterSize  = 106
 	MagicNumber = 0x53535442
 )
 
@@ -21,17 +21,18 @@ type SegmentHandler struct {
 }
 
 type Footer struct {
-	FilterHandler     SegmentHandler      // handler for filter segment
-	IndexHandler      SegmentHandler      // handler for index segment
-	TTLIndexHandler   SegmentHandler      // handler for index segment
-	SummaryHandler    SegmentHandler      // handler for summary segment
-	MerkleHandler     SegmentHandler      // handler for merkle tree segment
-	MetaDataHandler   SegmentHandler      // handler for metadata segment
-	DictionaryHandler SegmentHandler      // handler for dictionary segment
-	Version           byte                // version = 1 always
-	Format            enums.SSTableFormat // format (0 - singlefile / 1 - multifile)
-	MagicNumber       uint32              // SSTB in hex
-	CRC               uint32              // crc over the whole footer segment
+	FilterHandler        SegmentHandler      // handler for filter segment
+	IndexHandler         SegmentHandler      // handler for index segment
+	TTLIndexHandler      SegmentHandler      // handler for index segment
+	RangeDelIndexHandler SegmentHandler      // handler for range deletion segment
+	SummaryHandler       SegmentHandler      // handler for summary segment
+	MerkleHandler        SegmentHandler      // handler for merkle tree segment
+	MetaDataHandler      SegmentHandler      // handler for metadata segment
+	DictionaryHandler    SegmentHandler      // handler for dictionary segment
+	Version              byte                // version = 1 always
+	Format               enums.SSTableFormat // format (0 - singlefile / 1 - multifile)
+	MagicNumber          uint32              // SSTB in hex
+	CRC                  uint32              // crc over the whole footer segment
 }
 
 func NewFooter() *Footer {
@@ -62,6 +63,11 @@ func (f *Footer) Encode() []byte {
 	binary.LittleEndian.PutUint64(buf[pos:], f.TTLIndexHandler.Offset)
 	pos += 8
 	binary.LittleEndian.PutUint32(buf[pos:], f.TTLIndexHandler.Size)
+	pos += 4
+
+	binary.LittleEndian.PutUint64(buf[pos:], f.RangeDelIndexHandler.Offset)
+	pos += 8
+	binary.LittleEndian.PutUint32(buf[pos:], f.RangeDelIndexHandler.Size)
 	pos += 4
 
 	binary.LittleEndian.PutUint64(buf[pos:], f.SummaryHandler.Offset)
@@ -120,6 +126,11 @@ func (f *Footer) Decode(buf []byte) error {
 	f.TTLIndexHandler.Offset = binary.LittleEndian.Uint64(buf[pos:])
 	pos += 8
 	f.TTLIndexHandler.Size = binary.LittleEndian.Uint32(buf[pos:])
+	pos += 4
+
+	f.RangeDelIndexHandler.Offset = binary.LittleEndian.Uint64(buf[pos:])
+	pos += 8
+	f.RangeDelIndexHandler.Size = binary.LittleEndian.Uint32(buf[pos:])
 	pos += 4
 
 	f.SummaryHandler.Offset = binary.LittleEndian.Uint64(buf[pos:])

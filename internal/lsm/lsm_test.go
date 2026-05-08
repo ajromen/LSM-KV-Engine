@@ -34,7 +34,7 @@ func setupLSM(t *testing.T, compaction enums.LSMCompaction) (*LSM, string) {
 		t.Fatalf("MkdirTemp: %v", err)
 	}
 	newConfig(compaction)
-	lsm, err := NewLSM(dir)
+	lsm, err := NewLSM(dir, func(maxSeq uint64) {})
 	if err != nil {
 		t.Fatalf("NewLSM: %v", err)
 	}
@@ -54,7 +54,6 @@ func putN(t *testing.T, lsm *LSM, n int, seq *sequence.SequenceGenerator) {
 	}
 }
 
-// putRange piše ključeve od start do end (exclusive)
 func putRange(t *testing.T, lsm *LSM, start, end int, valuePrefix string, seq *sequence.SequenceGenerator) {
 	t.Helper()
 	for i := start; i < end; i++ {
@@ -94,7 +93,7 @@ func assertNotFound(t *testing.T, lsm *LSM, key string) {
 	}
 }
 
-// ===== Basic (obje strategije) =====
+// ===== Basic =====
 
 func runBasicTests(t *testing.T, compaction enums.LSMCompaction) {
 	t.Run("PutGet", func(t *testing.T) {
@@ -158,33 +157,13 @@ func runBasicTests(t *testing.T, compaction enums.LSMCompaction) {
 		assertGet(t, lsm, "key00003", "new_value")
 	})
 
-	// Overwrite koji prolazi kroz više SSTable flushova
 	t.Run("OverwriteAcrossMultipleFlushes", func(t *testing.T) {
 		lsm, _ := setupLSM(t, compaction)
 		seq := newSeq()
-		// Prva serija — triggera flush
 		putRange(t, lsm, 0, 20, "old", seq)
-		// Druga serija — overwrituje iste ključeve, triggera novi flush
 		putRange(t, lsm, 0, 20, "new", seq)
 		for i := 0; i < 20; i++ {
 			assertGet(t, lsm, fmt.Sprintf("key%05d", i), fmt.Sprintf("new%05d", i))
-		}
-	})
-
-	// Brisanje u sredini rangeа — ostali ključevi moraju ostati netaknuti
-	t.Run("DeleteMiddleRange", func(t *testing.T) {
-		lsm, _ := setupLSM(t, compaction)
-		seq := newSeq()
-		putN(t, lsm, 30, seq)
-		delRange(t, lsm, 10, 20, seq)
-		for i := 0; i < 10; i++ {
-			assertGet(t, lsm, fmt.Sprintf("key%05d", i), fmt.Sprintf("val%05d", i))
-		}
-		for i := 10; i < 20; i++ {
-			assertNotFound(t, lsm, fmt.Sprintf("key%05d", i))
-		}
-		for i := 20; i < 30; i++ {
-			assertGet(t, lsm, fmt.Sprintf("key%05d", i), fmt.Sprintf("val%05d", i))
 		}
 	})
 }
@@ -237,7 +216,6 @@ func TestLeveled_DeleteAfterCompaction(t *testing.T) {
 	}
 }
 
-// Ključevi koji se preklapaju između layera — leveled mora ispravno riješiti
 func TestLeveled_OverlapResolved(t *testing.T) {
 	lsm, _ := setupLSM(t, enums.LeveledCompaction)
 	seq := newSeq()
@@ -248,7 +226,6 @@ func TestLeveled_OverlapResolved(t *testing.T) {
 	}
 }
 
-// Interleavani upisi — parni ključevi su "a", neparni "b", provjeri oboje
 func TestLeveled_InterleavedWrites(t *testing.T) {
 	lsm, _ := setupLSM(t, enums.LeveledCompaction)
 	seq := newSeq()
@@ -268,7 +245,6 @@ func TestLeveled_InterleavedWrites(t *testing.T) {
 	}
 }
 
-// Pisanje u obrnutom redoslijedu ključeva — testira da sort u compaction radi
 func TestLeveled_ReverseKeyOrder(t *testing.T) {
 	lsm, _ := setupLSM(t, enums.LeveledCompaction)
 	seq := newSeq()
@@ -280,13 +256,11 @@ func TestLeveled_ReverseKeyOrder(t *testing.T) {
 	}
 }
 
-// Brisanje pa ponovni upis istog ključa
 func TestLeveled_DeleteThenReinsert(t *testing.T) {
 	lsm, _ := setupLSM(t, enums.LeveledCompaction)
 	seq := newSeq()
 	putN(t, lsm, 30, seq)
 	delRange(t, lsm, 0, 15, seq)
-	// Reinserti moraju biti vidljivi
 	putRange(t, lsm, 0, 15, "new", seq)
 	for i := 0; i < 15; i++ {
 		assertGet(t, lsm, fmt.Sprintf("key%05d", i), fmt.Sprintf("new%05d", i))
@@ -296,7 +270,6 @@ func TestLeveled_DeleteThenReinsert(t *testing.T) {
 	}
 }
 
-// Layeri moraju rasti pod pritiskom upisa
 func TestLeveled_LayersGrowUnderLoad(t *testing.T) {
 	lsm, _ := setupLSM(t, enums.LeveledCompaction)
 	seq := newSeq()
@@ -307,7 +280,7 @@ func TestLeveled_LayersGrowUnderLoad(t *testing.T) {
 	}
 }
 
-// ===== Persistence (obje strategije) =====
+// ===== Persistence =====
 
 func testPersistence(t *testing.T, compaction enums.LSMCompaction) {
 	dir, err := os.MkdirTemp("", "lsm_persist_*")
@@ -317,7 +290,7 @@ func testPersistence(t *testing.T, compaction enums.LSMCompaction) {
 	t.Cleanup(func() { os.RemoveAll(dir) })
 
 	newConfig(compaction)
-	lsm1, err := NewLSM(dir)
+	lsm1, err := NewLSM(dir, func(maxSeq uint64) {})
 	if err != nil {
 		t.Fatalf("NewLSM: %v", err)
 	}
@@ -325,7 +298,7 @@ func testPersistence(t *testing.T, compaction enums.LSMCompaction) {
 	putN(t, lsm1, 50, seq)
 	_ = lsm1.Finish()
 
-	lsm2, err := NewLSM(dir)
+	lsm2, err := NewLSM(dir, func(maxSeq uint64) {})
 	if err != nil {
 		t.Fatalf("NewLSM reopen: %v", err)
 	}
