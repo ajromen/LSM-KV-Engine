@@ -34,7 +34,7 @@ func setupLSM(t *testing.T, compaction enums.LSMCompaction) (*LSM, string) {
 		t.Fatalf("MkdirTemp: %v", err)
 	}
 	newConfig(compaction)
-	lsm, err := NewLSM(dir, func() {})
+	lsm, err := NewLSM(dir, func(maxSeq uint64) {})
 	if err != nil {
 		t.Fatalf("NewLSM: %v", err)
 	}
@@ -290,7 +290,7 @@ func testPersistence(t *testing.T, compaction enums.LSMCompaction) {
 	t.Cleanup(func() { os.RemoveAll(dir) })
 
 	newConfig(compaction)
-	lsm1, err := NewLSM(dir, func() {})
+	lsm1, err := NewLSM(dir, func(maxSeq uint64) {})
 	if err != nil {
 		t.Fatalf("NewLSM: %v", err)
 	}
@@ -298,7 +298,7 @@ func testPersistence(t *testing.T, compaction enums.LSMCompaction) {
 	putN(t, lsm1, 50, seq)
 	_ = lsm1.Finish()
 
-	lsm2, err := NewLSM(dir, func() {})
+	lsm2, err := NewLSM(dir, func(maxSeq uint64) {})
 	if err != nil {
 		t.Fatalf("NewLSM reopen: %v", err)
 	}
