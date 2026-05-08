@@ -98,7 +98,7 @@ func handleRestoreBackup(engine *core.Engine, parts []string) {
 
 	err := engine.RestoreFromBackup(parts[1])
 	if err != nil {
-		PrintError(fmt.Sprintf("Restore unsuccessful: ", err))
+		PrintError(fmt.Sprintf("Restore unsuccessful: %s", err))
 		return
 	}
 	PrintSuccess("Restore successful")
@@ -112,7 +112,7 @@ func handleDeleteAllBackups(engine *core.Engine, parts []string) {
 
 	err := engine.DeleteAllBackups()
 	if err != nil {
-		PrintError(fmt.Sprintf("Delete all backups failed : ", err))
+		PrintError(fmt.Sprintf("Delete all backups failed: %s", err))
 		return
 	}
 	PrintSuccess("Delete all backups successful")
