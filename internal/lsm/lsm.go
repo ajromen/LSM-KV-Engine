@@ -81,18 +81,24 @@ func (l *LSM) Put(key []byte, value []byte, seqId uint64, opType enums.OpType) {
 	value = append([]byte(nil), value...)
 	key = append([]byte(nil), key...)
 	l.memtableeManager.Put(key, value, seqId, opType)
-	//if opType == enums.OpTypeDel || opType == enums.OpTypeMerge {
-	//	l.readCache.Put(string(key), nil)
-	//} else {
-	//	l.readCache.Put(string(key), &sstable.Record{Value: value, ExpiresAt: 0})
-	//}
+	switch opType {
+	case enums.OpTypeDel, enums.OpTypeRangeDel:
+		l.readCache.Put(string(key), nil)
+	case enums.OpTypeMerge:
+		l.readCache.Delete(string(key))
+	default:
+		l.readCache.Put(string(key), &sstable.Record{Value: value, ExpiresAt: 0})
+	}
 }
 
 func (l *LSM) PutWithTTL(key []byte, value []byte, seqId uint64, opType enums.OpType, ttl int64) {
 	value = append([]byte(nil), value...)
 	key = append([]byte(nil), key...)
 	l.memtableeManager.PutWithTTL(key, value, seqId, opType, ttl)
-	//l.readCache.Put(string(key), &sstable.Record{Value: value, ExpiresAt: ttl})
+	l.readCache.Put(string(key), &sstable.Record{
+		Value:     value,
+		ExpiresAt: time.Now().UnixMilli() + ttl,
+	})
 }
 
 // Remove physically deletes a specific version of a key from the active memtable.
@@ -120,6 +126,7 @@ func (l *LSM) Get(key []byte) ([]byte, bool, error) {
 	}
 
 	// 2. check cache
+
 	if rec, ok := l.readCache.Get(string(key)); ok {
 		if rec == nil {
 			return nil, false, nil
@@ -148,7 +155,9 @@ func (l *LSM) Get(key []byte) ([]byte, bool, error) {
 			l.readCache.Put(string(key), nil)
 			return nil, false, nil
 		}
-		l.readCache.Put(string(key), record)
+		if record.OpType != enums.OpTypeMerge {
+			l.readCache.Put(string(key), record)
+		}
 		return record.Value, true, nil
 	}
 

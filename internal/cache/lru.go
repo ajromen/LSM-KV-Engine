@@ -86,3 +86,12 @@ func (lru *LRU[K, V]) InvalidateWhere(predicate func(K) bool) {
 		}
 	}
 }
+
+func (c *LRU[K, V]) Delete(key K) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if elem, ok := c.cache[key]; ok {
+		c.list.Remove(elem)
+		delete(c.cache, key)
+	}
+}
